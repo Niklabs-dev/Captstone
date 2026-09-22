@@ -1,0 +1,63 @@
+# Levanta el sistema completo: PostgreSQL + backend NestJS + frontend Next.js
+# Uso: docker compose up --build
+# Los valores por defecto permiten levantar sin pasos manuales en desarrollo;
+# en producción se sobrescriben con un archivo .env (ver backend/.env.example).
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: subway_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-cambiar-en-produccion}
+      POSTGRES_DB: ${DB_NAME:-subway_gestion}
+    # 5433 en el host para no chocar con un PostgreSQL local en 5432; dentro de la red Docker la BD usa 5432
+    ports:
+      - "${DB_PORT_HOST:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: subway_backend
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-cambiar-en-produccion}
+      DB_NAME: ${DB_NAME:-subway_gestion}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-cambiar-en-produccion}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
+    ports:
+      - "3001:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/ > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    container_name: subway_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  postgres_data:
