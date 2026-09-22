@@ -1,0 +1,19 @@
+# dependencias
+/node_modules
+
+# compilación
+/dist
+
+# tests
+/coverage
+
+# variables de entorno (nunca commitear secretos)
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+
+# SO
+.DS_Store
