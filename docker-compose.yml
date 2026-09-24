@@ -33,6 +33,7 @@ services:
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-cambiar-en-produccion}
       DB_NAME: ${DB_NAME:-subway_gestion}
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-cambiar-en-produccion}@db:5432/${DB_NAME:-subway_gestion}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-cambiar-en-produccion}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
     ports:
@@ -40,11 +41,27 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3001/ > /dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Aplica las migraciones de Prisma una sola vez antes de levantar el backend
+  migrate:
+    build:
+      context: ./backend
+      target: deps
+    container_name: subway_migrate
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-cambiar-en-produccion}@db:5432/${DB_NAME:-subway_gestion}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: npx prisma migrate deploy
 
   frontend:
     build:
