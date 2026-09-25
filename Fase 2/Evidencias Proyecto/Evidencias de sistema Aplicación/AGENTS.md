@@ -28,21 +28,30 @@ Nota: `frontend/AGENTS.md` es generado y mantenido por Next.js; leerlo antes de 
 
 ## Forma de escritura de código
 
-- **TypeScript estricto** en ambos proyectos; prohibido `any` (usar `unknown` o tipos explícitos).
+- **TypeScript estricto** en ambos proyectos: **prohibido `any`** (usar `unknown` o tipos explícitos) y **`void` solo cuando sea estrictamente necesario** —firmas que lo exigen, como los hooks de ciclo de vida de NestJS (ej. la conexión a la base de datos)—; todo lo demás va tipado explícitamente.
 - **Identificadores en inglés** (variables, funciones, clases, archivos); **comentarios, documentación y mensajes de commit en español**.
 - **Backend NestJS:** arquitectura modular obligatoria — cada módulo con su controller, service y module; la lógica de negocio va en los servicios; configuración con `@nestjs/config` (nunca `process.env` directo); sin secretos en el código.
 - **Frontend Next.js:** Server Components por defecto (`'use client'` solo cuando haya interactividad); rutas en `src/app/`, componentes en `src/components/`; estilos con Tailwind, sin CSS personalizado salvo necesidad.
+- **ESLint y Prettier son parte de la escritura**, no un paso posterior: el código se escribe ya formateado y sin warnings (`npm run format` antes de commitear).
+- **Tests junto al código:** todo código nuevo de lógica lleva sus tests en el mismo PR (no se dejan "para después"). Los tests de integración del backend corren contra PostgreSQL real y **revierten su transacción** (patrón `withinRollback` de `test/database.integration.spec.ts`), así no dejan datos residuales.
+- **Migraciones Prisma seguras:**
+  - Nunca editar ni renombrar una migración ya aplicada o commiteada: todo cambio de schema va en una **migración nueva**.
+  - El timestamp de la migración debe ser **posterior a la última existente** (Prisma las aplica en orden alfabético; una migración con timestamp anterior rompe los despliegues desde cero).
+  - Antes de commitear, verificar con `migrate deploy` sobre un **volumen limpio**: `docker compose down -v && docker compose up --build -d db migrate backend`.
 - **Calidad obligatoria antes de commitear** (debe pasar sin errores):
   - `npm run lint` y `npm run format:check` (ESLint + Prettier en ambos proyectos)
   - `npm run build` en el proyecto afectado
   - `npm run test` en backend si se tocó lógica
   - `docker compose up` cuando el cambio afecte infraestructura
+- **Archivos generados fuera de git:** `dist/`, `node_modules/`, `src/generated/` (cliente Prisma) y `*.tsbuildinfo` no se commitean; deben estar en `.gitignore`.
 - **Variables de entorno:** toda variable nueva se documenta en el `.env.example` correspondiente; los `.env` reales nunca se commitean.
-- **Commits:** estilo Conventional Commits en español, referenciando la tarea del tablero, ej.: `feat: agrega login con JWT (SPRINT-1-T04)`.
+- **Commits atómicos:** un commit por cambio lógico, estilo Conventional Commits en español, referenciando la tarea del tablero, ej.: `feat: agrega login con JWT (SPRINT-1-T04)`.
 
 ## Flujo de trabajo para cada tarea
 
 Las tareas viven en el tablero de Notion con estados: `Por hacer` → `En curso` → `En revisión` → `Hecho` (o `Bloqueado`).
+
+**Regla de oro: una tarea = una rama = un Pull Request.** No se mezclan varias tareas en un mismo PR ni se trabajan dos tareas en la misma rama; si durante el trabajo surge algo fuera del alcance de la tarea, se crea una tarea nueva en el tablero.
 
 1. **Tomar la tarea:** pasar la tarea a **En curso** en el tablero de Notion antes de empezar.
 2. **Crear la rama:** `git checkout -b feat/<ID-tarea>-descripcion-corta` desde `main` (ej.: `feat/sprint-1-t04-login-jwt`).
