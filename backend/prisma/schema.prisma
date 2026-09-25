@@ -299,7 +299,8 @@ model TipPoolLine {
 
 enum PaymentMethod {
   CASH
-  CARD
+  DEBIT_CARD
+  CREDIT_CARD
   TRANSFER
 }
 
@@ -336,31 +337,49 @@ enum CashClosingStatus {
   CLOSED
 }
 
-/// Cierre de caja diario por local. difference = counted_cash - system_cash
-/// (calculada en la aplicación y almacenada para trazabilidad).
-/// Un solo cierre por local y día (restricción única compuesta).
+/// Cierre de caja diario por local. El supervisor declara lo contado por cada
+/// medio de pago en cash_closing_lines (efectivo, débito, crédito,
+/// transferencia) y el sistema lo compara contra lo esperado según las ventas,
+/// calculando la diferencia por línea; la diferencia total del cierre es la
+/// suma de las líneas. opening_cash (fondo de caja) se suma a lo esperado de
+/// la línea CASH. Un solo cierre por local y día (restricción única compuesta).
 model CashClosing {
   id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   businessDate DateTime          @map("business_date") @db.Date
   openingCash  Decimal           @map("opening_cash") @db.Decimal(12, 2)
-  systemCash   Decimal           @map("system_cash") @db.Decimal(12, 2)
-  countedCash  Decimal?          @map("counted_cash") @db.Decimal(12, 2)
-  difference   Decimal?          @db.Decimal(12, 2)
-  cardTotal    Decimal           @default(0) @map("card_total") @db.Decimal(12, 2)
   status       CashClosingStatus @default(OPEN)
   notes        String?           @db.VarChar(255)
   closedAt     DateTime?         @map("closed_at") @db.Timestamptz(6)
   createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  store         Store  @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  storeId       String @map("store_id") @db.Uuid
-  responsible   User   @relation("ResponsibleCashClosings", fields: [responsibleId], references: [id], onDelete: Restrict)
-  responsibleId String @map("responsible_id") @db.Uuid
+  store         Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId       String            @map("store_id") @db.Uuid
+  responsible   User              @relation("ResponsibleCashClosings", fields: [responsibleId], references: [id], onDelete: Restrict)
+  responsibleId String            @map("responsible_id") @db.Uuid
   sales         Sale[]
+  lines         CashClosingLine[]
 
   @@unique([storeId, businessDate])
   @@map("cash_closings")
+}
+
+/// Desglose del cierre de caja por medio de pago: lo esperado según el sistema
+/// (suma de las ventas del medio, más el fondo de caja si es efectivo) contra
+/// lo declarado/contado por el supervisor, con su diferencia. Un medio de pago
+/// por línea (restricción única compuesta).
+model CashClosingLine {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentMethod  PaymentMethod @map("payment_method")
+  expectedAmount Decimal       @map("expected_amount") @db.Decimal(12, 2)
+  countedAmount  Decimal       @map("counted_amount") @db.Decimal(12, 2)
+  difference     Decimal       @db.Decimal(12, 2)
+
+  closing   CashClosing @relation(fields: [closingId], references: [id], onDelete: Cascade)
+  closingId String      @map("closing_id") @db.Uuid
+
+  @@unique([closingId, paymentMethod])
+  @@map("cash_closing_lines")
 }
 
 // -------------------------------------------------------------
