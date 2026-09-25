@@ -366,7 +366,6 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
           storeId: store.id,
           businessDate: new Date('2026-09-24'),
           openingCash: 50000,
-          systemCash: 250000,
           responsibleId: user.id,
         },
       });
@@ -378,7 +377,6 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
             storeId: store.id,
             businessDate: new Date('2026-09-24'),
             openingCash: 50000,
-            systemCash: 100000,
             responsibleId: user.id,
           },
         }),
@@ -394,7 +392,6 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
           storeId: store.id,
           businessDate: new Date('2026-09-24'),
           openingCash: 50000,
-          systemCash: 150000,
           responsibleId: user.id,
         },
       });
@@ -402,7 +399,7 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
         data: {
           storeId: store.id,
           soldAt: new Date('2026-09-24T13:30:00-03:00'),
-          paymentMethod: PaymentMethod.CARD,
+          paymentMethod: PaymentMethod.DEBIT_CARD,
           channel: SaleChannel.IN_STORE,
           grossAmount: 12500,
           tipAmount: 1250,
@@ -411,6 +408,91 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
         },
       });
       expect(Number(venta.tipAmount)).toBe(1250);
+    });
+  });
+
+  it('desglosa el cierre por medio de pago: esperado vs contado con diferencia por línea', async () => {
+    await withinRollback(async (tx) => {
+      const { user, store } = await crearUsuarioBase(tx);
+      // Fondo de caja $50.000; ventas del día: $100.000 efectivo,
+      // $140.000 débito y $160.000 crédito.
+      const cierre = await tx.cashClosing.create({
+        data: {
+          storeId: store.id,
+          businessDate: new Date('2026-09-24'),
+          openingCash: 50000,
+          responsibleId: user.id,
+        },
+      });
+
+      const ventas: Array<[PaymentMethod, number]> = [
+        [PaymentMethod.CASH, 100000],
+        [PaymentMethod.DEBIT_CARD, 140000],
+        [PaymentMethod.CREDIT_CARD, 160000],
+      ];
+      for (const [paymentMethod, grossAmount] of ventas) {
+        await tx.sale.create({
+          data: {
+            storeId: store.id,
+            soldAt: new Date('2026-09-24T20:00:00-03:00'),
+            paymentMethod,
+            grossAmount,
+            cashClosingId: cierre.id,
+            registeredById: user.id,
+          },
+        });
+      }
+
+      // Esperado por medio = suma de ventas del medio (+ fondo si es efectivo).
+      const esperadoPorMedio = new Map<PaymentMethod, number>([
+        [PaymentMethod.CASH, 150000],
+        [PaymentMethod.DEBIT_CARD, 140000],
+        [PaymentMethod.CREDIT_CARD, 160000],
+      ]);
+
+      // El supervisor declara lo contado; crédito cuadra con $1.000 menos.
+      const contado: Array<[PaymentMethod, number]> = [
+        [PaymentMethod.CASH, 150000],
+        [PaymentMethod.DEBIT_CARD, 140000],
+        [PaymentMethod.CREDIT_CARD, 159000],
+      ];
+      for (const [medio, montoContado] of contado) {
+        const esperado = esperadoPorMedio.get(medio) ?? 0;
+        await tx.cashClosingLine.create({
+          data: {
+            closingId: cierre.id,
+            paymentMethod: medio,
+            expectedAmount: esperado,
+            countedAmount: montoContado,
+            difference: montoContado - esperado,
+          },
+        });
+      }
+
+      const conLineas = await tx.cashClosing.findUniqueOrThrow({
+        where: { id: cierre.id },
+        include: { lines: true },
+      });
+      expect(conLineas.lines).toHaveLength(3);
+      // La diferencia total del cierre es la suma de las diferencias por línea.
+      const diferenciaTotal = conLineas.lines.reduce(
+        (suma, linea) => suma + Number(linea.difference),
+        0,
+      );
+      expect(diferenciaTotal).toBe(-1000);
+
+      // Un solo medio de pago por línea dentro del mismo cierre.
+      await expect(
+        tx.cashClosingLine.create({
+          data: {
+            closingId: cierre.id,
+            paymentMethod: PaymentMethod.CASH,
+            expectedAmount: 0,
+            countedAmount: 0,
+            difference: 0,
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'P2002' });
     });
   });
 

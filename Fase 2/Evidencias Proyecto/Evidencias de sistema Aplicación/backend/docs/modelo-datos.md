@@ -13,11 +13,11 @@
 | Núcleo | `stores`, `roles`, `users`, `refresh_tokens`, `audit_logs` | Locales, control de acceso por rol y local, autenticación JWT y auditoría inmutable |
 | Gestor Documental | `document_types`, `documents`, `document_versions` | Documentación laboral con hash SHA-256, versionado y conservación por 5 años |
 | Propinas | `tip_pools`, `tip_pool_lines` | Reparto proporcional a horas trabajadas con registro escrito (art. 64 CT) |
-| Ventas y Caja | `sales`, `cash_closings` | Ventas por local y cierre de caja diario con responsable y diferencia |
+| Ventas y Caja | `sales`, `cash_closings`, `cash_closing_lines` | Ventas por local y cierre de caja diario con responsable, desglosado por medio de pago (esperado vs. contado con diferencia por línea) |
 | Inventario | `products`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Stock por libro mayor de movimientos y conteos físicos que detectan mermas |
 | Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
 
-**17 tablas y 10 enums.** El Portal del Trabajador no agrega tablas: es una vista
+**18 tablas y 10 enums.** El Portal del Trabajador no agrega tablas: es una vista
 de solo lectura sobre `users`, `documents`, `tip_pool_lines` y `sales`, con
 aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 
@@ -29,14 +29,15 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 - **Sin borrado físico**: todas las FK usan `ON DELETE RESTRICT` por defecto
   (protege la trazabilidad), `SET NULL` en auditoría (el registro sobrevive a la
   anonimización del usuario) y `CASCADE` solo en datos estrictamente hijos
-  (tokens de sesión, líneas de reparto/conteo).
+  (tokens de sesión, líneas de reparto/cierre/conteo).
 - **Dinero en `DECIMAL(12,2)`** (CLP) y cantidades en `DECIMAL(12,3)`: nunca
   `float`, para evitar errores de redondeo en propinas, ventas e inventario.
 - **`date` para fechas de negocio** (períodos de reparto, día de cierre) y
   **`timestamptz` para marcas de tiempo** (Chile tiene horario de verano).
 - **Restricciones de negocio en la BD**: un cierre de caja por local y día
-  (`UNIQUE(store_id, business_date)`), un reparto por local y período, una línea
-  por trabajador por reparto, hash SHA-256 único por versión de documento.
+  (`UNIQUE(store_id, business_date)`), una línea por medio de pago por cierre
+  (`UNIQUE(closing_id, payment_method)`), un reparto por local y período, una
+  línea por trabajador por reparto, hash SHA-256 único por versión de documento.
 - **Inmutabilidad**: `audit_logs` y `document_versions` no tienen `updated_at`;
   la aplicación solo permite `INSERT`/`SELECT` sobre ellas.
 - **Convenciones**: tablas y columnas en `snake_case`, modelos Prisma en
@@ -65,8 +66,13 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
   local; `tip_pool_lines.hours_worked` es la base del reparto proporcional y
   `amount` el registro escrito por trabajador; `calculated_by`/`confirmed_by`/
   `confirmed_at` dejan trazabilidad del cálculo validado por el contador.
-- **Cierre de caja con responsable**: `cash_closings.responsible_id` (obligatorio),
-  `opening_cash`, `system_cash`, `counted_cash` y `difference` calculada.
+- **Cierre de caja con responsable y desglose por medio de pago**:
+  `cash_closings.responsible_id` (obligatorio) y `opening_cash` (fondo de caja)
+  en la cabecera; `cash_closing_lines` registra **una línea por medio de pago**
+  (efectivo, débito, crédito, transferencia) con lo esperado según las ventas
+  (`expected_amount`), lo contado por el supervisor (`counted_amount`) y la
+  `difference` de la línea. El fondo se suma a lo esperado de la línea CASH y
+  la diferencia total del cierre se deriva sumando las líneas.
 
 ## Trazabilidad del Gestor Documental
 
@@ -127,6 +133,7 @@ erDiagram
 
   STORES ||--o{ SALES : "vende"
   CASH_CLOSINGS |o--o{ SALES : "agrupa"
+  CASH_CLOSINGS ||--o{ CASH_CLOSING_LINES : "desglosa por medio de pago"
   USERS ||--o{ SALES : "registra"
   STORES ||--o{ CASH_CLOSINGS : "cierra"
   USERS ||--o{ CASH_CLOSINGS : "es responsable"
@@ -166,7 +173,8 @@ enum TipPoolStatus {
 
 enum PaymentMethod {
   CASH
-  CARD
+  DEBIT_CARD
+  CREDIT_CARD
   TRANSFER
 }
 
@@ -399,11 +407,7 @@ Table sales {
 Table cash_closings {
   id uuid [pk, default: `gen_random_uuid()`]
   business_date date [not null]
-  opening_cash decimal(12,2) [not null]
-  system_cash decimal(12,2) [not null]
-  counted_cash decimal(12,2)
-  difference decimal(12,2) [note: 'counted_cash - system_cash']
-  card_total decimal(12,2) [not null, default: 0]
+  opening_cash decimal(12,2) [not null, note: 'Fondo de caja: se suma a lo esperado de la línea CASH']
   status CashClosingStatus [not null, default: 'OPEN']
   notes varchar(255)
   closed_at timestamptz
@@ -414,6 +418,21 @@ Table cash_closings {
 
   indexes {
     (store_id, business_date) [unique, note: 'Un cierre por local y día']
+  }
+}
+
+Table cash_closing_lines {
+  id uuid [pk, default: `gen_random_uuid()`]
+  payment_method PaymentMethod [not null]
+  expected_amount decimal(12,2) [not null, note: 'Calculado desde las ventas del medio de pago']
+  counted_amount decimal(12,2) [not null, note: 'Declarado por el supervisor']
+  difference decimal(12,2) [not null, note: 'counted - expected; el total del cierre es la suma de líneas']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+  closing_id uuid [not null, ref: > cash_closings.id]
+
+  indexes {
+    (closing_id, payment_method) [unique, note: 'Una línea por medio de pago por cierre']
   }
 }
 
