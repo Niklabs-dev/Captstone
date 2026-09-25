@@ -29,6 +29,29 @@
 
 ```bash
 $ npm install
+$ cp .env.example .env   # completar valores por ambiente (nunca commitear .env)
+```
+
+## Base de datos (Prisma + PostgreSQL)
+
+El modelo de datos completo (6 módulos, 17 tablas) está documentado en
+[`docs/modelo-datos.md`](docs/modelo-datos.md), incluidos los diagramas
+(Mermaid y DBML para dbdiagram.io) y el cumplimiento de la Ley N°21.719 y el
+Código del Trabajo.
+
+```bash
+# levantar PostgreSQL con docker compose (puerto 5433 del host)
+$ docker compose up -d db
+
+# aplicar migraciones
+$ npm run prisma:migrate          # desarrollo (también crea migraciones nuevas)
+$ npm run prisma:migrate:deploy   # producción/CI (solo aplica)
+
+# regenerar el cliente (corre solo en npm install vía postinstall)
+$ npm run prisma:generate
+
+# explorar datos en el navegador
+$ npm run prisma:studio
 ```
 
 ## Compile and run the project
