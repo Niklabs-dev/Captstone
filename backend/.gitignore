@@ -3,6 +3,7 @@
 
 # compilación
 /dist
+*.tsbuildinfo
 
 # cliente Prisma generado (se regenera con npm run prisma:generate)
 /src/generated
