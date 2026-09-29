@@ -165,8 +165,12 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
   it('registra documento con versionado, hash SHA-256 y versión vigente', async () => {
     await withinRollback(async (tx) => {
       const { user, store } = await crearUsuarioBase(tx);
-      const tipo = await tx.documentType.create({
-        data: { code: 'CONTRATO', name: 'Contrato de trabajo' },
+      // Upsert: la base puede venir ya sembrada (SPRINT-1-T05) con los tipos
+      // de documento creados; el test solo necesita un tipo para asociar.
+      const tipo = await tx.documentType.upsert({
+        where: { code: 'CONTRATO' },
+        update: {},
+        create: { code: 'CONTRATO', name: 'Contrato de trabajo' },
       });
       expect(tipo.retentionYears).toBe(5);
 
@@ -225,8 +229,10 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
   it('rechaza hash SHA-256 duplicado y número de versión duplicado', async () => {
     await withinRollback(async (tx) => {
       const { user, store } = await crearUsuarioBase(tx);
-      const tipo = await tx.documentType.create({
-        data: { code: 'FINIQUITO', name: 'Finiquito' },
+      const tipo = await tx.documentType.upsert({
+        where: { code: 'FINIQUITO' },
+        update: {},
+        create: { code: 'FINIQUITO', name: 'Finiquito' },
       });
       const documento = await tx.document.create({
         data: {
@@ -254,8 +260,10 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
 
     await withinRollback(async (tx) => {
       const { user, store } = await crearUsuarioBase(tx);
-      const tipo = await tx.documentType.create({
-        data: { code: 'ANEXO', name: 'Anexo de contrato' },
+      const tipo = await tx.documentType.upsert({
+        where: { code: 'ANEXO' },
+        update: {},
+        create: { code: 'ANEXO', name: 'Anexo de contrato' },
       });
       const documento = await tx.document.create({
         data: {
