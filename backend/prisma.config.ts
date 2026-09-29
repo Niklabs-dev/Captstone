@@ -12,6 +12,8 @@ export default defineConfig({
   schema: 'prisma/schema.prisma',
   migrations: {
     path: 'prisma/migrations',
+    // `prisma db seed`: roles base y usuario administrador inicial (SPRINT-1-T05)
+    seed: 'tsx prisma/seed.ts',
   },
   datasource: {
     url: databaseUrl,
