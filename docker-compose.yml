@@ -36,6 +36,7 @@ services:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-cambiar-en-produccion}@db:5432/${DB_NAME:-subway_gestion}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-cambiar-en-produccion}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
     ports:
       - "3001:3001"
     depends_on:
