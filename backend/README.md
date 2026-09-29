@@ -85,6 +85,29 @@ curl -X POST http://localhost:3001/auth/login \
   -d '{"email":"admin@moi-food.cl","password":"admin-cambiar-en-produccion"}'
 ```
 
+## Autorización por rol y local
+
+Además del `JwtAuthGuard`, hay dos guards globales que se ejecutan en este
+orden y solo actúan sobre los endpoints decorados:
+
+| Decorador | Guard | Efecto |
+| --- | --- | --- |
+| `@Roles(ROLE.ADMINISTRADOR, ...)` | `RolesGuard` | 403 si el rol del usuario no está en la lista. Se puede aplicar al controller completo; el del handler tiene prioridad. |
+| `@StoreScoped({ field?, source? })` | `StoreAccessGuard` | Lee el ID del local de `params` (por defecto), `query` o `body` (campo `storeId` por defecto) y responde 403 si el usuario no tiene acceso a ese local; 400 si falta. |
+
+Regla de acceso por local: `ADMINISTRADOR` y `CONTADOR` son globales y
+acceden a todos los locales; `SUPERVISOR` y `TRABAJADOR` solo a su local
+asignado. Los servicios pueden reutilizar la misma regla con
+`canAccessStore(user, storeId)` (`src/auth/policies/store-access.policy.ts`).
+Ambos decoradores documentan la respuesta 403 en Swagger automáticamente.
+
+```ts
+@Get(':storeId/cierres')
+@Roles(ROLE.ADMINISTRADOR, ROLE.SUPERVISOR)
+@StoreScoped()
+listClosings(@Param('storeId') storeId: string) { ... }
+```
+
 ## Documentación interactiva (Swagger / OpenAPI)
 
 La API genera su documentación OpenAPI con `@nestjs/swagger`:
