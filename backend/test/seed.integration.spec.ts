@@ -1,7 +1,12 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcryptjs';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
-import { BASE_ROLES, seedDatabase, type SeedOptions } from '../prisma/seed.js';
+import {
+  BASE_ROLES,
+  DOCUMENT_TYPES,
+  seedDatabase,
+  type SeedOptions,
+} from '../prisma/seed.js';
 
 // Tests de integración del seed (SPRINT-1-T05) contra PostgreSQL real.
 // Se omiten si no se define TEST_DATABASE_URL y cada test corre dentro de
@@ -88,6 +93,34 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
     });
   });
 
+  it('crea los tipos de documento laboral con conservación de 5 años', async () => {
+    await withinRollback(async (tx) => {
+      await seedDatabase(tx, opciones);
+
+      for (const esperado of DOCUMENT_TYPES) {
+        const tipo = await tx.documentType.findUniqueOrThrow({
+          where: { code: esperado.code },
+        });
+        expect(tipo.name).toBe(esperado.name);
+        expect(tipo.description).toBe(esperado.description);
+        expect(tipo.isActive).toBe(true);
+        // Conservación laboral por defecto (art. 9 bis CT).
+        expect(tipo.retentionYears).toBe(5);
+      }
+
+      // El permiso sanitario vence: exige alertas de expiración.
+      const permiso = await tx.documentType.findUniqueOrThrow({
+        where: { code: 'PERMISO_SANITARIO' },
+      });
+      expect(permiso.requiresExpiration).toBe(true);
+      // Los documentos laborales del trabajador no vencen.
+      const contrato = await tx.documentType.findUniqueOrThrow({
+        where: { code: 'CONTRATO' },
+      });
+      expect(contrato.requiresExpiration).toBe(false);
+    });
+  });
+
   it('es idempotente: no duplica roles ni crea un segundo administrador', async () => {
     await withinRollback(async (tx) => {
       const primera = await seedDatabase(tx, opciones);
@@ -96,6 +129,7 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
       expect(segunda.adminCreated).toBe(false);
       expect(segunda.adminUserId).toBe(primera.adminUserId);
       expect(segunda.roleIds).toEqual(primera.roleIds);
+      expect(segunda.documentTypeIds).toEqual(primera.documentTypeIds);
 
       const admins = await tx.user.findMany({
         where: { email: opciones.adminEmail },

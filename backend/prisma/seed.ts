@@ -1,11 +1,12 @@
 // =============================================================
-// Seed de datos base (SPRINT-1-T05): roles del sistema y usuario
-// administrador inicial.
+// Seed de datos base (SPRINT-1-T05): roles del sistema, usuario
+// administrador inicial y tipos de documento laboral.
 //
 // Ejecución: `npm run prisma:seed` (o `npx prisma db seed`).
-// El script es idempotente: los roles se sincronizan por `code`
-// (upsert) y el administrador solo se crea si el correo no existe,
-// sin sobrescribir la contraseña de un usuario ya registrado.
+// El script es idempotente: los roles y tipos de documento se
+// sincronizan por `code` (upsert) y el administrador solo se crea si
+// el correo no existe, sin sobrescribir la contraseña de un usuario
+// ya registrado.
 // =============================================================
 import 'dotenv/config';
 import { realpathSync } from 'node:fs';
@@ -45,6 +46,49 @@ export const BASE_ROLES = [
   },
 ] as const;
 
+// Tipos de documento laboral del Gestor Documental. La conservación de 5 años
+// corresponde al art. 9 bis del Código del Trabajo; requiresExpiration activa
+// las alertas de vencimiento sobre documents.expires_at.
+export const DOCUMENT_TYPES = [
+  {
+    code: 'CONTRATO',
+    name: 'Contrato de trabajo',
+    description: 'Contrato de trabajo firmado entre Moi-food y el trabajador.',
+    requiresExpiration: false,
+    retentionYears: 5,
+  },
+  {
+    code: 'ANEXO',
+    name: 'Anexo de contrato',
+    description: 'Anexo que modifica o complementa el contrato vigente.',
+    requiresExpiration: false,
+    retentionYears: 5,
+  },
+  {
+    code: 'FINIQUITO',
+    name: 'Finiquito',
+    description:
+      'Finiquito ratificado ante notario al término de la relación laboral.',
+    requiresExpiration: false,
+    retentionYears: 5,
+  },
+  {
+    code: 'LIQUIDACION',
+    name: 'Liquidación de sueldo',
+    description: 'Liquidación mensual de remuneraciones del trabajador.',
+    requiresExpiration: false,
+    retentionYears: 5,
+  },
+  {
+    code: 'PERMISO_SANITARIO',
+    name: 'Permiso sanitario',
+    description:
+      'Permiso sanitario del local; documento del local (sin trabajador titular).',
+    requiresExpiration: true,
+    retentionYears: 5,
+  },
+] as const;
+
 export interface SeedOptions {
   adminEmail: string;
   adminPassword: string;
@@ -54,6 +98,7 @@ export interface SeedOptions {
 
 export interface SeedResult {
   roleIds: Record<string, string>;
+  documentTypeIds: Record<string, string>;
   adminUserId: string;
   adminCreated: boolean;
 }
@@ -80,11 +125,32 @@ export async function seedDatabase(
     roleIds[guardado.code] = guardado.id;
   }
 
+  const documentTypeIds: Record<string, string> = {};
+  for (const tipo of DOCUMENT_TYPES) {
+    const guardado = await db.documentType.upsert({
+      where: { code: tipo.code },
+      update: {
+        name: tipo.name,
+        description: tipo.description,
+        requiresExpiration: tipo.requiresExpiration,
+        retentionYears: tipo.retentionYears,
+        isActive: true,
+      },
+      create: { ...tipo },
+    });
+    documentTypeIds[guardado.code] = guardado.id;
+  }
+
   const existente = await db.user.findUnique({
     where: { email: options.adminEmail },
   });
   if (existente) {
-    return { roleIds, adminUserId: existente.id, adminCreated: false };
+    return {
+      roleIds,
+      documentTypeIds,
+      adminUserId: existente.id,
+      adminCreated: false,
+    };
   }
 
   // storeId queda NULL: el administrador es un usuario global (ver schema).
@@ -97,7 +163,12 @@ export async function seedDatabase(
       roleId: roleIds['ADMINISTRADOR'],
     },
   });
-  return { roleIds, adminUserId: admin.id, adminCreated: true };
+  return {
+    roleIds,
+    documentTypeIds,
+    adminUserId: admin.id,
+    adminCreated: true,
+  };
 }
 
 async function main(): Promise<void> {
@@ -122,6 +193,10 @@ async function main(): Promise<void> {
     console.log(
       `Seed OK: ${BASE_ROLES.length} roles sincronizados (${BASE_ROLES.map(
         (r) => r.code,
+      ).join(
+        ', ',
+      )}) y ${DOCUMENT_TYPES.length} tipos de documento (${DOCUMENT_TYPES.map(
+        (t) => t.code,
       ).join(', ')}).`,
     );
     console.log(

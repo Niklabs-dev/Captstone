@@ -78,5 +78,5 @@ npm run test                                      # tests backend (Vitest)
 
 # Base de datos (en backend/)
 npm run prisma:migrate:deploy                     # aplica migraciones
-npm run prisma:seed                               # datos base: roles + admin inicial (idempotente)
+npm run prisma:seed                               # datos base: roles, tipos de documento y admin inicial (idempotente)
 ```
