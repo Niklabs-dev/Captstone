@@ -47,8 +47,9 @@ $ docker compose up -d db
 $ npm run prisma:migrate          # desarrollo (también crea migraciones nuevas)
 $ npm run prisma:migrate:deploy   # producción/CI (solo aplica)
 
-# datos base: roles (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR)
-# y usuario administrador inicial. Idempotente: se puede re-ejecutar.
+# datos base: roles (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR),
+# tipos de documento laboral (CONTRATO, ANEXO, FINIQUITO, LIQUIDACION,
+# PERMISO_SANITARIO) y usuario administrador inicial. Idempotente.
 $ npm run prisma:seed
 
 # regenerar el cliente (corre solo en npm install vía postinstall)
