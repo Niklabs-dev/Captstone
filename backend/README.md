@@ -85,6 +85,15 @@ curl -X POST http://localhost:3001/auth/login \
   -d '{"email":"admin@moi-food.cl","password":"admin-cambiar-en-produccion"}'
 ```
 
+## Documentación interactiva (Swagger / OpenAPI)
+
+La API genera su documentación OpenAPI con `@nestjs/swagger`:
+
+- **Swagger UI:** `http://localhost:3001/api/docs` — permite explorar y probar
+  los endpoints; para los protegidos, pegar el access token en **Authorize**
+  (candado) con el esquema Bearer.
+- **Esquema OpenAPI en JSON:** `http://localhost:3001/api/docs-json`.
+
 ## Compile and run the project
 
 ```bash
