@@ -6,6 +6,8 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
+import { RolesGuard } from './guards/roles.guard.js';
+import { StoreAccessGuard } from './guards/store-access.guard.js';
 import { JwtStrategy } from './strategies/jwt.strategy.js';
 
 @Module({
@@ -28,8 +30,13 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
   providers: [
     AuthService,
     JwtStrategy,
-    // Guard global: todo endpoint exige access token salvo los @Public().
+    // Guards globales, en orden de ejecución:
+    // 1. JwtAuthGuard: todo endpoint exige access token salvo los @Public().
+    // 2. RolesGuard: restringe por rol los endpoints con @Roles().
+    // 3. StoreAccessGuard: restringe por local los endpoints con @StoreScoped().
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: StoreAccessGuard },
   ],
 })
 export class AuthModule {}
