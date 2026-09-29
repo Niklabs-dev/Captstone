@@ -66,6 +66,34 @@ Tras `npm run prisma:seed`, el administrador por defecto es
 `.env.example`, sobreescribibles con `ADMIN_EMAIL` y `ADMIN_PASSWORD`).
 **Cambiar la contraseña en el primer inicio y nunca usarla en producción.**
 
+## Autenticación (JWT)
+
+Todos los endpoints exigen `Authorization: Bearer <accessToken>` salvo los
+públicos (`GET /`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`).
+
+| Endpoint | Acceso | Descripción |
+| --- | --- | --- |
+| `POST /auth/login` | Público | Valida email + contraseña (bcrypt) y emite access token (JWT, `JWT_EXPIRES_IN`) y refresh token (opaco, hash SHA-256 en BD, `JWT_REFRESH_EXPIRES_IN`) |
+| `POST /auth/refresh` | Público | Rota el refresh token: revoca el usado y emite un par nuevo |
+| `POST /auth/logout` | Público | Revoca el refresh token (idempotente) |
+| `GET /auth/me` | Autenticado | Devuelve el usuario del token (id, email, rol, local) |
+
+```bash
+# ejemplo local
+curl -X POST http://localhost:3001/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@moi-food.cl","password":"admin-cambiar-en-produccion"}'
+```
+
+## Documentación interactiva (Swagger / OpenAPI)
+
+La API genera su documentación OpenAPI con `@nestjs/swagger`:
+
+- **Swagger UI:** `http://localhost:3001/api/docs` — permite explorar y probar
+  los endpoints; para los protegidos, pegar el access token en **Authorize**
+  (candado) con el esquema Bearer.
+- **Esquema OpenAPI en JSON:** `http://localhost:3001/api/docs-json`.
+
 ## Compile and run the project
 
 ```bash
