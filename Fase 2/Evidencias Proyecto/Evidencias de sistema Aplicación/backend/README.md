@@ -47,12 +47,24 @@ $ docker compose up -d db
 $ npm run prisma:migrate          # desarrollo (también crea migraciones nuevas)
 $ npm run prisma:migrate:deploy   # producción/CI (solo aplica)
 
+# datos base: roles (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR),
+# tipos de documento laboral (CONTRATO, ANEXO, FINIQUITO, LIQUIDACION,
+# PERMISO_SANITARIO) y usuario administrador inicial. Idempotente.
+$ npm run prisma:seed
+
 # regenerar el cliente (corre solo en npm install vía postinstall)
 $ npm run prisma:generate
 
 # explorar datos en el navegador
 $ npm run prisma:studio
 ```
+
+### Credenciales iniciales (solo desarrollo)
+
+Tras `npm run prisma:seed`, el administrador por defecto es
+`admin@moi-food.cl` / `admin-cambiar-en-produccion` (valores de
+`.env.example`, sobreescribibles con `ADMIN_EMAIL` y `ADMIN_PASSWORD`).
+**Cambiar la contraseña en el primer inicio y nunca usarla en producción.**
 
 ## Compile and run the project
 

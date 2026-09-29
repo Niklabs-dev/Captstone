@@ -69,10 +69,14 @@ Las tareas viven en el tablero de Notion con estados: `Por hacer` → `En curso`
 cd backend && npm install && npm run start:dev   # API en http://localhost:3001
 cd frontend && npm install && npm run dev         # Web en http://localhost:3000
 
-# Sistema completo con Docker (sin pasos manuales)
-docker compose up --build                         # db + backend + frontend
+# Sistema completo con Docker (sin pasos manuales: migra y siembra solo)
+docker compose up --build                         # db + migrate + seed + backend + frontend
 
 # Calidad
 npm run lint && npm run format:check              # en backend/ y frontend/
 npm run test                                      # tests backend (Vitest)
+
+# Base de datos (en backend/)
+npm run prisma:migrate:deploy                     # aplica migraciones
+npm run prisma:seed                               # datos base: roles, tipos de documento y admin inicial (idempotente)
 ```

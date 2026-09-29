@@ -58,8 +58,12 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
         address: 'Av. Vicuña Mackenna 123',
       },
     });
-    const role = await tx.role.create({
-      data: { code: 'TRABAJADOR', name: 'Trabajador' },
+    // Upsert: la base puede venir ya sembrada (SPRINT-1-T05) con el rol
+    // TRABAJADOR creado; el test solo necesita un rol al que asociar usuarios.
+    const role = await tx.role.upsert({
+      where: { code: 'TRABAJADOR' },
+      update: {},
+      create: { code: 'TRABAJADOR', name: 'Trabajador' },
     });
     const user = await tx.user.create({
       data: {
