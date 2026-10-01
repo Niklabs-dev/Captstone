@@ -108,6 +108,18 @@ Ambos decoradores documentan la respuesta 403 en Swagger automáticamente.
 listClosings(@Param('storeId') storeId: string) { ... }
 ```
 
+## Gestión de usuarios
+
+Endpoints exclusivos del rol `ADMINISTRADOR` (403 para el resto):
+
+| Endpoint | Descripción |
+| --- | --- |
+| `POST /users` | Crea un usuario con rol (`roleCode`), local (`storeId`) y contraseña inicial (hash bcrypt). `SUPERVISOR` y `TRABAJADOR` requieren local; `ADMINISTRADOR` y `CONTADOR` son globales y no lo admiten (400). RUT validado con dígito verificador. 409 si el correo o el RUT ya existen. |
+| `GET /users` | Lista usuarios (sin hash de contraseña), con filtros opcionales `storeId`, `roleCode` e `isActive`. |
+| `PATCH /users/:id/deactivate` | Desactiva la cuenta: bloquea login y renovación de sesión (revoca sus refresh tokens) sin borrar sus datos ni documentos. Idempotente; no permite desactivar la cuenta propia. |
+
+El access token ya emitido sigue vigente hasta su expiración (`JWT_EXPIRES_IN`).
+
 ## Documentación interactiva (Swagger / OpenAPI)
 
 La API genera su documentación OpenAPI con `@nestjs/swagger`:
