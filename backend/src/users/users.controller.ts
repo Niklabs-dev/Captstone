@@ -24,6 +24,8 @@ import { ROLE } from '../auth/constants/roles.constants.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
+import { AUDIT_ACTION } from '../audit/constants/audit-actions.constants.js';
+import { Audited } from '../audit/decorators/audited.decorator.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { ListUsersQueryDto } from './dto/list-users-query.dto.js';
 import { UserResponseDto } from './dto/user-response.dto.js';
@@ -40,6 +42,12 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
+  @Audited({
+    action: AUDIT_ACTION.USER_CREATED,
+    entityType: 'users',
+    entityIdFrom: 'response.id',
+    detailFromBody: ['email', 'roleCode'],
+  })
   @ApiOperation({
     summary: 'Crea un usuario con rol, local y credenciales iniciales',
   })
@@ -77,6 +85,11 @@ export class UsersController {
 
   @Patch(':id/deactivate')
   @HttpCode(200)
+  @Audited({
+    action: AUDIT_ACTION.USER_DEACTIVATED,
+    entityType: 'users',
+    entityIdFrom: 'params.id',
+  })
   @ApiOperation({
     summary:
       'Desactiva una cuenta: bloquea el acceso sin eliminar sus datos ni documentos',

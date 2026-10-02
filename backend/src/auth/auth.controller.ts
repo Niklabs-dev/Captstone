@@ -8,6 +8,8 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
+import { AUDIT_ACTION } from '../audit/constants/audit-actions.constants.js';
+import { Audited } from '../audit/decorators/audited.decorator.js';
 import { AuthService } from './auth.service.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { Public } from './decorators/public.decorator.js';
@@ -30,6 +32,13 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(200)
+  @Audited({
+    action: AUDIT_ACTION.USER_LOGIN,
+    entityType: 'auth',
+    entityIdFrom: 'response.user.id',
+    detailFromBody: ['email'],
+    failureAction: AUDIT_ACTION.USER_LOGIN_FAILED,
+  })
   @ApiOperation({
     summary: 'Inicia sesión con email y contraseña, y emite los tokens',
   })
