@@ -69,9 +69,7 @@ describe.skipIf(!databaseUrl)('Autenticación JWT (SPRINT-1-T06)', () => {
     });
 
     // Limpieza previa por si una ejecución anterior quedó a medias.
-    await prisma.user.deleteMany({
-      where: { email: { in: [EMAIL, EMAIL_INACTIVO] } },
-    });
+    await limpiar();
 
     const store = await prisma.store.create({
       data: {
@@ -112,14 +110,30 @@ describe.skipIf(!databaseUrl)('Autenticación JWT (SPRINT-1-T06)', () => {
   }, 60_000);
 
   afterAll(async () => {
-    // Borrar el usuario elimina sus refresh tokens en cascada.
-    await prisma.user.deleteMany({
-      where: { email: { in: [EMAIL, EMAIL_INACTIVO] } },
-    });
+    await limpiar();
     await prisma.store.delete({ where: { id: storeId } });
     await prisma.$disconnect();
     await app.close();
   });
+
+  // Limpia los datos de prueba. Primero la auditoría que generan los logins
+  // (SPRINT-1-T13): borrar los usuarios deja userId en NULL (SetNull) y se
+  // perdería el filtro por actor. Los refresh tokens se borran en cascada.
+  async function limpiar(): Promise<void> {
+    await prisma.auditLog.deleteMany({
+      where: {
+        OR: [
+          { user: { email: { in: [EMAIL, EMAIL_INACTIVO] } } },
+          { detail: { path: ['email'], equals: EMAIL } },
+          { detail: { path: ['email'], equals: EMAIL_INACTIVO } },
+          { detail: { path: ['email'], equals: 'no-existe@moi-food.cl' } },
+        ],
+      },
+    });
+    await prisma.user.deleteMany({
+      where: { email: { in: [EMAIL, EMAIL_INACTIVO] } },
+    });
+  }
 
   // Sin async para conservar el tipo Test de supertest y poder encadenar .expect().
   function login(email: string, password: string) {
