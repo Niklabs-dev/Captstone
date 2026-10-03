@@ -1,11 +1,12 @@
-import { cookies } from 'next/headers';
-import { parseSessionCookie, SESSION_COOKIE } from '@/lib/mock-auth';
+import { redirect } from 'next/navigation';
+import { getSessionUser } from '@/lib/session';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Pill } from '@/components/ui/Pill';
 import { LogoutButton } from '@/components/LogoutButton';
 
 // Datos de ejemplo del propio trabajador — en el backend real, el endpoint
 // debe devolver únicamente los registros de session.user.id (E4-H1/E4-H2).
+// Pendiente: aún no existe el endpoint (módulos Documental/Propinas, Sprint 2-3).
 const MI_INFO = {
   liquidaciones: [
     { periodo: 'Agosto 2026', estado: 'Publicada', monto: '$612.400' },
@@ -23,8 +24,8 @@ const MI_INFO = {
 };
 
 export default async function PortalPage() {
-  const jar = await cookies();
-  const user = parseSessionCookie(jar.get(SESSION_COOKIE)?.value);
+  const user = await getSessionUser();
+  if (!user) redirect('/login');
 
   return (
     <main className="max-w-[760px] mx-auto px-3.5 sm:px-5 py-6 sm:py-9">
@@ -33,7 +34,7 @@ export default async function PortalPage() {
           <div className="font-mono text-[10px] tracking-widest uppercase text-muted">
             Portal del trabajador · solo lectura
           </div>
-          <h1 className="text-xl font-extrabold mt-0.5">Hola, {user?.nombre ?? 'trabajador/a'}</h1>
+          <h1 className="text-xl font-extrabold mt-0.5">Hola, {user.nombre}</h1>
         </div>
         <LogoutButton />
       </header>

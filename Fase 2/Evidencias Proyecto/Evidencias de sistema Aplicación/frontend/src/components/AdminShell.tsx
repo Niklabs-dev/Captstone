@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { getSessionUserClient, clearSessionCookie } from '@/lib/mock-auth';
 import { Button } from './ui/Button';
 
 const NAV = [
@@ -14,14 +13,17 @@ const NAV = [
   { href: '/admin/inventario', label: 'Inventario' },
   { href: '/admin/usuarios', label: 'Usuarios (T10)' },
   { href: '/admin/auditoria', label: 'Auditoría (T16)' },
-  // Todos con datos mock — cada módulo se conecta a su endpoint real cuando
-  // ese Sprint del backlog lo entregue.
 ];
 
-export function AdminShell({ children }: { children: React.ReactNode }) {
+export function AdminShell({
+  user,
+  children,
+}: {
+  user: { nombre: string; rol: string };
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
   const router = useRouter();
-  const user = getSessionUserClient();
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -31,9 +33,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     };
   }, [menuOpen]);
 
-  function handleLogout() {
-    clearSessionCookie();
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
     router.push('/login');
+    router.refresh();
   }
 
   return (
@@ -86,12 +89,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <div className="border-t border-line px-4 py-3.5">
           <div className="flex items-center gap-2.5 mb-2.5">
             <div className="w-8.5 h-8.5 rounded-lg bg-salmon text-white flex items-center justify-center font-bold text-xs shrink-0">
-              {(user?.nombre ?? '?').slice(0, 1)}
+              {user.nombre.slice(0, 1)}
             </div>
             <div className="min-w-0">
-              <div className="text-[13px] font-semibold truncate">{user?.nombre ?? 'Sin sesión'}</div>
+              <div className="text-[13px] font-semibold truncate">{user.nombre}</div>
               <div className="font-mono text-[9.5px] tracking-widest uppercase text-salmon-deep">
-                {user?.rol}
+                {user.rol}
               </div>
             </div>
           </div>

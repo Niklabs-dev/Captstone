@@ -1,19 +1,16 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { clearSessionCookie } from '@/lib/mock-auth';
 import { Button } from './ui/Button';
 
 export function LogoutButton() {
   const router = useRouter();
-  return (
-    <Button
-      onClick={() => {
-        clearSessionCookie();
-        router.push('/login');
-      }}
-    >
-      Cerrar sesión
-    </Button>
-  );
+
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+    router.refresh();
+  }
+
+  return <Button onClick={handleLogout}>Cerrar sesión</Button>;
 }

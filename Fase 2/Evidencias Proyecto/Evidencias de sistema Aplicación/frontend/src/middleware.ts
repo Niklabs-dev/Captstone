@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { parseSessionCookie, SESSION_COOKIE } from '@/lib/mock-auth';
+import { USER_COOKIE, parseUserCookie, landingPathForRole } from '@/lib/session';
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const user = parseSessionCookie(req.cookies.get(SESSION_COOKIE)?.value);
+  const user = parseUserCookie(req.cookies.get(USER_COOKIE)?.value);
 
   const isAdminRoute = pathname.startsWith('/admin');
   const isPortalRoute = pathname.startsWith('/portal');
@@ -17,14 +17,14 @@ export function middleware(req: NextRequest) {
   // Un trabajador nunca entra al panel administrador; el resto de roles no
   // tiene por qué entrar al Portal del Trabajador (Ley N°21.719 — aislamiento
   // de datos, mismo criterio de E4-H1/E4-H2 del backlog).
-  if (isAdminRoute && user?.rol === 'trabajador') {
+  if (user && isAdminRoute && user.rol === 'TRABAJADOR') {
     const url = req.nextUrl.clone();
-    url.pathname = '/portal';
+    url.pathname = landingPathForRole(user.rol);
     return NextResponse.redirect(url);
   }
-  if (isPortalRoute && user && user.rol !== 'trabajador') {
+  if (user && isPortalRoute && user.rol !== 'TRABAJADOR') {
     const url = req.nextUrl.clone();
-    url.pathname = '/admin';
+    url.pathname = landingPathForRole(user.rol);
     return NextResponse.redirect(url);
   }
 

@@ -1,22 +1,3 @@
-export interface UsuarioRow {
-  id: string;
-  nombre: string;
-  correo: string;
-  rol: 'Administrador' | 'Contador' | 'Supervisor' | 'Trabajador';
-  alcance: string;
-  estado: 'Activo' | 'Desactivado';
-}
-
-export const MOCK_USUARIOS: UsuarioRow[] = [
-  { id: 'u1', nombre: 'Moisés Jiménez', correo: 'admin@moifood.cl', rol: 'Administrador', alcance: 'Consolidado 3 locales', estado: 'Activo' },
-  { id: 'u2', nombre: 'Ricardo Ballesteros', correo: 'contador@moifood.cl', rol: 'Contador', alcance: '3 locales · reportes', estado: 'Activo' },
-  { id: 'u3', nombre: 'Rosa Fernández', correo: 'rosa@moifood.cl', rol: 'Supervisor', alcance: 'Solo LOC-01', estado: 'Activo' },
-  { id: 'u4', nombre: 'Grace Muñoz', correo: 'grace@moifood.cl', rol: 'Supervisor', alcance: 'Solo LOC-02', estado: 'Activo' },
-  { id: 'u5', nombre: 'Lisbely Araya', correo: 'lisbely@moifood.cl', rol: 'Supervisor', alcance: 'Solo LOC-03 (Calera)', estado: 'Activo' },
-  { id: 'u6', nombre: 'Camila Rojas', correo: 'trabajador@moifood.cl', rol: 'Trabajador', alcance: 'Solo su información', estado: 'Activo' },
-  { id: 'u7', nombre: 'Andrés Molina', correo: 'andres@moifood.cl', rol: 'Trabajador', alcance: '—', estado: 'Desactivado' },
-];
-
 export interface AuditoriaRow {
   hora: string;
   usuario: string;
