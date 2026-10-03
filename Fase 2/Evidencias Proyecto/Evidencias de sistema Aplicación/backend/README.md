@@ -29,7 +29,93 @@
 
 ```bash
 $ npm install
+$ cp .env.example .env   # completar valores por ambiente (nunca commitear .env)
 ```
+
+## Base de datos (Prisma + PostgreSQL)
+
+El modelo de datos completo (6 módulos, 17 tablas) está documentado en
+[`docs/modelo-datos.md`](docs/modelo-datos.md), incluidos los diagramas
+(Mermaid y DBML para dbdiagram.io) y el cumplimiento de la Ley N°21.719 y el
+Código del Trabajo.
+
+```bash
+# levantar PostgreSQL con docker compose (puerto 5433 del host)
+$ docker compose up -d db
+
+# aplicar migraciones
+$ npm run prisma:migrate          # desarrollo (también crea migraciones nuevas)
+$ npm run prisma:migrate:deploy   # producción/CI (solo aplica)
+
+# datos base: roles (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR),
+# tipos de documento laboral (CONTRATO, ANEXO, FINIQUITO, LIQUIDACION,
+# PERMISO_SANITARIO) y usuario administrador inicial. Idempotente.
+$ npm run prisma:seed
+
+# regenerar el cliente (corre solo en npm install vía postinstall)
+$ npm run prisma:generate
+
+# explorar datos en el navegador
+$ npm run prisma:studio
+```
+
+### Credenciales iniciales (solo desarrollo)
+
+Tras `npm run prisma:seed`, el administrador por defecto es
+`admin@moi-food.cl` / `admin-cambiar-en-produccion` (valores de
+`.env.example`, sobreescribibles con `ADMIN_EMAIL` y `ADMIN_PASSWORD`).
+**Cambiar la contraseña en el primer inicio y nunca usarla en producción.**
+
+## Autenticación (JWT)
+
+Todos los endpoints exigen `Authorization: Bearer <accessToken>` salvo los
+públicos (`GET /`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`).
+
+| Endpoint | Acceso | Descripción |
+| --- | --- | --- |
+| `POST /auth/login` | Público | Valida email + contraseña (bcrypt) y emite access token (JWT, `JWT_EXPIRES_IN`) y refresh token (opaco, hash SHA-256 en BD, `JWT_REFRESH_EXPIRES_IN`) |
+| `POST /auth/refresh` | Público | Rota el refresh token: revoca el usado y emite un par nuevo |
+| `POST /auth/logout` | Público | Revoca el refresh token (idempotente) |
+| `GET /auth/me` | Autenticado | Devuelve el usuario del token (id, email, rol, local) |
+
+```bash
+# ejemplo local
+curl -X POST http://localhost:3001/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@moi-food.cl","password":"admin-cambiar-en-produccion"}'
+```
+
+## Autorización por rol y local
+
+Además del `JwtAuthGuard`, hay dos guards globales que se ejecutan en este
+orden y solo actúan sobre los endpoints decorados:
+
+| Decorador | Guard | Efecto |
+| --- | --- | --- |
+| `@Roles(ROLE.ADMINISTRADOR, ...)` | `RolesGuard` | 403 si el rol del usuario no está en la lista. Se puede aplicar al controller completo; el del handler tiene prioridad. |
+| `@StoreScoped({ field?, source? })` | `StoreAccessGuard` | Lee el ID del local de `params` (por defecto), `query` o `body` (campo `storeId` por defecto) y responde 403 si el usuario no tiene acceso a ese local; 400 si falta. |
+
+Regla de acceso por local: `ADMINISTRADOR` y `CONTADOR` son globales y
+acceden a todos los locales; `SUPERVISOR` y `TRABAJADOR` solo a su local
+asignado. Los servicios pueden reutilizar la misma regla con
+`canAccessStore(user, storeId)` (`src/auth/policies/store-access.policy.ts`).
+Ambos decoradores documentan la respuesta 403 en Swagger automáticamente.
+
+```ts
+@Get(':storeId/cierres')
+@Roles(ROLE.ADMINISTRADOR, ROLE.SUPERVISOR)
+@StoreScoped()
+listClosings(@Param('storeId') storeId: string) { ... }
+```
+
+## Documentación interactiva (Swagger / OpenAPI)
+
+La API genera su documentación OpenAPI con `@nestjs/swagger`:
+
+- **Swagger UI:** `http://localhost:3001/api/docs` — permite explorar y probar
+  los endpoints; para los protegidos, pegar el access token en **Authorize**
+  (candado) con el esquema Bearer.
+- **Esquema OpenAPI en JSON:** `http://localhost:3001/api/docs-json`.
 
 ## Compile and run the project
 

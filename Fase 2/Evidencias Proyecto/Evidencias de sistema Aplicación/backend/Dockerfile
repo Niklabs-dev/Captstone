@@ -4,6 +4,11 @@
 FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
+# prisma/ y prisma.config.ts antes de npm ci: el postinstall ejecuta
+# `prisma generate` y deja el cliente disponible para las etapas siguientes
+# (incluida la migración con `npx prisma migrate deploy`).
+COPY prisma ./prisma
+COPY prisma.config.ts ./
 RUN npm ci
 
 # ---- Compilación ----

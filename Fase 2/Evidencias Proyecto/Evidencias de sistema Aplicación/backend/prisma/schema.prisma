@@ -1,0 +1,529 @@
+// =============================================================
+// Moi-food — Sistema de Gestión Interna Subway (Capstone Duoc UC)
+// Modelo de datos Prisma 7 sobre PostgreSQL.
+//
+// Convenciones:
+// - Identificadores en inglés; tablas y columnas en snake_case.
+// - UUIDs generados por PostgreSQL (gen_random_uuid()); los libros
+//   mayores (audit_logs, inventory_movements) usan BigInt
+//   autoincremental para preservar el orden cronológico natural.
+// - Montos en Decimal(12, 2) (CLP); cantidades Decimal(12, 3).
+// - Fechas de negocio como date; marcas de tiempo como timestamptz.
+// - Borrado físico restringido (Restrict) por defecto para proteger
+//   la trazabilidad; los datos personales se anonimizan (no se
+//   borran) conforme a la Ley N°21.719.
+// =============================================================
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  // Explícito para que `prisma generate` produzca ESM con extensiones .js
+  // incluso sin tsconfig.json en el contexto (p. ej. etapa deps del Dockerfile).
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -------------------------------------------------------------
+// MÓDULO NÚCLEO: locales, roles, usuarios, autenticación, auditoría
+// -------------------------------------------------------------
+
+/// Local de la franquicia (dos en Melipilla y uno en Calera de Tango).
+model Store {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @db.VarChar(100)
+  city      String   @db.VarChar(100)
+  address   String   @db.VarChar(200)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users              User[]
+  auditLogs          AuditLog[]
+  documents          Document[]
+  tipPools           TipPool[]
+  sales              Sale[]
+  cashClosings       CashClosing[]
+  inventoryMovements InventoryMovement[]
+  inventoryCounts    InventoryCount[]
+
+  @@map("stores")
+}
+
+/// Rol de acceso (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR; seed en SPRINT-1-T05).
+model Role {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String   @unique @db.VarChar(30)
+  name        String   @db.VarChar(50)
+  description String?  @db.VarChar(255)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users User[]
+
+  @@map("roles")
+}
+
+/// Usuario del sistema. Los datos personales (nombres, RUT, correo, teléfono)
+/// son datos personales según la Ley N°21.719: se minimizan a lo estrictamente
+/// necesario y, al ejercerse el derecho de cancelación, se anonimizan en lugar
+/// de borrarse (marcando anonymized_at) para preservar la trazabilidad laboral
+/// que exige el art. 9 bis del Código del Trabajo.
+/// store_id es NULL para usuarios globales (dueño, administrador, contador).
+model User {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String    @unique @db.VarChar(160)
+  passwordHash  String    @map("password_hash") @db.VarChar(255)
+  firstName     String    @map("first_name") @db.VarChar(80)
+  lastName      String    @map("last_name") @db.VarChar(80)
+  rut           String?   @unique @db.VarChar(12)
+  phone         String?   @db.VarChar(20)
+  hiredAt       DateTime? @map("hired_at") @db.Date
+  isActive      Boolean   @default(true) @map("is_active")
+  anonymizedAt  DateTime? @map("anonymized_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  role    Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  roleId  String @map("role_id") @db.Uuid
+  store   Store? @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId String? @map("store_id") @db.Uuid
+
+  refreshTokens              RefreshToken[]
+  auditLogs                  AuditLog[]
+  subjectDocuments           Document[]           @relation("SubjectDocuments")
+  createdDocuments           Document[]           @relation("CreatedDocuments")
+  uploadedVersions           DocumentVersion[]    @relation("UploadedVersions")
+  calculatedTipPools         TipPool[]            @relation("CalculatedTipPools")
+  confirmedTipPools          TipPool[]            @relation("ConfirmedTipPools")
+  tipPoolLines               TipPoolLine[]        @relation("TipPoolLines")
+  registeredSales            Sale[]               @relation("RegisteredSales")
+  responsibleCashClosings    CashClosing[]        @relation("ResponsibleCashClosings")
+  inventoryMovements         InventoryMovement[]  @relation("CreatedInventoryMovements")
+  inventoryCounts            InventoryCount[]     @relation("CreatedInventoryCounts")
+  ownDataRightsRequests      DataRightsRequest[]  @relation("OwnDataRightsRequests")
+  resolvedDataRightsRequests DataRightsRequest[]  @relation("ResolvedDataRightsRequests")
+
+  @@index([storeId])
+  @@map("users")
+}
+
+/// Refresh token de sesión (SPRINT-1-T06). Nunca se guarda el token en claro,
+/// solo su hash, con expiración y revocación.
+model RefreshToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(255)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  ipAddress String?   @map("ip_address") @db.Inet
+  userAgent String?   @map("user_agent") @db.VarChar(255)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id") @db.Uuid
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+/// Registro de auditoría INMUTABLE (SPRINT-1-T12 a T15): quién, qué operación,
+/// sobre qué entidad, en qué local y cuándo. Sin updated_at: las filas no se
+/// modifican ni se borran; la aplicación solo permite INSERT y SELECT.
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  action     String   @db.VarChar(60)
+  entityType String   @map("entity_type") @db.VarChar(60)
+  entityId   String?  @map("entity_id") @db.VarChar(64)
+  detail     Json?    @db.JsonB
+  ipAddress  String?  @map("ip_address") @db.Inet
+  userAgent  String?  @map("user_agent") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // SetNull: el registro de auditoría sobrevive a la anonimización del usuario.
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId     String?  @map("user_id") @db.Uuid
+  store      Store?   @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  storeId    String?  @map("store_id") @db.Uuid
+
+  @@index([storeId, createdAt])
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+// -------------------------------------------------------------
+// MÓDULO GESTOR DOCUMENTAL: documentos laborales con hash SHA-256,
+// control de versiones y conservación por 5 años (art. 9 bis CT).
+// -------------------------------------------------------------
+
+/// Tipo de documento laboral (CONTRATO, ANEXO, FINIQUITO, LIQUIDACION, etc.).
+/// retention_years refleja la conservación exigida por la normativa (5 años).
+model DocumentType {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code               String   @unique @db.VarChar(40)
+  name               String   @db.VarChar(100)
+  description        String?  @db.VarChar(255)
+  requiresExpiration Boolean  @default(false) @map("requires_expiration")
+  retentionYears     Int      @default(5) @map("retention_years")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  documents Document[]
+
+  @@map("document_types")
+}
+
+enum DocumentStatus {
+  ACTIVE
+  EXPIRED
+  ARCHIVED
+}
+
+/// Documento laboral. subject_user_id identifica al trabajador dueño del
+/// documento (NULL para documentos del local, ej. permiso sanitario).
+/// expires_at permite alertas de vencimiento; nunca se borra físicamente
+/// durante el plazo de conservación legal.
+model Document {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title            String         @db.VarChar(160)
+  description      String?
+  status           DocumentStatus @default(ACTIVE)
+  issuedAt         DateTime?      @map("issued_at") @db.Date
+  expiresAt        DateTime?      @map("expires_at") @db.Date
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store            Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId          String         @map("store_id") @db.Uuid
+  subjectUser      User?          @relation("SubjectDocuments", fields: [subjectUserId], references: [id], onDelete: Restrict)
+  subjectUserId    String?        @map("subject_user_id") @db.Uuid
+  documentType     DocumentType   @relation(fields: [documentTypeId], references: [id], onDelete: Restrict)
+  documentTypeId   String         @map("document_type_id") @db.Uuid
+  createdBy        User           @relation("CreatedDocuments", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById      String         @map("created_by_id") @db.Uuid
+  currentVersion   DocumentVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  currentVersionId String?          @unique @map("current_version_id") @db.Uuid
+  versions         DocumentVersion[] @relation("DocumentVersions")
+
+  @@index([storeId, status])
+  @@index([subjectUserId])
+  @@index([expiresAt])
+  @@map("documents")
+}
+
+/// Versión INMUTABLE de un documento: archivo en volumen separado (file_path),
+/// hash SHA-256 único que permite verificar la integridad del archivo, y
+/// trazabilidad de quién subió cada versión y cuándo.
+model DocumentVersion {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  versionNumber Int      @map("version_number")
+  fileName      String   @map("file_name") @db.VarChar(255)
+  filePath      String   @map("file_path") @db.VarChar(500)
+  mimeType      String   @map("mime_type") @db.VarChar(100)
+  sizeBytes     BigInt   @map("size_bytes")
+  sha256Hash    String   @unique @map("sha256_hash") @db.Char(64)
+  changeNote    String?  @map("change_note") @db.VarChar(255)
+  uploadedAt    DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+
+  document     Document  @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Restrict)
+  documentId   String    @map("document_id") @db.Uuid
+  uploadedBy   User      @relation("UploadedVersions", fields: [uploadedById], references: [id], onDelete: Restrict)
+  uploadedById String    @map("uploaded_by_id") @db.Uuid
+  currentOf    Document? @relation("CurrentVersion")
+
+  @@unique([documentId, versionNumber])
+  @@map("document_versions")
+}
+
+// -------------------------------------------------------------
+// MÓDULO PROPINAS: reparto proporcional a horas trabajadas con
+// registro escrito por trabajador (art. 64 del Código del Trabajo).
+// -------------------------------------------------------------
+
+enum TipPoolStatus {
+  DRAFT
+  CONFIRMED
+  PAID
+}
+
+/// Reparto de propinas de un local para un período. El total proviene de las
+/// propinas registradas en las ventas del período (sales.tip_amount).
+model TipPool {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  periodStart   DateTime      @map("period_start") @db.Date
+  periodEnd     DateTime      @map("period_end") @db.Date
+  totalAmount   Decimal       @map("total_amount") @db.Decimal(12, 2)
+  status        TipPoolStatus @default(DRAFT)
+  notes         String?       @db.VarChar(255)
+  confirmedAt   DateTime?     @map("confirmed_at") @db.Timestamptz(6)
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store          Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId        String        @map("store_id") @db.Uuid
+  calculatedBy   User          @relation("CalculatedTipPools", fields: [calculatedById], references: [id], onDelete: Restrict)
+  calculatedById String        @map("calculated_by_id") @db.Uuid
+  confirmedBy    User?         @relation("ConfirmedTipPools", fields: [confirmedById], references: [id], onDelete: Restrict)
+  confirmedById  String?       @map("confirmed_by_id") @db.Uuid
+  lines          TipPoolLine[]
+
+  @@unique([storeId, periodStart, periodEnd])
+  @@map("tip_pools")
+}
+
+/// Detalle del reparto por trabajador: horas trabajadas (base del cálculo
+/// proporcional del art. 64) y monto asignado. Es el registro escrito del reparto.
+model TipPoolLine {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  hoursWorked Decimal @map("hours_worked") @db.Decimal(6, 2)
+  amount      Decimal @db.Decimal(12, 2)
+
+  pool   TipPool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  poolId String  @map("pool_id") @db.Uuid
+  user   User    @relation("TipPoolLines", fields: [userId], references: [id], onDelete: Restrict)
+  userId String  @map("user_id") @db.Uuid
+
+  @@unique([poolId, userId])
+  @@map("tip_pool_lines")
+}
+
+// -------------------------------------------------------------
+// MÓDULO VENTAS Y CAJA: ventas por local y cierre de caja diario
+// con responsable asociado y diferencia calculada.
+// -------------------------------------------------------------
+
+enum PaymentMethod {
+  CASH
+  DEBIT_CARD
+  CREDIT_CARD
+  TRANSFER
+}
+
+enum SaleChannel {
+  IN_STORE
+  DELIVERY
+}
+
+/// Venta registrada en un local. tip_amount alimenta el fondo de propinas del
+/// período; cash_closing_id la amarra al cierre de caja correspondiente.
+model Sale {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  soldAt        DateTime      @map("sold_at") @db.Timestamptz(6)
+  paymentMethod PaymentMethod @map("payment_method")
+  channel       SaleChannel   @default(IN_STORE)
+  grossAmount   Decimal       @map("gross_amount") @db.Decimal(12, 2)
+  tipAmount     Decimal       @default(0) @map("tip_amount") @db.Decimal(12, 2)
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  store          Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId        String        @map("store_id") @db.Uuid
+  cashClosing    CashClosing?  @relation(fields: [cashClosingId], references: [id], onDelete: Restrict)
+  cashClosingId  String?       @map("cash_closing_id") @db.Uuid
+  registeredBy   User          @relation("RegisteredSales", fields: [registeredById], references: [id], onDelete: Restrict)
+  registeredById String        @map("registered_by_id") @db.Uuid
+
+  @@index([storeId, soldAt])
+  @@index([cashClosingId])
+  @@map("sales")
+}
+
+enum CashClosingStatus {
+  OPEN
+  CLOSED
+}
+
+/// Cierre de caja diario por local. El supervisor declara lo contado por cada
+/// medio de pago en cash_closing_lines (efectivo, débito, crédito,
+/// transferencia) y el sistema lo compara contra lo esperado según las ventas,
+/// calculando la diferencia por línea; la diferencia total del cierre es la
+/// suma de las líneas. opening_cash (fondo de caja) se suma a lo esperado de
+/// la línea CASH. Un solo cierre por local y día (restricción única compuesta).
+model CashClosing {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessDate DateTime          @map("business_date") @db.Date
+  openingCash  Decimal           @map("opening_cash") @db.Decimal(12, 2)
+  status       CashClosingStatus @default(OPEN)
+  notes        String?           @db.VarChar(255)
+  closedAt     DateTime?         @map("closed_at") @db.Timestamptz(6)
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store         Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId       String            @map("store_id") @db.Uuid
+  responsible   User              @relation("ResponsibleCashClosings", fields: [responsibleId], references: [id], onDelete: Restrict)
+  responsibleId String            @map("responsible_id") @db.Uuid
+  sales         Sale[]
+  lines         CashClosingLine[]
+
+  @@unique([storeId, businessDate])
+  @@map("cash_closings")
+}
+
+/// Desglose del cierre de caja por medio de pago: lo esperado según el sistema
+/// (suma de las ventas del medio, más el fondo de caja si es efectivo) contra
+/// lo declarado/contado por el supervisor, con su diferencia. Un medio de pago
+/// por línea (restricción única compuesta).
+model CashClosingLine {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentMethod  PaymentMethod @map("payment_method")
+  expectedAmount Decimal       @map("expected_amount") @db.Decimal(12, 2)
+  countedAmount  Decimal       @map("counted_amount") @db.Decimal(12, 2)
+  difference     Decimal       @db.Decimal(12, 2)
+
+  closing   CashClosing @relation(fields: [closingId], references: [id], onDelete: Cascade)
+  closingId String      @map("closing_id") @db.Uuid
+
+  @@unique([closingId, paymentMethod])
+  @@map("cash_closing_lines")
+}
+
+// -------------------------------------------------------------
+// MÓDULO INVENTARIO: productos, libro mayor de movimientos y
+// conteos físicos para comparar contra el consumo real (mermas).
+// -------------------------------------------------------------
+
+enum UnitOfMeasure {
+  UNIT
+  KG
+  G
+  L
+  ML
+  PACK
+}
+
+/// Insumo o producto controlado en inventario.
+model Product {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sku       String        @unique @db.VarChar(40)
+  name      String        @db.VarChar(120)
+  category  String?       @db.VarChar(60)
+  unit      UnitOfMeasure
+  minStock  Decimal       @default(0) @map("min_stock") @db.Decimal(12, 3)
+  isActive  Boolean       @default(true) @map("is_active")
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  movements  InventoryMovement[]
+  countLines InventoryCountLine[]
+
+  @@map("products")
+}
+
+enum InventoryMovementType {
+  PURCHASE
+  CONSUMPTION
+  WASTE
+  ADJUSTMENT
+}
+
+/// Libro mayor de movimientos de inventario: quantity siempre es positiva y el
+/// tipo define el signo (PURCHASE suma; CONSUMPTION y WASTE restan; ADJUSTMENT
+/// corrige). El stock de un producto es la suma firmada de sus movimientos.
+model InventoryMovement {
+  id          BigInt                @id @default(autoincrement())
+  type        InventoryMovementType
+  quantity    Decimal               @db.Decimal(12, 3)
+  reason      String?               @db.VarChar(255)
+  reference   String?               @db.VarChar(60)
+  occurredAt  DateTime              @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  store       Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId     String  @map("store_id") @db.Uuid
+  product     Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productId   String  @map("product_id") @db.Uuid
+  createdBy   User    @relation("CreatedInventoryMovements", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById String  @map("created_by_id") @db.Uuid
+
+  @@index([storeId, productId, occurredAt])
+  @@map("inventory_movements")
+}
+
+enum InventoryCountStatus {
+  OPEN
+  CONFIRMED
+}
+
+/// Toma de inventario físico de un local.
+model InventoryCount {
+  id        String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status    InventoryCountStatus @default(OPEN)
+  countedAt DateTime             @default(now()) @map("counted_at") @db.Timestamptz(6)
+  notes     String?              @db.VarChar(255)
+  createdAt DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store       Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId     String               @map("store_id") @db.Uuid
+  createdBy   User                 @relation("CreatedInventoryCounts", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById String               @map("created_by_id") @db.Uuid
+  lines       InventoryCountLine[]
+
+  @@map("inventory_counts")
+}
+
+/// Línea de conteo físico: compara el stock según sistema contra la cantidad
+/// contada, dejando registrada la diferencia (mermas detectadas).
+model InventoryCountLine {
+  id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  systemQuantity  Decimal @map("system_quantity") @db.Decimal(12, 3)
+  countedQuantity Decimal @map("counted_quantity") @db.Decimal(12, 3)
+  difference      Decimal @db.Decimal(12, 3)
+
+  count     InventoryCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  countId   String         @map("count_id") @db.Uuid
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productId String         @map("product_id") @db.Uuid
+
+  @@unique([countId, productId])
+  @@map("inventory_count_lines")
+}
+
+// -------------------------------------------------------------
+// LEY N°21.719: gestión de solicitudes de derechos de los titulares
+// (acceso, rectificación, cancelación, oposición y portabilidad),
+// con plazo legal de respuesta (due_at) y trazabilidad de resolución.
+// -------------------------------------------------------------
+
+enum DataRightType {
+  ACCESS
+  RECTIFICATION
+  CANCELLATION
+  OBJECTION
+  PORTABILITY
+}
+
+enum DataRightStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+}
+
+/// Solicitud de ejercicio de derechos del titular de datos personales.
+/// Una cancelación RESOLVED gatilla la anonimización del usuario
+/// (users.anonymized_at), no su borrado físico.
+model DataRightsRequest {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type        DataRightType
+  status      DataRightStatus @default(PENDING)
+  description String?
+  response    String?
+  requestedAt DateTime        @default(now()) @map("requested_at") @db.Timestamptz(6)
+  dueAt       DateTime        @map("due_at") @db.Date
+  resolvedAt  DateTime?       @map("resolved_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  subject      User    @relation("OwnDataRightsRequests", fields: [subjectId], references: [id], onDelete: Restrict)
+  subjectId    String  @map("subject_id") @db.Uuid
+  resolvedBy   User?   @relation("ResolvedDataRightsRequests", fields: [resolvedById], references: [id], onDelete: Restrict)
+  resolvedById String? @map("resolved_by_id") @db.Uuid
+
+  @@index([status, dueAt])
+  @@map("data_rights_requests")
+}

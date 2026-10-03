@@ -33,18 +33,56 @@ services:
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-cambiar-en-produccion}
       DB_NAME: ${DB_NAME:-subway_gestion}
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-cambiar-en-produccion}@db:5432/${DB_NAME:-subway_gestion}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-cambiar-en-produccion}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
     ports:
       - "3001:3001"
     depends_on:
       db:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3001/ > /dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Aplica las migraciones de Prisma una sola vez antes de levantar el backend
+  migrate:
+    build:
+      context: ./backend
+      target: deps
+    container_name: subway_migrate
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-cambiar-en-produccion}@db:5432/${DB_NAME:-subway_gestion}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: npx prisma migrate deploy
+
+  # Carga los datos base (roles y usuario administrador) tras las migraciones.
+  # El seed es idempotente: no duplica roles ni sobrescribe la contraseña del
+  # administrador si ya existe.
+  seed:
+    build:
+      context: ./backend
+      target: deps
+    container_name: subway_seed
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-cambiar-en-produccion}@db:5432/${DB_NAME:-subway_gestion}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@moi-food.cl}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin-cambiar-en-produccion}
+      ADMIN_FIRST_NAME: ${ADMIN_FIRST_NAME:-Administrador}
+      ADMIN_LAST_NAME: ${ADMIN_LAST_NAME:-Moi-food}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: npx prisma db seed
 
   frontend:
     build:
