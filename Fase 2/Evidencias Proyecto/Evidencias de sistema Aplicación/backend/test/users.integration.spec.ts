@@ -37,6 +37,16 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
   let adminToken: string;
 
   async function cleanup(): Promise<void> {
+    // Primero la auditoría que generan estos flujos (SPRINT-1-T13): borrar
+    // los usuarios deja userId en NULL (SetNull) y se perdería el filtro.
+    await prisma.auditLog.deleteMany({
+      where: {
+        OR: [
+          { user: { email: { endsWith: DOMAIN } } },
+          { detail: { path: ['email'], string_ends_with: DOMAIN } },
+        ],
+      },
+    });
     // Borrar los usuarios elimina sus refresh tokens en cascada.
     await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
     await prisma.store.deleteMany({
