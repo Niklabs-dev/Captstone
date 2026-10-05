@@ -120,6 +120,26 @@ Endpoints exclusivos del rol `ADMINISTRADOR` (403 para el resto):
 
 El access token ya emitido sigue vigente hasta su expiración (`JWT_EXPIRES_IN`).
 
+## Consulta de auditoría
+
+Endpoint exclusivo del rol `ADMINISTRADOR` (403 para el resto), de solo lectura:
+
+| Endpoint | Descripción |
+| --- | --- |
+| `GET /audit-logs` | Lista las operaciones auditadas con usuario responsable, fecha/hora, local y tipo (`action`), de la más reciente a la más antigua. Filtros opcionales: `storeId` (UUID), `from` y `to` (`YYYY-MM-DD`, ambos inclusive). Paginación con `limit` (1–200, por defecto 50) y `offset`; la respuesta trae `items` y `total`. |
+
+Las fechas `from`/`to` son días de negocio en la hora de Chile
+(`America/Santiago`, con sus cambios de horario): `?from=2026-10-05&to=2026-10-05`
+incluye una operación registrada a las 23:30 del 05-10 en Chile aunque en UTC
+ya sea el 06-10. Sin `storeId` se incluyen también las operaciones globales
+(sin local, ej. un login fallido); con `storeId`, solo las de ese local.
+
+```bash
+# operaciones del 01 al 05 de octubre en un local, de a 20
+curl "http://localhost:3001/audit-logs?storeId=<uuid>&from=2026-10-01&to=2026-10-05&limit=20" \
+  -H "Authorization: Bearer <access_token>"
+```
+
 ## Documentación interactiva (Swagger / OpenAPI)
 
 La API genera su documentación OpenAPI con `@nestjs/swagger`:
