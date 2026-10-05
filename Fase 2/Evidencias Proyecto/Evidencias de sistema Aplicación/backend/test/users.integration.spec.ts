@@ -9,6 +9,7 @@ import { ROLE, type RoleCode } from '../src/auth/constants/roles.constants.js';
 import type { JwtPayload } from '../src/auth/types/auth.types.js';
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import type { UserResponse } from '../src/users/types/users.types.js';
+import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
 
 type App = Parameters<typeof request>[0];
 
@@ -37,15 +38,14 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
   let adminToken: string;
 
   async function cleanup(): Promise<void> {
-    // Primero la auditoría que generan estos flujos (SPRINT-1-T13): borrar
-    // los usuarios deja userId en NULL (SetNull) y se perdería el filtro.
-    await prisma.auditLog.deleteMany({
-      where: {
-        OR: [
-          { user: { email: { endsWith: DOMAIN } } },
-          { detail: { path: ['email'], string_ends_with: DOMAIN } },
-        ],
-      },
+    // Primero la auditoría que generan estos flujos (SPRINT-1-T13): con FK RESTRICT (SPRINT-1-T15) no se pueden borrar usuarios ni locales
+    // que tengan registros, y estos se purgan con el helper porque audit_logs
+    // es inmutable.
+    await purgeTestAuditLogs(prisma, {
+      OR: [
+        { user: { email: { endsWith: DOMAIN } } },
+        { detail: { path: ['email'], string_ends_with: DOMAIN } },
+      ],
     });
     // Borrar los usuarios elimina sus refresh tokens en cascada.
     await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });

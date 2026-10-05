@@ -140,6 +140,16 @@ curl "http://localhost:3001/audit-logs?storeId=<uuid>&from=2026-10-01&to=2026-10
   -H "Authorization: Bearer <access_token>"
 ```
 
+### Inmutabilidad del registro
+
+Una operación registrada no se puede modificar ni eliminar (criterio 2 de E1-H2):
+
+- **API:** no existe ninguna ruta de escritura sobre `/audit-logs` (`PUT`, `PATCH` y `DELETE` responden 404).
+- **Base de datos:** la migración `auditoria_inmutable` instala triggers que rechazan `UPDATE`, `DELETE` y `TRUNCATE` sobre `audit_logs` para cualquier rol (incluido el dueño de la tabla) y cualquier vía (Prisma, SQL directo o cascadas), con el error *"El registro de auditoría es inmutable"*.
+- **Llaves foráneas:** `audit_logs.user_id` y `audit_logs.store_id` son `ON DELETE RESTRICT`: un usuario o local con historial no se puede borrar. Para el derecho de cancelación (Ley N°21.719) el usuario se anonimiza (`anonymized_at`), lo que conserva la fila y su trazabilidad.
+
+Los triggers solo se omiten con `session_replication_role = replica`, que exige superusuario (mantenimiento de la base de datos). Los tests de integración que ejercitan la API por HTTP lo usan para purgar sus propios registros (`test/helpers/audit-cleanup.ts`), por lo que `TEST_DATABASE_URL` debe conectarse con un superusuario, como el `postgres` de docker compose.
+
 ## Documentación interactiva (Swagger / OpenAPI)
 
 La API genera su documentación OpenAPI con `@nestjs/swagger`:
@@ -173,6 +183,14 @@ $ npm run test:e2e
 
 # test coverage
 $ npm run test:cov
+```
+
+Los tests de integración corren contra PostgreSQL real y se omiten si no se
+define `TEST_DATABASE_URL` (debe ser un superusuario; ver
+[Inmutabilidad del registro](#inmutabilidad-del-registro)):
+
+```bash
+TEST_DATABASE_URL="postgresql://postgres:cambiar-en-produccion@localhost:5433/subway_gestion" npm run test
 ```
 
 ## Deployment

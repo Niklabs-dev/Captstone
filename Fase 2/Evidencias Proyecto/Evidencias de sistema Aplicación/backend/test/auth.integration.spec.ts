@@ -7,6 +7,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import type { AuthUser } from '../src/auth/types/auth.types.js';
+import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
 
 type App = Parameters<typeof request>[0];
 
@@ -117,18 +118,17 @@ describe.skipIf(!databaseUrl)('Autenticación JWT (SPRINT-1-T06)', () => {
   });
 
   // Limpia los datos de prueba. Primero la auditoría que generan los logins
-  // (SPRINT-1-T13): borrar los usuarios deja userId en NULL (SetNull) y se
-  // perdería el filtro por actor. Los refresh tokens se borran en cascada.
+  // (SPRINT-1-T13): con FK RESTRICT (SPRINT-1-T15) no se pueden borrar
+  // usuarios ni locales que tengan registros, y estos se purgan con el helper
+  // porque audit_logs es inmutable. Los refresh tokens se borran en cascada.
   async function limpiar(): Promise<void> {
-    await prisma.auditLog.deleteMany({
-      where: {
-        OR: [
-          { user: { email: { in: [EMAIL, EMAIL_INACTIVO] } } },
-          { detail: { path: ['email'], equals: EMAIL } },
-          { detail: { path: ['email'], equals: EMAIL_INACTIVO } },
-          { detail: { path: ['email'], equals: 'no-existe@moi-food.cl' } },
-        ],
-      },
+    await purgeTestAuditLogs(prisma, {
+      OR: [
+        { user: { email: { in: [EMAIL, EMAIL_INACTIVO] } } },
+        { detail: { path: ['email'], equals: EMAIL } },
+        { detail: { path: ['email'], equals: EMAIL_INACTIVO } },
+        { detail: { path: ['email'], equals: 'no-existe@moi-food.cl' } },
+      ],
     });
     await prisma.user.deleteMany({
       where: { email: { in: [EMAIL, EMAIL_INACTIVO] } },
