@@ -18,6 +18,15 @@ function readMigrations(): string {
     .join('\n');
 }
 
+// SQL de la única migración cuyo nombre termina en el sufijo indicado.
+function readMigration(suffix: string): string {
+  const dirs = readdirSync(migrationsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith(suffix))
+    .map((entry) => entry.name);
+  expect(dirs).toHaveLength(1);
+  return readFileSync(join(migrationsDir, dirs[0], 'migration.sql'), 'utf-8');
+}
+
 describe('Esquema de base de datos (SPRINT-1-T04)', () => {
   it('el schema de Prisma es válido', () => {
     const output = execFileSync('npx', ['prisma', 'validate'], {
@@ -79,13 +88,25 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(sql).toContain('"counted_amount" DECIMAL(12,2) NOT NULL');
   });
 
-  it('protege la trazabilidad: FKs con Restrict y auditoría con SetNull', () => {
+  it('protege la trazabilidad: FKs con Restrict', () => {
     const sql = readMigrations();
     expect(sql).toContain('ON DELETE RESTRICT');
-    // La auditoría sobrevive a la anonimización de usuarios.
-    expect(sql).toContain(
-      'ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL',
-    );
+  });
+
+  it('hace inmutable el registro de auditoría (SPRINT-1-T15)', () => {
+    const sql = readMigration('auditoria_inmutable');
+    // Triggers que rechazan UPDATE/DELETE por fila y TRUNCATE por sentencia.
+    expect(sql).toContain('BEFORE UPDATE OR DELETE ON "audit_logs"');
+    expect(sql).toContain('FOR EACH ROW EXECUTE FUNCTION');
+    expect(sql).toContain('BEFORE TRUNCATE ON "audit_logs"');
+    // Las FK ya no ponen en NULL al responsable ni al local al borrarlos.
+    for (const fk of ['user_id', 'store_id']) {
+      expect(sql).toContain(
+        `ADD CONSTRAINT "audit_logs_${fk}_fkey" FOREIGN KEY ("${fk}")`,
+      );
+    }
+    expect(sql).not.toContain('ON DELETE SET NULL');
+    expect(sql.match(/ON DELETE RESTRICT/g)).toHaveLength(2);
   });
 
   it('soporta el cumplimiento de la Ley N°21.719', () => {

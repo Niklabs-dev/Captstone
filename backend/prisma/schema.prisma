@@ -143,10 +143,12 @@ model AuditLog {
   userAgent  String?  @map("user_agent") @db.VarChar(255)
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  // SetNull: el registro de auditoría sobrevive a la anonimización del usuario.
-  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // Restrict: el registro es inmutable (SPRINT-1-T15, triggers en la migración
+  // auditoria_inmutable), por lo que un usuario o local con historial no se
+  // borra; la Ley N°21.719 se cumple anonimizando (anonymizedAt), que conserva la fila.
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
   userId     String?  @map("user_id") @db.Uuid
-  store      Store?   @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  store      Store?   @relation(fields: [storeId], references: [id], onDelete: Restrict)
   storeId    String?  @map("store_id") @db.Uuid
 
   @@index([storeId, createdAt])

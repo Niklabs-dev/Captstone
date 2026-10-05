@@ -10,6 +10,7 @@ import { ROLE } from '../src/auth/constants/roles.constants.js';
 import type { JwtPayload } from '../src/auth/types/auth.types.js';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import type { UserResponse } from '../src/users/types/users.types.js';
+import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
 
 type App = Parameters<typeof request>[0];
 
@@ -45,9 +46,10 @@ describe.skipIf(!databaseUrl)('Interceptor de auditoría (SPRINT-1-T13)', () => 
   };
 
   async function cleanup(): Promise<void> {
-    // Primero la auditoría: borrar los usuarios deja userId en NULL (SetNull)
-    // y se perdería el filtro por actor.
-    await prisma.auditLog.deleteMany({ where: scopedWhere });
+    // Primero la auditoría: con FK RESTRICT (SPRINT-1-T15) no se pueden borrar usuarios ni locales
+    // que tengan registros, y estos se purgan con el helper porque audit_logs
+    // es inmutable.
+    await purgeTestAuditLogs(prisma, scopedWhere);
     // Borrar los usuarios elimina sus refresh tokens en cascada.
     await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
     await prisma.store.deleteMany({
