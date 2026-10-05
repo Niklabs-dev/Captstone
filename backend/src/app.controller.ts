@@ -16,7 +16,7 @@ export class AppController {
     description: 'El servicio responde correctamente.',
     type: String,
   })
-  getHello(): string {
-    return this.appService.getHello();
+  getStatus(): string {
+    return this.appService.getStatus();
   }
 }
