@@ -12,6 +12,7 @@ import type {
 import { ROLE, type RoleCode } from '../src/auth/constants/roles.constants.js';
 import type { JwtPayload } from '../src/auth/types/auth.types.js';
 import { PrismaClient } from '../src/generated/prisma/client.js';
+import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
 
 type App = Parameters<typeof request>[0];
 
@@ -46,16 +47,15 @@ describe.skipIf(!databaseUrl)('Consulta de auditoría (SPRINT-1-T14)', () => {
   const ids: Record<string, string> = {};
 
   async function cleanup(): Promise<void> {
-    // Primero la auditoría: borrar locales y usuarios deja sus FK en NULL
-    // (SetNull) y se perdería el filtro.
-    await prisma.auditLog.deleteMany({
-      where: {
-        OR: [
-          { store: { name: { startsWith: STORE_PREFIX } } },
-          { user: { email: { endsWith: DOMAIN } } },
-          { detail: { path: ['email'], string_ends_with: DOMAIN } },
-        ],
-      },
+    // Primero la auditoría: con FK RESTRICT (SPRINT-1-T15) no se pueden borrar usuarios ni locales
+    // que tengan registros, y estos se purgan con el helper porque audit_logs
+    // es inmutable.
+    await purgeTestAuditLogs(prisma, {
+      OR: [
+        { store: { name: { startsWith: STORE_PREFIX } } },
+        { user: { email: { endsWith: DOMAIN } } },
+        { detail: { path: ['email'], string_ends_with: DOMAIN } },
+      ],
     });
     await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
     await prisma.store.deleteMany({
@@ -370,5 +370,27 @@ describe.skipIf(!databaseUrl)('Consulta de auditoría (SPRINT-1-T14)', () => {
     const antes = await prisma.auditLog.count(delAdmin);
     await listAuditLogs(`?storeId=${storeA.id}`).expect(200);
     expect(await prisma.auditLog.count(delAdmin)).toBe(antes);
+  });
+
+  // SPRINT-1-T15: la API no expone ninguna vía para alterar el registro.
+  it('no expone rutas para modificar o eliminar registros, ni siquiera al administrador', async () => {
+    const id = ids.loginA10;
+    const server = app.getHttpServer();
+    const auth = `Bearer ${adminToken}`;
+
+    for (const path of ['/audit-logs', `/audit-logs/${id}`]) {
+      await request(server).put(path).set('Authorization', auth).expect(404);
+      await request(server)
+        .patch(path)
+        .set('Authorization', auth)
+        .send({ action: 'HACK' })
+        .expect(404);
+      await request(server).delete(path).set('Authorization', auth).expect(404);
+    }
+
+    const log = await prisma.auditLog.findUniqueOrThrow({
+      where: { id: BigInt(id) },
+    });
+    expect(log.action).toBe(AUDIT_ACTION.USER_LOGIN);
   });
 });
