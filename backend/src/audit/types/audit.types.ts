@@ -53,3 +53,42 @@ export interface AuditEvent {
   ipAddress: string | null;
   userAgent: string | null;
 }
+
+// Usuario responsable de una operación auditada (SPRINT-1-T14).
+export interface AuditLogUserSummary {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+}
+
+// Local donde ocurrió la operación auditada (SPRINT-1-T14).
+export interface AuditLogStoreSummary {
+  id: string;
+  name: string;
+}
+
+// Registro de auditoría tal como lo devuelve la API de consulta.
+export interface AuditLogResponse {
+  // BIGSERIAL serializado como texto: JSON no representa BigInt.
+  id: string;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  detail: Record<string, unknown> | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: Date;
+  // null en logins fallidos (actor no identificado) o usuarios eliminados.
+  user: AuditLogUserSummary | null;
+  // null en operaciones globales (sin local asociado).
+  store: AuditLogStoreSummary | null;
+}
+
+// Página de resultados de la consulta de auditoría.
+export interface AuditLogPage {
+  items: AuditLogResponse[];
+  total: number;
+  limit: number;
+  offset: number;
+}
