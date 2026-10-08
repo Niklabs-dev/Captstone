@@ -97,6 +97,7 @@ model User {
   auditLogs                  AuditLog[]
   subjectDocuments           Document[]           @relation("SubjectDocuments")
   createdDocuments           Document[]           @relation("CreatedDocuments")
+  dtRegisteredDocuments      Document[]           @relation("DtRegisteredDocuments")
   uploadedVersions           DocumentVersion[]    @relation("UploadedVersions")
   calculatedTipPools         TipPool[]            @relation("CalculatedTipPools")
   confirmedTipPools          TipPool[]            @relation("ConfirmedTipPools")
@@ -162,18 +163,21 @@ model AuditLog {
 // control de versiones y conservación por 5 años (art. 9 bis CT).
 // -------------------------------------------------------------
 
-/// Tipo de documento laboral (CONTRATO, ANEXO, FINIQUITO, LIQUIDACION, etc.).
+/// Tipo de documento laboral (CONTRATO, ANEXO, PACTO, FINIQUITO, LIQUIDACION, etc.).
 /// retention_years refleja la conservación exigida por la normativa (5 años).
+/// requires_dt_registration marca los tipos que deben registrarse en la
+/// Dirección del Trabajo dentro de 15 días desde su celebración (SPRINT-2-T03).
 model DocumentType {
-  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  code               String   @unique @db.VarChar(40)
-  name               String   @db.VarChar(100)
-  description        String?  @db.VarChar(255)
-  requiresExpiration Boolean  @default(false) @map("requires_expiration")
-  retentionYears     Int      @default(5) @map("retention_years")
-  isActive           Boolean  @default(true) @map("is_active")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                   String   @unique @db.VarChar(40)
+  name                   String   @db.VarChar(100)
+  description            String?  @db.VarChar(255)
+  requiresExpiration     Boolean  @default(false) @map("requires_expiration")
+  requiresDtRegistration Boolean  @default(false) @map("requires_dt_registration")
+  retentionYears         Int      @default(5) @map("retention_years")
+  isActive               Boolean  @default(true) @map("is_active")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   documents Document[]
 
@@ -188,17 +192,29 @@ enum DocumentStatus {
 
 /// Documento laboral. subject_user_id identifica al trabajador dueño del
 /// documento (NULL para documentos del local, ej. permiso sanitario).
+/// issued_at es la fecha de celebración (firma) del documento.
 /// expires_at permite alertas de vencimiento; nunca se borra físicamente
 /// durante el plazo de conservación legal.
+/// Plazos (SPRINT-2-T03):
+/// - retain_until: fecha hasta la que debe conservarse (art. 9 bis CT), fijada
+///   al crear el documento como issued_at (o la fecha de carga) + retention_years
+///   del tipo. Es una foto: no cambia si luego se modifica el tipo.
+/// - dt_registration_due_at: vencimiento del plazo de 15 días para registrar el
+///   documento en la Dirección del Trabajo; NULL si su tipo no lo exige.
+/// - dt_registered_at / dt_registered_by_id: cuándo y quién marcó el registro en
+///   la DT como realizado; mientras sea NULL la alerta sigue activa.
 model Document {
-  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  title            String         @db.VarChar(160)
-  description      String?
-  status           DocumentStatus @default(ACTIVE)
-  issuedAt         DateTime?      @map("issued_at") @db.Date
-  expiresAt        DateTime?      @map("expires_at") @db.Date
-  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title               String         @db.VarChar(160)
+  description         String?
+  status              DocumentStatus @default(ACTIVE)
+  issuedAt            DateTime?      @map("issued_at") @db.Date
+  expiresAt           DateTime?      @map("expires_at") @db.Date
+  retainUntil         DateTime       @map("retain_until") @db.Date
+  dtRegistrationDueAt DateTime?      @map("dt_registration_due_at") @db.Date
+  dtRegisteredAt      DateTime?      @map("dt_registered_at") @db.Timestamptz(6)
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   store            Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
   storeId          String         @map("store_id") @db.Uuid
@@ -208,6 +224,8 @@ model Document {
   documentTypeId   String         @map("document_type_id") @db.Uuid
   createdBy        User           @relation("CreatedDocuments", fields: [createdById], references: [id], onDelete: Restrict)
   createdById      String         @map("created_by_id") @db.Uuid
+  dtRegisteredBy   User?          @relation("DtRegisteredDocuments", fields: [dtRegisteredById], references: [id], onDelete: Restrict)
+  dtRegisteredById String?        @map("dt_registered_by_id") @db.Uuid
   currentVersion   DocumentVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
   currentVersionId String?          @unique @map("current_version_id") @db.Uuid
   versions         DocumentVersion[] @relation("DocumentVersions")
@@ -215,6 +233,8 @@ model Document {
   @@index([storeId, status])
   @@index([subjectUserId])
   @@index([expiresAt])
+  @@index([dtRegistrationDueAt])
+  @@index([retainUntil])
   @@map("documents")
 }
 
