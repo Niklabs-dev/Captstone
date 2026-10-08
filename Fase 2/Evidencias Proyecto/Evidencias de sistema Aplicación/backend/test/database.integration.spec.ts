@@ -354,9 +354,9 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
       await withinRollback(async (tx) => {
         const { user, store } = await crearUsuarioBase(tx);
         const tipo = await tx.documentType.upsert({
-          where: { code: 'FINIQUITO' },
+          where: { code: 'LIQUIDACION' },
           update: {},
-          create: { code: 'FINIQUITO', name: 'Finiquito' },
+          create: { code: 'LIQUIDACION', name: 'Liquidación de sueldo' },
         });
         await expect(
           tx.document.create({

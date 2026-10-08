@@ -94,7 +94,7 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 | Plazo | Columnas | Regla |
 | --- | --- | --- |
 | Conservación (art. 9 bis CT) | `documents.retain_until` | Se fija al crear el documento: `issued_at` (o el día de carga, hora de Chile) + `document_types.retention_years`. Es una foto: no cambia si luego se modifica el tipo. Base del bloqueo de eliminación (SPRINT-2-T07). |
-| Registro en la Dirección del Trabajo | `document_types.requires_dt_registration`, `documents.dt_registration_due_at` | Los tipos marcados (`CONTRATO` y `ANEXO`) tienen 15 días desde su celebración para registrarse en la DT. `dt_registration_due_at` es `NULL` si el tipo no lo exige. |
+| Registro en la Dirección del Trabajo | `document_types.requires_dt_registration`, `documents.dt_registration_due_at` | Los tipos marcados (`CONTRATO`, `ANEXO` y `FINIQUITO`) tienen 15 días desde su celebración para registrarse en la DT. `dt_registration_due_at` es `NULL` si el tipo no lo exige. |
 | Registro en la DT realizado | `documents.dt_registered_at`, `documents.dt_registered_by_id` | Mientras `dt_registered_at` sea `NULL`, la alerta sigue activa (SPRINT-2-T08). |
 
 Dos `CHECK` mantienen la consistencia: un documento solo se marca como

@@ -49,8 +49,8 @@ export const BASE_ROLES = [
 // Tipos de documento laboral del Gestor Documental. La conservación de 5 años
 // corresponde al art. 9 bis del Código del Trabajo; requiresExpiration activa
 // las alertas de vencimiento sobre documents.expires_at y requiresDtRegistration
-// las de registro en la Dirección del Trabajo dentro de 15 días (contratos y
-// sus modificaciones; SPRINT-2-T03).
+// las de registro en la Dirección del Trabajo dentro de 15 días (contratos, sus
+// modificaciones y su término; SPRINT-2-T03).
 export const DOCUMENT_TYPES = [
   {
     code: 'CONTRATO',
@@ -83,7 +83,7 @@ export const DOCUMENT_TYPES = [
     description:
       'Finiquito ratificado ante notario al término de la relación laboral.',
     requiresExpiration: false,
-    requiresDtRegistration: false,
+    requiresDtRegistration: true,
     retentionYears: 5,
   },
   {

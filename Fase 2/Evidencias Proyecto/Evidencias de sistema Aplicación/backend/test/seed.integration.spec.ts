@@ -132,8 +132,8 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
         .filter((t) => t.requiresDtRegistration)
         .map((t) => t.code)
         .sort();
-      // Contratos y sus modificaciones; el resto no se registra en la DT.
-      expect(conRegistro).toEqual(['ANEXO', 'CONTRATO']);
+      // Contratos, sus modificaciones y su término; el resto no se registra en la DT.
+      expect(conRegistro).toEqual(['ANEXO', 'CONTRATO', 'FINIQUITO']);
       // Los pactos laborales (E1-H3) existen como tipo de documento.
       expect(tipos.map((t) => t.code)).toContain('PACTO');
     });
