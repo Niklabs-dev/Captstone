@@ -9,13 +9,13 @@ export default async function DashboardPage(): Promise<ReactElement> {
     throw new Error(session.message);
   }
   return (
-    <main className="min-h-screen bg-slate-100 px-5 py-10 text-slate-900">
-      <section className="mx-auto max-w-xl rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
-        <p className="text-xs font-bold uppercase tracking-widest text-emerald-700">
+    <main className="min-h-screen bg-tint px-5 py-10 text-ink">
+      <section className="mx-auto max-w-xl rounded-2xl border border-line bg-bg p-7 ">
+        <p className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-salmon-ink">
           Moi-food · Gestión interna
         </p>
         <h1 className="my-3 text-2xl font-bold">Bienvenido al sistema</h1>
-        <p className="mb-6 text-slate-600">
+        <p className="mb-6 text-ink2">
           Sesión iniciada como {session.data.email}.
         </p>
         <SessionActions />

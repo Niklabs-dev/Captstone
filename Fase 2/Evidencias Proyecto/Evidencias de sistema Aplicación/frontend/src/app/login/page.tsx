@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import Image from 'next/image';
 import { redirect } from 'next/navigation';
 import type { ReactElement } from 'react';
 import { LoginForm } from '@/components/LoginForm';
@@ -14,18 +15,31 @@ export default async function LoginPage({
   const params = await searchParams;
   const canRefresh = Boolean((await cookies()).get(REFRESH_COOKIE)?.value);
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-5 py-10 text-slate-900">
+    <main className="flex min-h-screen items-center justify-center bg-tint px-5 py-10 text-ink">
       <section
-        className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-7 shadow-sm"
+        className="w-full max-w-[360px] rounded-2xl border border-line bg-bg p-7 "
         aria-labelledby="login-title"
       >
-        <p className="mb-2 text-xs font-bold uppercase tracking-widest text-emerald-700">
-          Moi-food · Gestión interna
-        </p>
-        <h1 id="login-title" className="mb-2 text-2xl font-bold">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <Image
+            src="/logo.png"
+            alt=""
+            width={46}
+            height={46}
+            className="mb-3 rounded-xl border border-line"
+            priority
+          />
+          <p className="text-[17px] font-extrabold tracking-tight">
+            Moi<span className="text-salmon-deep">Food</span>
+          </p>
+          <p className="mt-1 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">
+            Gestión interna
+          </p>
+        </div>
+        <h1 id="login-title" className="mb-2 text-lg font-bold">
           Iniciar sesión
         </h1>
-        <p className="mb-7 text-sm text-slate-600">
+        <p className="mb-7 text-sm text-ink2">
           Ingresa con tu cuenta para acceder al sistema.
         </p>
         <LoginForm
