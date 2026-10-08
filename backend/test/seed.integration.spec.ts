@@ -121,6 +121,24 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
     });
   });
 
+  it('marca los tipos que deben registrarse en la DT dentro de 15 días (SPRINT-2-T03)', async () => {
+    await withinRollback(async (tx) => {
+      await seedDatabase(tx, opciones);
+
+      const tipos = await tx.documentType.findMany({
+        where: { code: { in: DOCUMENT_TYPES.map((t) => t.code) } },
+      });
+      const conRegistro = tipos
+        .filter((t) => t.requiresDtRegistration)
+        .map((t) => t.code)
+        .sort();
+      // Contratos, sus modificaciones y su término; el resto no se registra en la DT.
+      expect(conRegistro).toEqual(['ANEXO', 'CONTRATO', 'FINIQUITO']);
+      // Los pactos laborales (E1-H3) existen como tipo de documento.
+      expect(tipos.map((t) => t.code)).toContain('PACTO');
+    });
+  });
+
   it('es idempotente: no duplica roles ni crea un segundo administrador', async () => {
     await withinRollback(async (tx) => {
       const primera = await seedDatabase(tx, opciones);
