@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "commonjs", "moduleResolution": "node",
+    "strict": true, "esModuleInterop": true, "skipLibCheck": true,
+    "outDir": ".test-build", "types": ["node"]
+  },
+  "include": ["src/lib/auth.ts", "src/lib/auth-backend.ts", "src/lib/*.test.ts"]
+}
