@@ -34,3 +34,46 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## SPRINT-1-T10: administración de usuarios
+
+Vista: `/admin/usuarios`. Crear, listar, buscar, filtrar por rol, local y estado,
+y desactivar cuentas con confirmación. Solo el administrador puede acceder.
+La sesión `mf_access` se verifica mediante NestJS; ni el JWT ni las contraseñas
+guardadas se exponen en las respuestas al navegador. Las mutaciones requieren
+el origen del frontend y el backend conserva la auditoría de las operaciones.
+
+Esta rama parte de `main` y depende del login de SPRINT-1-T09 (PR #16) para
+la navegación completa. No incluye el login ni la redirección por rol de T11.
+
+Configuración del servidor: `BACKEND_INTERNAL_URL` y, opcionalmente,
+`USER_MANAGEMENT_STORES` (ver `.env.example`). Como el backend todavía no expone
+un catálogo de locales, se combinan los locales de usuarios existentes con los
+locales configurados. Los IDs deben corresponder a locales activos en PostgreSQL;
+el backend verifica su existencia. Sin locales disponibles solo se pueden crear
+administradores y contadores. No se inventan IDs ni se muestran campos técnicos
+para asignar un local.
+
+```powershell
+npm ci
+npm run lint
+npm run format:check
+npm run test:users
+npm run build
+npm run test:users:integration
+npx playwright install chromium
+```
+
+Las pruebas de navegador usan un proyecto Docker exclusivo y datos ficticios.
+Configura `TEST_USERS_ADMIN_EMAIL` y `TEST_USERS_ADMIN_PASSWORD` con las credenciales
+del seed de desarrollo y ejecuta desde `frontend/`:
+
+```powershell
+./scripts/test-users.ps1
+```
+
+El script usa puertos 3102 (frontend), 3103 (backend) y 5434 (PostgreSQL), crea
+un local ficticio y ejecuta Playwright en escritorio y móvil. Las cuentas de
+prueba quedan desactivadas; el volumen y la auditoría se conservan exclusivamente
+en `capstone-sprint1-t10` para inspección. No ejecutar contra datos de producción.
+Las capturas y trazas se guardan en `test-results/`, fuera de Git.

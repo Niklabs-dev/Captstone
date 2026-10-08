@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:users": "tsc -p tsconfig.users-test.json && node --test .users-test-build/users.test.js",
+    "test:users:integration": "tsc -p tsconfig.users-test.json && node --test .users-test-build/users-http.integration.test.js",
+    "test:users:e2e": "playwright test --config playwright.users.config.ts",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"*.{ts,mjs}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.{ts,mjs}\""
   },
@@ -16,6 +19,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

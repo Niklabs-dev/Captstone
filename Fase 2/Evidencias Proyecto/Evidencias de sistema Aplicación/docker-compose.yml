@@ -91,6 +91,9 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
     container_name: subway_frontend
     restart: unless-stopped
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:3001
+      USER_MANAGEMENT_STORES: ${USER_MANAGEMENT_STORES:-[]}
     ports:
       - "3000:3000"
     depends_on:

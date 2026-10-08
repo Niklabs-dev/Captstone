@@ -1,0 +1,26 @@
+@import 'tailwindcss';
+
+@theme inline {
+  --font-u-mono: var(--font-users-mono);
+}
+
+/* Paleta del mockup de Fase 1, aislada para integrar SPRINT-1-T10 sin alterar el login. */
+@theme {
+  --color-u-bg: #ffffff;
+  --color-u-tint: #fef4ef;
+  --color-u-tint2: #fce9df;
+  --color-u-line: #f3e4db;
+  --color-u-line2: #ead5c9;
+  --color-u-salmon: #ff8b52;
+  --color-u-salmon-deep: #e96f33;
+  --color-u-salmon-ink: #b44e1b;
+  --color-u-ink: #2e2320;
+  --color-u-ink2: #5c4a41;
+  --color-u-muted: #97807a;
+  --color-u-ok: #2f9e6e;
+  --color-u-ok-bg: #e9f6f0;
+  --color-u-crit: #d9503c;
+  --color-u-crit-bg: #fbebe8;
+  --color-u-info: #4e7fbf;
+  --color-u-info-bg: #ecf2fa;
+}
