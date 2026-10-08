@@ -72,10 +72,16 @@ ya integrado. Los módulos auth/users no cambian respecto de T09.
 Playwright desactivó sus seis cuentas ficticias al finalizar.
 Agregar Playwright no modificó ninguna versión de dependencias existentes.
 
-PR y hash: se registran al publicar la entrega.
+PR: [#19](https://github.com/Niklabs-dev/Captstone/pull/19).
+Commit de implementación: `6104c04`.
+Rama: `feat/sprint-1-t11-portal-trabajador`.
+Revisor solicitado: `Niklabs-dev`.
+La rama se creó desde main y se reubicó sobre T09 para que el diff del PR
+contenga exclusivamente T11. El frontend no cambió al reubicarla.
+Integrar primero #16 y luego cambiar la base de #19 a main.
 
 ## Seguimiento
 
-Preparada para revisión. No se modificó Notion: la integración no tiene acceso a la página
+En revisión (registro local). No se modificó Notion: la integración no tiene acceso a la página
 compartida de Capstone. El registro local documenta el resultado y el hash.
 Solo se marcará Hecho cuando el usuario confirme la revisión.
