@@ -94,6 +94,7 @@ services:
     environment:
       BACKEND_INTERNAL_URL: http://backend:3001
       AUTH_REFRESH_COOKIE_MAX_AGE: ${AUTH_REFRESH_COOKIE_MAX_AGE:-604800}
+      AUDIT_STORES: ${AUDIT_STORES:-[]}
     ports:
       - "3000:3000"
     depends_on:

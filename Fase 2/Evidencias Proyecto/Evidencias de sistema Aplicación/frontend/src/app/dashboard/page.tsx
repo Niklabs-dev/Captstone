@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import type { ReactElement } from 'react';
 import { getSession } from '@/lib/session';
 import { SessionActions } from '@/components/SessionActions';
@@ -21,6 +22,15 @@ export default async function DashboardPage(): Promise<ReactElement> {
         <p className="mb-6 text-ink2">
           Sesión iniciada como {session.data.email}.
         </p>
+        {session.data.role === 'ADMINISTRADOR' && (
+          <Link
+            href="/admin/auditoria"
+            prefetch={false}
+            className="mb-6 inline-block rounded-lg border border-line2 px-4 py-2 text-sm font-semibold text-salmon-ink hover:bg-tint"
+          >
+            Consultar auditoría
+          </Link>
+        )}
         <SessionActions />
       </section>
     </main>

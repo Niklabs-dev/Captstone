@@ -78,6 +78,57 @@ No ejecutar estas pruebas contra producción.
 
 Detalle de alcance, dependencia y validación: [SPRINT-1-T11](docs/SPRINT-1-T11.md).
 
+## Auditoría — SPRINT-1-T16
+
+El administrador puede abrir «Consultar auditoría» desde el dashboard o
+visitar `/admin/auditoria`. La tabla muestra responsable, operación,
+fecha/hora de Chile, local, módulo e identificador del registro.
+Los filtros por local y fechas se conservan en la URL y al paginar.
+Desde/hasta son días inclusivos de Chile; se pueden dejar vacíos.
+La vista es de solo lectura. No se ofrecen acciones de edición ni eliminación.
+
+La página es un Server Component. El formulario usa navegación GET y los
+resultados se obtienen de NestJS en el servidor; no se entregan JWT al cliente.
+La API interna `GET /api/audit-logs` exige administrador activo, valida
+filtros/paginación y devuelve una proyección sin detalles arbitrarios, IP ni
+user-agent. Los otros métodos no se implementan.
+La autorización definitiva de `GET /audit-logs` permanece en NestJS.
+
+El backend no tiene un endpoint de catálogo de locales. El selector combina
+los locales asociados a usuarios (incluidos desactivados), los de los registros
+consultados y el catálogo opcional `AUDIT_STORES`. Para garantizar que aparezcan
+locales sin usuarios ni eventos en la página actual, configurar la lista completa
+con sus UUID y nombres reales:
+
+```dotenv
+AUDIT_STORES=[{"id":"<UUID real del local>","name":"<nombre del local>"}]
+```
+
+No es necesario configurar este catálogo si los locales ya están asociados a
+usuarios. La lista no se inventa y los UUID son comprobados antes de utilizarse.
+La variable se documenta en `.env.example` y Docker Compose la pasa al frontend.
+
+```powershell
+npm run test:audit
+# Después de npm run build:
+npm run test:audit:integration
+# Chromium instalado mediante npx playwright install chromium:
+$env:TEST_AUDIT_ADMIN_EMAIL = '<correo del seed>'
+$env:TEST_AUDIT_ADMIN_PASSWORD = '<contraseña del seed>'
+./scripts/test-audit.ps1
+```
+
+Las pruebas de navegador usan el proyecto Docker exclusivo
+`capstone-sprint1-t16`: frontend 3106, backend 3107 y PostgreSQL 5436.
+El script inserta dos locales y 36 registros ficticios para comprobar límites
+de días chilenos, aislamiento del filtro y paginación. Son idempotentes y
+permanecen en ese volumen porque la auditoría es inmutable.
+Las cuentas temporales creadas por API se desactivan al finalizar.
+El navegador se configura en UTC para comprobar que se mantienen las horas
+chilenas. No usar este script contra producción.
+
+Detalle de alcance y validación: [SPRINT-1-T16](docs/SPRINT-1-T16.md).
+
 ## Verificación
 
 ```bash
