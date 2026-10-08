@@ -32,7 +32,7 @@ espera al anterior.
 | `db` | PostgreSQL con volumen persistente `postgres_data` | No (queda corriendo) |
 | `migrate` | `prisma migrate deploy`: aplica las migraciones pendientes | Sí |
 | `seed` | `prisma db seed`: roles, tipos de documento y administrador inicial (idempotente) | Sí |
-| `backend` | API NestJS en `http://localhost:3001` | No |
+| `backend` | API NestJS en `http://localhost:3001`, con los archivos del gestor documental en el volumen `documents_data` | No |
 | `frontend` | Web Next.js en `http://localhost:3000` | No |
 
 Que `subway_migrate` y `subway_seed` terminen con código `0` es lo esperado.
@@ -80,9 +80,42 @@ docker compose up --build -d              # en segundo plano
 docker compose logs -f backend            # ver logs de un servicio
 docker compose ps                         # estado de los servicios
 docker compose down                       # detener (conserva los datos)
-docker compose down -v                    # detener y BORRAR la base de datos
+docker compose down -v                    # detener y BORRAR la base de datos y los documentos
 docker compose up --build -d db migrate backend   # verificar migraciones sobre un volumen limpio (tras down -v)
 ```
+
+### Volúmenes y respaldo
+
+Compose crea dos volúmenes nombrados, separados a propósito:
+
+| Volumen | Contenido | Montado en |
+| --- | --- | --- |
+| `postgres_data` | Base de datos PostgreSQL | `db:/var/lib/postgresql/data` |
+| `documents_data` | Archivos del gestor documental (contratos, anexos, finiquitos, liquidaciones) | `backend:/app/storage/documents` (`DOCUMENTS_STORAGE_PATH`) |
+
+Ambos sobreviven a `docker compose down` y a las reconstrucciones de imagen;
+solo `docker compose down -v` los borra. La documentación laboral debe
+conservarse **al menos 5 años** (art. 9 bis CT), y los volúmenes viven en el
+mismo disco del servidor, así que deben respaldarse **fuera** del servidor. La
+base de datos guarda la ruta y el hash SHA-256 de cada archivo: hay que
+respaldar **ambos volúmenes juntos** para que se correspondan.
+
+Compose antepone el nombre del proyecto al volumen (por defecto, el nombre de
+la carpeta). Para ver el nombre real: `docker volume ls | grep documents_data`.
+
+```bash
+# Respaldo de los documentos en un .tar.gz de la carpeta actual (solo lectura sobre el volumen)
+docker run --rm -v <proyecto>_documents_data:/data:ro -v "$PWD":/backup alpine \
+  tar czf /backup/documentos-$(date +%F).tar.gz -C /data .
+
+# Restauración (con el backend detenido: docker compose stop backend)
+docker run --rm -v <proyecto>_documents_data:/data -v "$PWD":/backup:ro alpine \
+  tar xzf /backup/documentos-AAAA-MM-DD.tar.gz -C /data
+```
+
+En Coolify, los volúmenes nombrados del `docker-compose.yml` se crean igual;
+no usar un *bind mount* a una carpeta del host sin darle permisos de escritura
+al usuario `nestjs` del contenedor, porque el backend no corre como root.
 
 ## Opción 2: desarrollo local (sin Docker para la app)
 
@@ -134,6 +167,7 @@ TEST_DATABASE_URL="postgresql://postgres:cambiar-en-produccion@localhost:5433/su
 | --- | --- |
 | `port is already allocated` en `5433`, `3000` o `3001` | Otro proceso usa el puerto. Detenerlo, o cambiar `DB_PORT_HOST` para la base de datos. |
 | `subway_migrate` termina con error | Revisar `docker compose logs migrate`. Si la base local quedó en un estado inconsistente: `docker compose down -v` y volver a levantar (borra los datos). |
+| El backend no puede guardar archivos (`EACCES`) | El volumen o carpeta de `DOCUMENTS_STORAGE_PATH` no es escribible por el usuario `nestjs`. Con el volumen nombrado de Compose no ocurre; si se usa un *bind mount*, darle permisos a la carpeta del host. |
 | El backend no conecta a la base desde `npm run start:dev` | `DATABASE_URL` en `backend/.env` debe apuntar a `localhost:5433`, no a `db:5432` (ese host solo existe dentro de la red Docker). |
 | El frontend no llega a la API tras cambiar `NEXT_PUBLIC_API_URL` | Es una variable de compilación: reconstruir con `docker compose up --build frontend`. |
 | Login falla con el administrador por defecto | El seed no sobrescribe un administrador existente; si cambió su contraseña, usar la nueva o recrear la base con `docker compose down -v`. |

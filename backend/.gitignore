@@ -8,6 +8,9 @@
 # cliente Prisma generado (se regenera con npm run prisma:generate)
 /src/generated
 
+# archivos del gestor documental en desarrollo local (DOCUMENTS_STORAGE_PATH)
+/storage
+
 # tests
 /coverage
 
