@@ -89,3 +89,19 @@ Validado: 13 pruebas unitarias, flujo HTTP simulado, flujo con los tres servicio
 reales, lint, formato, builds Docker, migraciones y seed sobre un volumen nuevo.
 La suite existente del backend tiene fallos independientes de inicialización
 de dependencias y ejecución de npx en Windows; quedan registrados para otra tarea.
+
+## Diseño según el mockup
+
+Referencia: `Fase 1/Evidencias Grupales/Documentación del proyecto/Adicionales/Mockup/index.html`.
+El acceso y la pantalla de sesión adoptan la paleta salmón y crema, tarjetas
+blancas, bordes cálidos y tipografías Inter / JetBrains Mono. Se reutiliza el
+logo del mockup en `public/logo.png`. El mockup no contiene una vista de login;
+el formulario adapta su lenguaje visual manteniendo los estados de error,
+carga y renovación de sesión. Los módulos posteriores deben seguir esta referencia.
+
+El lint y formato del frontend y backend pasan. La compilación local encontró
+un bloqueo EPERM en `.next/diagnostics`; la compilación de producción se valida
+en Docker. No se cambia la lógica de autenticación.
+
+Validación posterior al ajuste visual: build de producción Docker y prueba
+de login, renovación y logout contra frontend, NestJS y PostgreSQL reales aprobados.

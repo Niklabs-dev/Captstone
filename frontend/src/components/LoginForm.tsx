@@ -53,9 +53,9 @@ export function LoginForm({
     });
   }
   return (
-    <form onSubmit={handleSubmit} className="space-y-5" aria-busy={loading}>
+    <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading}>
       {expired && (
-        <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+        <p className="rounded-lg bg-warn-bg p-3 text-sm text-ink2">
           Inicia sesión o renueva tu sesión para continuar.
         </p>
       )}
@@ -63,13 +63,16 @@ export function LoginForm({
         <p
           role="alert"
           id="login-error"
-          className="rounded-lg bg-red-50 p-3 text-sm text-red-800"
+          className="rounded-lg bg-crit-bg p-3 text-sm text-crit"
         >
           {error}
         </p>
       )}
       <div className="space-y-2">
-        <label htmlFor="email" className="block text-sm font-medium">
+        <label
+          htmlFor="email"
+          className="block text-[12.5px] font-semibold text-ink2"
+        >
           Correo electrónico
         </label>
         <input
@@ -81,12 +84,15 @@ export function LoginForm({
           maxLength={254}
           disabled={loading}
           aria-describedby={error ? 'login-error' : undefined}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-600 disabled:opacity-60"
+          className="w-full rounded-lg border border-line2 px-3 py-2.5 outline-none focus:ring-2 focus:ring-salmon-deep disabled:opacity-60"
           placeholder="nombre@moi-food.cl"
         />
       </div>
       <div className="space-y-2">
-        <label htmlFor="password" className="block text-sm font-medium">
+        <label
+          htmlFor="password"
+          className="block text-[12.5px] font-semibold text-ink2"
+        >
           Contraseña
         </label>
         <input
@@ -98,13 +104,13 @@ export function LoginForm({
           maxLength={128}
           disabled={loading}
           aria-describedby={error ? 'login-error' : undefined}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-600 disabled:opacity-60"
+          className="w-full rounded-lg border border-line2 px-3 py-2.5 outline-none focus:ring-2 focus:ring-salmon-deep disabled:opacity-60"
         />
       </div>
       <button
         type="submit"
         disabled={loading}
-        className="w-full rounded-lg bg-emerald-700 px-4 py-3 font-semibold text-white hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:opacity-60"
+        className="w-full rounded-lg bg-salmon px-3.5 py-2.5 text-sm font-semibold text-white hover:bg-salmon-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-deep disabled:opacity-60"
       >
         {loading ? 'Conectando…' : 'Ingresar'}
       </button>
@@ -113,7 +119,7 @@ export function LoginForm({
           type="button"
           disabled={loading}
           onClick={() => authenticate('/api/auth/refresh')}
-          className="w-full rounded-lg border border-emerald-700 px-4 py-3 font-semibold text-emerald-800 disabled:opacity-60"
+          className="w-full rounded-lg border border-line2 px-3.5 py-2.5 text-sm font-semibold text-salmon-ink disabled:opacity-60"
         >
           Renovar sesión anterior
         </button>
