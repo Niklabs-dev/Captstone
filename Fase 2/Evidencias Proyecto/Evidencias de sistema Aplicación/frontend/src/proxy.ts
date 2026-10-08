@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ACCESS_COOKIE } from '@/lib/auth';
 import { verifyAccessToken } from '@/lib/auth-backend';
+import { getPageRedirect } from '@/lib/navigation';
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   const token = request.cookies.get(ACCESS_COOKIE)?.value;
   const result = token ? await verifyAccessToken(token) : null;
@@ -19,10 +20,31 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
         'Cache-Control': 'no-store',
       },
     });
+  const destination = getPageRedirect(
+    result.data.role,
+    request.nextUrl.pathname,
+  );
+  if (destination) {
+    const url = new URL(destination, request.url);
+    const response = NextResponse.redirect(url);
+    response.headers.set('Cache-Control', 'private, no-store');
+    return response;
+  }
   const response = NextResponse.next();
   response.headers.set('Cache-Control', 'private, no-store');
   return response;
 }
 export const config = {
-  matcher: ['/dashboard/:path*', '/admin/:path*', '/portal/:path*'],
+  matcher: [
+    '/dashboard/:path*',
+    '/admin/:path*',
+    '/portal/:path*',
+    '/documentos/:path*',
+    '/propinas/:path*',
+    '/ventas/:path*',
+    '/caja/:path*',
+    '/inventario/:path*',
+    '/usuarios/:path*',
+    '/auditoria/:path*',
+  ],
 };

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { hasTrustedOrigin, REFRESH_COOKIE } from '@/lib/auth';
 import { requestTokens } from '@/lib/auth-backend';
 import { clearSessionCookies, setSessionCookies } from '@/lib/session';
+import { getHomePath } from '@/lib/navigation';
 export async function POST(request: Request): Promise<NextResponse> {
   if (!hasTrustedOrigin(request))
     return NextResponse.json(
@@ -26,7 +27,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return result.status === 401 ? clearSessionCookies(response) : response;
   }
   return setSessionCookies(
-    NextResponse.json({ redirectTo: '/dashboard' }),
+    NextResponse.json({ redirectTo: getHomePath(result.data.user.role) }),
     result.data,
   );
 }

@@ -1,0 +1,18 @@
+# Entorno exclusivo de SPRINT-1-T11; no modifica las bases de otras tareas.
+services:
+  db:
+    container_name: capstone_t11_db
+    ports: !override
+      - "5435:5432"
+  backend:
+    container_name: capstone_t11_backend
+    ports: !override
+      - "3105:3001"
+  migrate:
+    container_name: capstone_t11_migrate
+  seed:
+    container_name: capstone_t11_seed
+  frontend:
+    container_name: capstone_t11_frontend
+    ports: !override
+      - "3104:3000"
