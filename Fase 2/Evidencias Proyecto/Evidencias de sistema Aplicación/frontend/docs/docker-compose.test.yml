@@ -1,0 +1,9 @@
+# Puertos alternativos para validar SPRINT-1-T09 sin detener procesos del equipo.
+# Requiere Docker Compose 2.24.4 o posterior por el uso de !override.
+services:
+  backend:
+    ports: !override
+      - "3101:3001"
+  frontend:
+    ports: !override
+      - "3100:3000"
