@@ -48,7 +48,7 @@ $ npm run prisma:migrate          # desarrollo (también crea migraciones nuevas
 $ npm run prisma:migrate:deploy   # producción/CI (solo aplica)
 
 # datos base: roles (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR),
-# tipos de documento laboral (CONTRATO, ANEXO, FINIQUITO, LIQUIDACION,
+# tipos de documento laboral (CONTRATO, ANEXO, PACTO, FINIQUITO, LIQUIDACION,
 # PERMISO_SANITARIO) y usuario administrador inicial. Idempotente.
 $ npm run prisma:seed
 

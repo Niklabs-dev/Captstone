@@ -48,13 +48,16 @@ export const BASE_ROLES = [
 
 // Tipos de documento laboral del Gestor Documental. La conservación de 5 años
 // corresponde al art. 9 bis del Código del Trabajo; requiresExpiration activa
-// las alertas de vencimiento sobre documents.expires_at.
+// las alertas de vencimiento sobre documents.expires_at y requiresDtRegistration
+// las de registro en la Dirección del Trabajo dentro de 15 días (contratos y
+// sus modificaciones; SPRINT-2-T03).
 export const DOCUMENT_TYPES = [
   {
     code: 'CONTRATO',
     name: 'Contrato de trabajo',
     description: 'Contrato de trabajo firmado entre Moi-food y el trabajador.',
     requiresExpiration: false,
+    requiresDtRegistration: true,
     retentionYears: 5,
   },
   {
@@ -62,6 +65,16 @@ export const DOCUMENT_TYPES = [
     name: 'Anexo de contrato',
     description: 'Anexo que modifica o complementa el contrato vigente.',
     requiresExpiration: false,
+    requiresDtRegistration: true,
+    retentionYears: 5,
+  },
+  {
+    code: 'PACTO',
+    name: 'Pacto laboral',
+    description:
+      'Pacto acordado con el trabajador (ej. horas extraordinarias o jornada).',
+    requiresExpiration: false,
+    requiresDtRegistration: false,
     retentionYears: 5,
   },
   {
@@ -70,6 +83,7 @@ export const DOCUMENT_TYPES = [
     description:
       'Finiquito ratificado ante notario al término de la relación laboral.',
     requiresExpiration: false,
+    requiresDtRegistration: false,
     retentionYears: 5,
   },
   {
@@ -77,6 +91,7 @@ export const DOCUMENT_TYPES = [
     name: 'Liquidación de sueldo',
     description: 'Liquidación mensual de remuneraciones del trabajador.',
     requiresExpiration: false,
+    requiresDtRegistration: false,
     retentionYears: 5,
   },
   {
@@ -85,6 +100,7 @@ export const DOCUMENT_TYPES = [
     description:
       'Permiso sanitario del local; documento del local (sin trabajador titular).',
     requiresExpiration: true,
+    requiresDtRegistration: false,
     retentionYears: 5,
   },
 ] as const;
@@ -133,6 +149,7 @@ export async function seedDatabase(
         name: tipo.name,
         description: tipo.description,
         requiresExpiration: tipo.requiresExpiration,
+        requiresDtRegistration: tipo.requiresDtRegistration,
         retentionYears: tipo.retentionYears,
         isActive: true,
       },

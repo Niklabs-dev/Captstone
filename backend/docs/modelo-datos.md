@@ -54,7 +54,7 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 | Derechos **ARCO** (acceso, rectificación, cancelación, oposición) y portabilidad | Tabla `data_rights_requests`: tipo de derecho, estado (`PENDING` → `RESOLVED`/`REJECTED`), plazo legal de respuesta (`due_at`), quién resolvió y cuándo |
 | Seguridad del tratamiento | Contraseñas solo como hash (`password_hash`); refresh tokens solo como hash con expiración y revocación; secretos fuera del código (variables de entorno) |
 | Registro de actividades de tratamiento | `audit_logs` inmutable: usuario, operación, entidad, local, detalle (JSONB), IP y fecha de cada operación crítica |
-| Conservación limitada | `document_types.retention_years` (5 por defecto) y `documents.expires_at` para gestionar plazos; el cumplimiento de conservación laboral prima sobre el borrado |
+| Conservación limitada | `document_types.retention_years` (5 por defecto), `documents.retain_until` (fecha hasta la que se conserva cada documento) y `documents.expires_at` para gestionar plazos; el cumplimiento de conservación laboral prima sobre el borrado |
 | Aislamiento por titular (Portal del Trabajador) | `documents.subject_user_id` y `users.store_id` permiten que cada trabajador vea **solo su información**; el aislamiento se enforce en los servicios del backend |
 
 ## Cumplimiento del Código del Trabajo
@@ -88,6 +88,19 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
    (`change_note`) quedan registrados, y la operación se audita en `audit_logs`.
 5. Las FK en `RESTRICT` impiden borrar documentos, versiones o tipos: la
    conservación de 5 años está garantizada a nivel de base de datos.
+
+## Plazos del Gestor Documental (E1-H3)
+
+| Plazo | Columnas | Regla |
+| --- | --- | --- |
+| Conservación (art. 9 bis CT) | `documents.retain_until` | Se fija al crear el documento: `issued_at` (o el día de carga, hora de Chile) + `document_types.retention_years`. Es una foto: no cambia si luego se modifica el tipo. Base del bloqueo de eliminación (SPRINT-2-T07). |
+| Registro en la Dirección del Trabajo | `document_types.requires_dt_registration`, `documents.dt_registration_due_at` | Los tipos marcados (`CONTRATO` y `ANEXO`) tienen 15 días desde su celebración para registrarse en la DT. `dt_registration_due_at` es `NULL` si el tipo no lo exige. |
+| Registro en la DT realizado | `documents.dt_registered_at`, `documents.dt_registered_by_id` | Mientras `dt_registered_at` sea `NULL`, la alerta sigue activa (SPRINT-2-T08). |
+
+Dos `CHECK` mantienen la consistencia: un documento solo se marca como
+registrado en la DT si tiene plazo (`documents_dt_registered_requires_due_at`),
+y la fecha de registro y quién lo marcó van siempre juntos
+(`documents_dt_registered_by_consistent`).
 
 ## Cómo ver el modelo de forma visual
 
@@ -125,6 +138,7 @@ erDiagram
   DOCUMENTS ||--o{ DOCUMENT_VERSIONS : "versiona"
   DOCUMENTS |o--o| DOCUMENT_VERSIONS : "versión vigente"
   USERS ||--o{ DOCUMENT_VERSIONS : "sube"
+  USERS |o--o{ DOCUMENTS : "registra en la DT"
 
   STORES ||--o{ TIP_POOLS : "reparte"
   USERS ||--o{ TIP_POOLS : "calcula / confirma"
@@ -303,10 +317,11 @@ Table audit_logs {
 
 Table document_types {
   id uuid [pk, default: `gen_random_uuid()`]
-  code varchar(40) [not null, unique, note: 'CONTRATO, ANEXO, FINIQUITO, LIQUIDACION...']
+  code varchar(40) [not null, unique, note: 'CONTRATO, ANEXO, PACTO, FINIQUITO, LIQUIDACION...']
   name varchar(100) [not null]
   description varchar(255)
   requires_expiration boolean [not null, default: false]
+  requires_dt_registration boolean [not null, default: false, note: 'Registro en la DT dentro de 15 días']
   retention_years int [not null, default: 5, note: 'Conservación art. 9 bis CT']
   is_active boolean [not null, default: true]
   created_at timestamptz [not null, default: `now()`]
@@ -318,8 +333,12 @@ Table documents {
   title varchar(160) [not null]
   description text
   status DocumentStatus [not null, default: 'ACTIVE']
-  issued_at date
+  issued_at date [note: 'Fecha de celebración (firma)']
   expires_at date [note: 'Permite alertas de vencimiento']
+  retain_until date [not null, note: 'Conservar hasta: issued_at (o carga) + retention_years']
+  dt_registration_due_at date [note: 'Plazo de 15 días para registrar en la DT; NULL si el tipo no lo exige']
+  dt_registered_at timestamptz [note: 'Registro en la DT marcado como realizado']
+  dt_registered_by_id uuid [ref: > users.id, note: 'Quién marcó el registro en la DT']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null]
   store_id uuid [not null, ref: > stores.id]
@@ -332,6 +351,8 @@ Table documents {
     (store_id, status)
     subject_user_id
     expires_at
+    dt_registration_due_at
+    retain_until
   }
 }
 
