@@ -1,7 +1,9 @@
 # SPRINT-1-T10 — Gestión de usuarios del frontend
 
 Rama: `feat/sprint-1-t10-gestion-usuarios`, creada desde `origin/main` (`500e679`).
-Estado: implementación verificada; pendiente de envío y revisión. No se ha cambiado el tablero de Notion,
+Estado: **En revisión en GitHub**, [PR #18](https://github.com/Niklabs-dev/Captstone/pull/18).
+Revisión solicitada a `Niklabs-dev`. Commit de implementación: `dfd0b59`.
+No se ha cambiado el tablero de Notion,
 porque la integración no tiene acceso a la página compartida. No se marca Hecho
 sin aprobación del usuario y cumplimiento de la DoD.
 
