@@ -2,6 +2,7 @@
 import { useState, type FormEvent, type ReactElement } from 'react';
 import { useRouter } from 'next/navigation';
 import { isRecord } from '@/lib/auth';
+import { isHomePath } from '@/lib/navigation';
 export function LoginForm({
   expired,
   canRefresh,
@@ -34,7 +35,11 @@ export function LoginForm({
         );
         return;
       }
-      router.replace('/dashboard');
+      if (!isRecord(data) || !isHomePath(data.redirectTo)) {
+        setError('No se pudo abrir tu cuenta. Intenta nuevamente.');
+        return;
+      }
+      router.replace(data.redirectTo);
       router.refresh();
     } catch {
       setError('No se pudo conectar. Revisa tu conexión e intenta nuevamente.');

@@ -7,3 +7,6 @@ node_modules
 .git
 Dockerfile
 .dockerignore
+
+test-results/
+playwright-report/
