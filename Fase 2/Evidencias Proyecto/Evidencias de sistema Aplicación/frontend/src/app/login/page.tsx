@@ -5,13 +5,14 @@ import type { ReactElement } from 'react';
 import { LoginForm } from '@/components/LoginForm';
 import { REFRESH_COOKIE } from '@/lib/auth';
 import { getSession } from '@/lib/session';
+import { getHomePath } from '@/lib/navigation';
 export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ reason?: string }>;
 }): Promise<ReactElement> {
   const session = await getSession();
-  if (session.ok) redirect('/dashboard');
+  if (session.ok) redirect(getHomePath(session.data.role));
   const params = await searchParams;
   const canRefresh = Boolean((await cookies()).get(REFRESH_COOKIE)?.value);
   return (

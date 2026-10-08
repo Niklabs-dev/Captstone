@@ -2,12 +2,15 @@ import { redirect } from 'next/navigation';
 import type { ReactElement } from 'react';
 import { getSession } from '@/lib/session';
 import { SessionActions } from '@/components/SessionActions';
+import { getPageRedirect } from '@/lib/navigation';
 export default async function DashboardPage(): Promise<ReactElement> {
   const session = await getSession();
   if (!session.ok) {
     if (session.status === 401) redirect('/login?reason=session');
     throw new Error(session.message);
   }
+  const destination = getPageRedirect(session.data.role, '/dashboard');
+  if (destination) redirect(destination);
   return (
     <main className="min-h-screen bg-tint px-5 py-10 text-ink">
       <section className="mx-auto max-w-xl rounded-2xl border border-line bg-bg p-7 ">

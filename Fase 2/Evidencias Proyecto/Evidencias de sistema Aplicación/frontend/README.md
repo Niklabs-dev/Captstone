@@ -34,11 +34,49 @@ No se envían tokens ni la URL interna al JavaScript del navegador.
   la respuesta informa `revoked: false`.
 - Las operaciones de autenticación verifican el encabezado `Origin`.
   El proxy inverso debe conservar el host y protocolo públicos de la solicitud.
-- El destino de esta tarea es `/dashboard` para todos los roles.
-  La redirección por rol y sus vistas corresponden a SPRINT-1-T11.
+- SPRINT-1-T11 dirige al trabajador a `/portal` y a los otros roles a `/dashboard`.
 
 El usuario inicial lo configura el seed del backend. No se incorporan cuentas
 ni contraseñas de demostración al frontend.
+
+## Portal y redirecciones — SPRINT-1-T11
+
+El trabajador que intenta entrar al dashboard, administración, documentos,
+propinas, ventas, caja, inventario, usuarios o auditoría vuelve a
+`/portal?reason=forbidden`. Sus subrutas tienen la misma protección.
+El portal es exclusivo del trabajador; los otros roles regresan al dashboard.
+Las páginas `/admin/*` están reservadas al administrador.
+La política se centraliza en `src/lib/navigation.ts`; login, renovación,
+inicio, login con sesión abierta y proxy usan el rol verificado por NestJS.
+No se toman decisiones a partir de cookies de rol o datos enviados por el cliente.
+
+El portal adapta la paleta, tipografía, logo, barra lateral y tarjetas del
+mockup administrador. Muestra únicamente la cuenta conectada y las acciones
+de sesión. Documentos, liquidaciones y propinas se habilitarán en sus tareas.
+Las API conservan sus permisos propios en NestJS: redirigir una página no
+sustituye la autorización del backend.
+
+Pruebas del portal:
+
+```powershell
+npm run test:portal
+# Después de npm run build:
+npm run test:integration
+# Instalar Chromium una sola vez:
+npx playwright install chromium
+# Credenciales del seed del entorno exclusivo de prueba:
+$env:TEST_PORTAL_ADMIN_EMAIL = '<correo del seed>'
+$env:TEST_PORTAL_ADMIN_PASSWORD = '<contraseña del seed>'
+./scripts/test-portal.ps1
+```
+
+El script usa el proyecto Docker `capstone-sprint1-t11`, con frontend 3104,
+backend 3105 y PostgreSQL 5435. Crea un local ficticio y las pruebas crean
+cuentas temporales; al terminar desactivan las cuentas y conservan la auditoría
+en ese volumen exclusivo. `-SkipBuild` permite usar imágenes ya construidas.
+No ejecutar estas pruebas contra producción.
+
+Detalle de alcance, dependencia y validación: [SPRINT-1-T11](docs/SPRINT-1-T11.md).
 
 ## Verificación
 

@@ -2,6 +2,7 @@
 import { useState, type ReactElement } from 'react';
 import { useRouter } from 'next/navigation';
 import { isRecord } from '@/lib/auth';
+import { isHomePath } from '@/lib/navigation';
 export function SessionActions(): ReactElement {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -26,7 +27,11 @@ export function SessionActions(): ReactElement {
         return;
       }
       if (action === 'logout') router.replace('/login');
-      else setMessage('Sesión renovada.');
+      else if (isRecord(data) && isHomePath(data.redirectTo)) {
+        setMessage('Sesión renovada.');
+        router.replace(data.redirectTo);
+      } else
+        setMessage('No se pudo abrir tu cuenta. Inicia sesión nuevamente.');
       router.refresh();
     } catch {
       setMessage('No se pudo conectar. Intenta nuevamente.');
