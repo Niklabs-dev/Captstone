@@ -1,5 +1,7 @@
 node_modules
 .next
+.users-test-build
+test-results
 .env*
 !.env.example
 *.log
