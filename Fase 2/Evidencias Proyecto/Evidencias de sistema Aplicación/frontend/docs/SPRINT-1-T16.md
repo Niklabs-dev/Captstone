@@ -73,6 +73,6 @@ La validación Docker utilizó el backend de main c5eaf43; audit/auth/users no d
 
 ## Seguimiento
 
-Validación terminada; pendiente de publicación (registro local). La integración no tiene acceso al tablero compartido
+En revisión (registro local). PR: https://github.com/Niklabs-dev/Captstone/pull/20. Revisor solicitado: Niklabs-dev. Commit de implementación: 2c6c2a3. La integración no tiene acceso al tablero compartido
 de Notion; no se ha actualizado allí ningún estado.
 No se marca Hecho ni se fusiona el PR sin confirmación de revisión.
