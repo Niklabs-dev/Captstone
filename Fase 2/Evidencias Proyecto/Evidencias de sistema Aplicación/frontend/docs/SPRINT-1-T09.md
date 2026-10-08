@@ -99,9 +99,13 @@ logo del mockup en `public/logo.png`. El mockup no contiene una vista de login;
 el formulario adapta su lenguaje visual manteniendo los estados de error,
 carga y renovación de sesión. Los módulos posteriores deben seguir esta referencia.
 
-El lint y formato del frontend y backend pasan. La compilación local encontró
-un bloqueo EPERM en `.next/diagnostics`; la compilación de producción se valida
-en Docker. No se cambia la lógica de autenticación.
+El lint y formato del frontend y backend pasan. El bloqueo EPERM de la caché
+local se resolvió regenerando .next. Las compilaciones local y Docker pasan.
+No se cambia la lógica de autenticación.
 
 Validación posterior al ajuste visual: build de producción Docker y prueba
 de login, renovación y logout contra frontend, NestJS y PostgreSQL reales aprobados.
+
+
+Revalidación final: 13 pruebas unitarias, integración HTTP simulada, flujo con
+servicios reales, lint, formato y build local aprobados después del ajuste visual.
