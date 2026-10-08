@@ -197,6 +197,93 @@ test('Flujo HTTP con Next.js compilado y contrato de backend simulado', async ()
     });
     assert.equal(response.status, 502);
     unavailable = false;
+    for (const role of [
+      'TRABAJADOR',
+      'CONTADOR',
+      'SUPERVISOR',
+      'ADMINISTRADOR',
+    ]) {
+      user.role = role;
+      const home = role === 'TRABAJADOR' ? '/portal' : '/dashboard';
+      response = await post('/api/auth/login', {
+        email: user.email,
+        password: 'test-password',
+      });
+      assert.deepEqual(await response.json(), { redirectTo: home });
+      acceptCookies(response);
+      const headers = { Cookie: `mf_access=${cookieJar.get('mf_access')}` };
+      for (const path of ['/', '/login']) {
+        response = await fetch(origin + path, { headers, redirect: 'manual' });
+        assert.equal(response.status, 307);
+        assert.equal(
+          new URL(response.headers.get('location')!, origin).pathname,
+          home,
+        );
+      }
+      response = await fetch(origin + home, { headers, redirect: 'manual' });
+      assert.equal(response.status, 200);
+      const html = await response.text();
+      assert.ok(html.includes(user.email));
+      assert.ok(!html.includes(accessToken));
+      if (role === 'TRABAJADOR') {
+        assert.ok(html.includes('Portal del Trabajador'));
+        for (const path of [
+          '/dashboard',
+          '/admin/usuarios',
+          '/admin/usuarios/crear',
+          '/documentos',
+          '/propinas',
+          '/ventas',
+          '/caja',
+          '/inventario',
+          '/usuarios',
+          '/auditoria',
+        ]) {
+          response = await fetch(origin + path + '?next=https://evil.example', {
+            headers,
+            redirect: 'manual',
+          });
+          assert.equal(response.status, 307, path);
+          const destination = new URL(
+            response.headers.get('location')!,
+            origin,
+          );
+          assert.equal(destination.pathname, '/portal');
+          assert.equal(destination.search, '?reason=forbidden');
+        }
+      } else {
+        response = await fetch(origin + '/portal', {
+          headers,
+          redirect: 'manual',
+        });
+        assert.equal(response.status, 307);
+        assert.ok(
+          response.headers
+            .get('location')
+            ?.endsWith('/dashboard?reason=forbidden'),
+        );
+      }
+      response = await post('/api/auth/refresh');
+      assert.deepEqual(await response.json(), { redirectTo: home });
+      acceptCookies(response);
+    }
+    for (const cookie of ['', 'mf_access=forged; mf_role=TRABAJADOR']) {
+      response = await fetch(origin + '/portal', {
+        headers: { Cookie: cookie },
+        redirect: 'manual',
+      });
+      assert.equal(response.status, 307);
+      assert.ok(
+        response.headers.get('location')?.includes('/login?reason=session'),
+      );
+    }
+    unavailable = true;
+    response = await fetch(origin + '/portal', {
+      headers: { Cookie: `mf_access=${cookieJar.get('mf_access')}` },
+      redirect: 'manual',
+    });
+    assert.equal(response.status, 503);
+    unavailable = false;
     response = await post('/api/auth/logout');
     assert.equal(response.status, 200);
     acceptCookies(response);
