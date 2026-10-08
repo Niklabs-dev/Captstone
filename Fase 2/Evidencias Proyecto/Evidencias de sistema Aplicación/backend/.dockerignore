@@ -7,3 +7,4 @@ src/generated
 !.env.example
 *.log
 .git
+storage

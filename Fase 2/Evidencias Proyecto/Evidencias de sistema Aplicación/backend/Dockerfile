@@ -22,6 +22,10 @@ FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -S nodejs && adduser -S nestjs -G nodejs
+# Punto de montaje del volumen de documentos. Se crea con dueño nestjs porque
+# Docker copia este dueño a un volumen nombrado vacío al montarlo por primera
+# vez; así el proceso, que no corre como root, puede escribir en él.
+RUN mkdir -p /app/storage/documents && chown -R nestjs:nodejs /app/storage
 COPY --from=build --chown=nestjs:nodejs /app/node_modules ./node_modules
 COPY --from=build --chown=nestjs:nodejs /app/dist ./dist
 COPY --chown=nestjs:nodejs package.json ./
