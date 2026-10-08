@@ -40,19 +40,19 @@ export function SessionActions(): ReactElement {
         <button
           disabled={loading}
           onClick={() => perform('refresh')}
-          className="rounded-lg border border-emerald-700 px-4 py-2 font-medium text-emerald-800 disabled:opacity-60"
+          className="rounded-lg border border-line2 px-4 py-2 font-medium text-salmon-ink disabled:opacity-60"
         >
           Renovar sesión
         </button>
         <button
           disabled={loading}
           onClick={() => perform('logout')}
-          className="rounded-lg bg-emerald-700 px-4 py-2 font-medium text-white disabled:opacity-60"
+          className="rounded-lg bg-salmon px-4 py-2 font-medium text-white disabled:opacity-60"
         >
           Cerrar sesión
         </button>
       </div>
-      <p role="status" className="text-sm text-slate-700">
+      <p role="status" className="text-sm text-ink2">
         {message}
       </p>
     </div>
