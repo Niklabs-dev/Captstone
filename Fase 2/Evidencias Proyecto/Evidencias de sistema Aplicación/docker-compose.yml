@@ -37,6 +37,12 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-secret-cambiar-en-produccion}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      DOCUMENTS_STORAGE_PATH: /app/storage/documents
+    # Archivos del gestor documental en un volumen propio, separado del de
+    # PostgreSQL: se conservan al menos 5 años (art. 9 bis CT) y se respaldan
+    # aparte (ver README, "Respaldo de los volúmenes").
+    volumes:
+      - documents_data:/app/storage/documents
     ports:
       - "3001:3001"
     depends_on:
@@ -99,3 +105,4 @@ services:
 
 volumes:
   postgres_data:
+  documents_data:
