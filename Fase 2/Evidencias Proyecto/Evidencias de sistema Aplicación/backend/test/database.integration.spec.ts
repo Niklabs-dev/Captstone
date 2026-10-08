@@ -181,6 +181,7 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
           subjectUserId: user.id,
           documentTypeId: tipo.id,
           createdById: user.id,
+          retainUntil: new Date('2031-10-08'),
         },
       });
       expect(documento.status).toBe(DocumentStatus.ACTIVE);
@@ -240,6 +241,7 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
           storeId: store.id,
           documentTypeId: tipo.id,
           createdById: user.id,
+          retainUntil: new Date('2031-10-08'),
         },
       });
       const version = {
@@ -271,6 +273,7 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
           storeId: store.id,
           documentTypeId: tipo.id,
           createdById: user.id,
+          retainUntil: new Date('2031-10-08'),
         },
       });
       const version = {
@@ -290,6 +293,87 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
         }),
       ).rejects.toMatchObject({ code: 'P2002' });
     });
+  });
+
+  it('registra los plazos del documento: conservación y registro en la DT (SPRINT-2-T03)', async () => {
+    await withinRollback(async (tx) => {
+      const { user, store } = await crearUsuarioBase(tx);
+      const tipo = await tx.documentType.upsert({
+        where: { code: 'CONTRATO' },
+        update: {},
+        create: {
+          code: 'CONTRATO',
+          name: 'Contrato de trabajo',
+          requiresDtRegistration: true,
+        },
+      });
+
+      // Contrato firmado el 01-10-2026: plazo de 15 días para la DT y
+      // conservación de 5 años desde su celebración.
+      const documento = await tx.document.create({
+        data: {
+          title: 'Contrato Ana Pérez',
+          storeId: store.id,
+          subjectUserId: user.id,
+          documentTypeId: tipo.id,
+          createdById: user.id,
+          issuedAt: new Date('2026-10-01'),
+          retainUntil: new Date('2031-10-01'),
+          dtRegistrationDueAt: new Date('2026-10-16'),
+        },
+      });
+      // Pendiente de registro: la alerta sigue activa.
+      expect(documento.dtRegisteredAt).toBeNull();
+      expect(documento.dtRegisteredById).toBeNull();
+
+      const registrado = await tx.document.update({
+        where: { id: documento.id },
+        data: { dtRegisteredAt: new Date(), dtRegisteredById: user.id },
+        include: { dtRegisteredBy: true },
+      });
+      expect(registrado.dtRegisteredBy?.id).toBe(user.id);
+      expect(registrado.retainUntil.toISOString().slice(0, 10)).toBe(
+        '2031-10-01',
+      );
+
+      // Quien marcó el registro en la DT no se puede borrar (Restrict).
+      await expect(
+        tx.user.delete({ where: { id: user.id } }),
+      ).rejects.toMatchObject({ code: 'P2003' });
+    });
+  });
+
+  it('rechaza un registro en la DT inconsistente (CHECK)', async () => {
+    const casos = [
+      // Registrado sin indicar quién lo marcó.
+      { dtRegistrationDueAt: new Date('2026-10-16'), sinResponsable: true },
+      // Registrado en un documento cuyo tipo no tiene plazo en la DT.
+      { dtRegistrationDueAt: null, sinResponsable: false },
+    ];
+    for (const caso of casos) {
+      await withinRollback(async (tx) => {
+        const { user, store } = await crearUsuarioBase(tx);
+        const tipo = await tx.documentType.upsert({
+          where: { code: 'LIQUIDACION' },
+          update: {},
+          create: { code: 'LIQUIDACION', name: 'Liquidación de sueldo' },
+        });
+        await expect(
+          tx.document.create({
+            data: {
+              title: 'Documento inconsistente',
+              storeId: store.id,
+              documentTypeId: tipo.id,
+              createdById: user.id,
+              retainUntil: new Date('2031-10-08'),
+              dtRegistrationDueAt: caso.dtRegistrationDueAt,
+              dtRegisteredAt: new Date(),
+              dtRegisteredById: caso.sinResponsable ? null : user.id,
+            },
+          }),
+        ).rejects.toThrow(/documents_dt_registered_/);
+      });
+    }
   });
 
   it('graba auditoría con detalle JSONB y permite acciones del sistema (sin usuario)', async () => {

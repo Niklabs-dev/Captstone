@@ -109,6 +109,26 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(sql.match(/ON DELETE RESTRICT/g)).toHaveLength(2);
   });
 
+  it('registra los plazos del gestor documental (SPRINT-2-T03)', () => {
+    const sql = readMigration('gestor_documental_plazos');
+    // Tipos que deben registrarse en la DT dentro de 15 días.
+    expect(sql).toContain(
+      '"requires_dt_registration" BOOLEAN NOT NULL DEFAULT false',
+    );
+    // Plazo de registro en la DT y quién/cuándo lo marcó como realizado.
+    expect(sql).toContain('"dt_registration_due_at" DATE');
+    expect(sql).toContain('"dt_registered_at" TIMESTAMPTZ(6)');
+    expect(sql).toContain(
+      'ADD CONSTRAINT "documents_dt_registered_by_id_fkey" FOREIGN KEY ("dt_registered_by_id")',
+    );
+    expect(sql).toContain('CHECK ("dt_registered_at" IS NULL OR');
+    // Conservación: se completa en los documentos existentes antes de exigirla.
+    expect(sql).toContain('ALTER COLUMN "retain_until" SET NOT NULL');
+    expect(sql.indexOf('UPDATE "documents"')).toBeLessThan(
+      sql.indexOf('ALTER COLUMN "retain_until" SET NOT NULL'),
+    );
+  });
+
   it('soporta el cumplimiento de la Ley N°21.719', () => {
     const sql = readMigrations();
     // Anonimización de titulares (derecho de cancelación).

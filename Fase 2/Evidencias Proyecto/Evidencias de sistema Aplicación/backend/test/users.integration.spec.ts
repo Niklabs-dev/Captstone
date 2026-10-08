@@ -321,6 +321,7 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
         storeId,
         subjectUserId: creado.id,
         createdById: adminId,
+        retainUntil: new Date('2031-10-08'),
       },
     });
 
