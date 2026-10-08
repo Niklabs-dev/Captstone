@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "noEmit": false,
+    "incremental": false,
+    "outDir": ".users-test-build",
+    "rootDir": "src/lib",
+    "plugins": []
+  },
+  "include": [
+    "src/lib/users.ts",
+    "src/lib/users-backend.ts",
+    "src/lib/users.test.ts",
+    "src/lib/users-http.integration.test.ts"
+  ],
+  "exclude": ["node_modules"]
+}
