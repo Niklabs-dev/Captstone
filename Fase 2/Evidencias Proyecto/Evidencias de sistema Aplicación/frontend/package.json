@@ -13,7 +13,10 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"*.{ts,mjs}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.{ts,mjs}\"",
     "test:portal": "tsc -p tsconfig.test.json \u0026\u0026 node --test .test-build/navigation.test.js",
-    "test:portal:e2e": "playwright test --config=playwright.portal.config.ts"
+    "test:portal:e2e": "playwright test --config=playwright.portal.config.ts",
+    "test:audit": "tsc -p tsconfig.test.json \u0026\u0026 node --test .test-build/audit.test.js",
+    "test:audit:integration": "tsc -p tsconfig.test.json \u0026\u0026 node --test .test-build/audit-http.integration.test.js",
+    "test:audit:e2e": "playwright test --config=playwright.audit.config.ts"
   },
   "dependencies": {
     "next": "16.3.6",
