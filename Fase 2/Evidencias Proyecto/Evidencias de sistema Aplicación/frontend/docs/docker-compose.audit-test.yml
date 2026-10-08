@@ -1,0 +1,20 @@
+# Proyecto exclusivo de T16; conserva separados todos los volúmenes de revisión.
+services:
+  db:
+    container_name: capstone_t16_db
+    ports: !override
+      - "5436:5432"
+  backend:
+    container_name: capstone_t16_backend
+    ports: !override
+      - "3107:3001"
+  migrate:
+    container_name: capstone_t16_migrate
+  seed:
+    container_name: capstone_t16_seed
+  frontend:
+    container_name: capstone_t16_frontend
+    environment:
+      AUDIT_STORES: ${AUDIT_STORES:-[]}
+    ports: !override
+      - "3106:3000"
