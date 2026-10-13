@@ -76,3 +76,8 @@ La validación Docker utilizó el backend de main c5eaf43; audit/auth/users no d
 En revisión (registro local). PR: https://github.com/Niklabs-dev/Captstone/pull/20. Revisor solicitado: Niklabs-dev. Commit de implementación: 2c6c2a3. La integración no tiene acceso al tablero compartido
 de Notion; no se ha actualizado allí ningún estado.
 No se marca Hecho ni se fusiona el PR sin confirmación de revisión.
+
+
+## Compatibilidad con la revisión del 13 de octubre
+
+Rama reubicada sobre T11 corregido, manteniendo el diff exclusivamente en T16. Commit de implementación vigente: 7b1017d (los hashes anteriores son históricos). Se aprobaron nuevamente build Docker, lint, formato, 12 unitarias de auditoría, integración HTTP de auditoría y regresión HTTP de autenticación. Se conservan las diez ejecuciones de navegador aprobadas en la entrega original; no se atribuyen a esta revisión. PR #20 sigue pendiente de revisión.
