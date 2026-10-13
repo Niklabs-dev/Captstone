@@ -113,3 +113,6 @@ La exportación del tablero del 13 de octubre confirma vacíos los campos
 la ficha exacta de T11; se prepara evidencia local para copiar al tablero vivo.
 Las sugerencias que la revisión pide convertir en tareas nuevas se registran
 aparte, sin atribuirles IDs ni afirmar su creación remota.
+
+
+Validación final de la revisión: lint, formato y build Docker aprobados; 18 unitarias e integración HTTP ampliada aprobadas; 6 escenarios de navegador aprobados en 56,4 segundos. Playwright CLI comprobó el trabajador en una ruta futura con extensión y al supervisor redirigido desde administración, con capturas a 390 px y 1280 px, sin desbordamiento ni mensajes de consola. Las dos cuentas del CLI quedaron desactivadas. Los resultados de Playwright se guardaron en una carpeta temporal porque OneDrive bloqueaba el borrado de test-results. Los hashes previos de este documento se conservan como referencias históricas; el registro externo de revisión identifica los heads publicados tras el rebase.
