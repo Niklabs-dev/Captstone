@@ -230,6 +230,11 @@ test('Bloquea un administrador desactivado aunque su JWT siga vigente', async ({
   const page = await restricted.newPage();
   await page.goto(`${frontendUrl}/admin/usuarios`);
   expect(page.url()).toContain('/login?reason=session');
+  expect(
+    (await restricted.cookies()).some(
+      (cookie) => cookie.name === 'mf_access' || cookie.name === 'mf_refresh',
+    ),
+  ).toBe(false);
   await restricted.close();
 });
 test('Rechaza visitantes, token falso y los tres roles no administradores', async ({

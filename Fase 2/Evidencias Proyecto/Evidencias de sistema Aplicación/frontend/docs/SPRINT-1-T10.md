@@ -111,3 +111,12 @@ La suite general existente del backend tenía fallos de inicialización de
 dependencias en Vitest y de ejecución de npx en Windows, registrados en T09.
 No se corrigen mezclándolos con esta tarea frontend. La aceptación final, merge
 y actualización del tablero permanecen pendientes de revisión.
+
+
+## Revisión e integración del 13 de octubre de 2026
+
+Conflictos resueltos sobre T11: Compose conserva las variables de sesión y usuarios y el volumen documental de main; ejemplos de entorno, ignores, README y scripts mantienen ambas tareas. El lockfile es idéntico al de T11 y fija Playwright 1.64.0; no se cambian dependencias. T10 utiliza el logo compartido. El trabajador vuelve al portal desde usuarios, y contador/supervisor al dashboard con aviso.
+
+Al integrar el login se detectó que una cuenta administradora desactivada podía volver al dashboard por conservar el access token anterior. La página ahora deriva a /admin/usuarios/session-expired; ese Route Handler vuelve a comprobar la cuenta y elimina ambas cookies únicamente ante un 401. Usa Location relativa para conservar el host público de Docker. Una cuenta activa conserva sus cookies, un cambio de permisos vuelve al dashboard y una caída del backend no cierra la sesión por error. La API sigue rechazando de inmediato cuentas inactivas. La revocación global en NestJS continúa como tarea independiente.
+
+Se valida build Docker, lint, formato, 14 unitarias de usuarios e integración HTTP ampliada (sesión activa/inactiva, cookies y redirecciones relativas), además de las regresiones de autenticación y navegación de la combinación. En navegador pasaron ocho escenarios de usuarios antes del último ajuste; los dos escenarios de sesión desactivada pasaron con el arreglo final (41,4 segundos), incluida la ausencia de ambas cookies. La integración HTTP ampliada también pasó con la redirección relativa. Resultados temporales fuera de OneDrive evitan el bloqueo EPERM de test-results. Los hashes previos se conservan como evidencia histórica; el registro externo identifica el head publicado tras rebase.

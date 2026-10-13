@@ -166,3 +166,6 @@ un local ficticio y ejecuta Playwright en escritorio y móvil. Las cuentas de
 prueba quedan desactivadas; el volumen y la auditoría se conservan exclusivamente
 en `capstone-sprint1-t10` para inspección. No ejecutar contra datos de producción.
 Las capturas y trazas se guardan en `test-results/`, fuera de Git.
+
+
+La sesión de usuarios se limpia mediante /admin/usuarios/session-expired cuando la cuenta ya no está activa. Este Route Handler de navegación revalida la cuenta antes de borrar cookies y conserva el host público usando Location relativa. Las API de usuarios siguen respondiendo JSON. test:users:integration ejecuta su build automáticamente.

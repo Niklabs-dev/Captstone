@@ -208,6 +208,37 @@ test(
       assert.ok(html.includes('Usuarios del sistema'));
       assert.ok(!html.includes('passwordHash'));
       assert.ok(!html.includes('admin-token'));
+      // La transición de sesión no cierra una cuenta todavía activa.
+      const activeSession = await send('/admin/usuarios/session-expired');
+      assert.equal(activeSession.status, 303);
+      assert.equal(activeSession.headers.get('location'), '/admin/usuarios');
+      assert.equal(activeSession.headers.get('set-cookie'), null);
+      administrator.isActive = false;
+      const inactivePage = await send('/admin/usuarios');
+      assert.equal(inactivePage.status, 307);
+      assert.ok(
+        inactivePage.headers
+          .get('location')
+          ?.endsWith('/admin/usuarios/session-expired'),
+      );
+      const expiredSession = await send('/admin/usuarios/session-expired');
+      assert.equal(expiredSession.status, 303);
+      assert.equal(
+        expiredSession.headers.get('location'),
+        '/login?reason=session',
+      );
+      assert.ok(
+        expiredSession.headers.get('cache-control')?.includes('no-store'),
+      );
+      for (const name of ['mf_access', 'mf_refresh']) {
+        const cookie = expiredSession.headers
+          .getSetCookie()
+          .find((value) => value.startsWith(name + '='));
+        assert.ok(cookie);
+        assert.ok(cookie.includes('Max-Age=0'));
+        assert.ok(cookie.includes('HttpOnly'));
+      }
+      administrator.isActive = true;
       conflict = true;
       assert.equal(
         (await send('/api/users', 'POST', 'admin-token', input)).status,
