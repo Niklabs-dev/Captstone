@@ -116,6 +116,8 @@ test('Login del trabajador, módulos restringidos, renovación y cierre de sesi�
     '/inventario',
     '/usuarios',
     '/auditoria',
+    '/modulo-nuevo',
+    '/modulo-nuevo/informe.csv',
   ]) {
     await page.goto(path);
     await expect(page).toHaveURL(/\/portal\?reason=forbidden$/);
@@ -188,8 +190,14 @@ test('Los otros roles conservan su dashboard y no entran al portal', async ({
     await expect(page).toHaveURL(/\/dashboard$/);
     await page.goto('/portal');
     await expect(page).toHaveURL(/\/dashboard\?reason=forbidden$/);
+    await expect(page.getByRole('status').first()).toContainText(
+      'Tu cuenta no tiene acceso a la página solicitada.',
+    );
     await page.goto('/admin/usuarios');
     await expect(page).toHaveURL(/\/dashboard\?reason=forbidden$/);
+    await expect(page.getByRole('status').first()).toContainText(
+      'Tu cuenta no tiene acceso a la página solicitada.',
+    );
   }
   await page.context().clearCookies();
   await page.goto('/login');
@@ -199,6 +207,9 @@ test('Los otros roles conservan su dashboard y no entran al portal', async ({
   await expect(page).toHaveURL(/\/dashboard$/);
   await page.goto('/portal');
   await expect(page).toHaveURL(/\/dashboard\?reason=forbidden$/);
+  await expect(page.getByRole('status').first()).toContainText(
+    'Tu cuenta no tiene acceso a la página solicitada.',
+  );
 });
 
 test('Sin sesión o con cookies falsas nunca se muestra el portal', async ({

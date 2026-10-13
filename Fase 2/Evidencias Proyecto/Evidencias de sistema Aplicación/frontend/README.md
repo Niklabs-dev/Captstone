@@ -22,7 +22,7 @@ No se envían tokens ni la URL interna al JavaScript del navegador.
 - El access token vence según `expiresIn` del backend. La cookie de renovación
   usa `AUTH_REFRESH_COOKIE_MAX_AGE` (604800 segundos por defecto), que debe
   alinearse con `JWT_REFRESH_EXPIRES_IN`.
-- `/dashboard`, `/admin/*` y `/portal/*` pasan por `src/proxy.ts`.
+- Todas las páginas privadas pasan por `src/proxy.ts`, incluidos módulos futuros.
   Se verifica el JWT con `GET /auth/me`; una cookie inventada no da acceso.
   El destino protegido también valida la sesión antes de mostrar datos.
 - Una sesión inválida redirige al login. Un fallo del backend deniega el acceso
@@ -50,6 +50,14 @@ La política se centraliza en `src/lib/navigation.ts`; login, renovación,
 inicio, login con sesión abierta y proxy usan el rol verificado por NestJS.
 No se toman decisiones a partir de cookies de rol o datos enviados por el cliente.
 
+El proxy protege páginas por defecto. Solo excluye inicio y login (que resuelven
+su sesión en servidor), las API (autorización propia y respuestas JSON), recursos
+internos de Next y los archivos públicos enumerados en el matcher. Un nombre
+con extensión, como `/modulo-nuevo/informe.csv`, sigue protegido. Al añadir un
+archivo público se registra explícitamente su ruta; no se excluye cualquier
+URL que contenga un punto. El dashboard también explica las redirecciones
+con `reason=forbidden`.
+
 El portal adapta la paleta, tipografía, logo, barra lateral y tarjetas del
 mockup administrador. Muestra únicamente la cuenta conectada y las acciones
 de sesión. Documentos, liquidaciones y propinas se habilitarán en sus tareas.
@@ -60,7 +68,7 @@ Pruebas del portal:
 
 ```powershell
 npm run test:portal
-# Después de npm run build:
+# Incluye automáticamente npm run build:
 npm run test:integration
 # Instalar Chromium una sola vez:
 npx playwright install chromium
@@ -91,7 +99,7 @@ npm run test:integration
 Las pruebas cubren validación de credenciales, respuestas malformadas, cookies,
 protección de origen, JWT inválido, renovación y caídas del backend.
 
-`test:integration` requiere un build previo y prueba el frontend compilado en
+`test:integration` ejecuta primero `npm run build` y prueba el frontend compilado en
 el puerto 3119 contra un backend HTTP simulado. No sustituye la validación con
 NestJS y PostgreSQL reales.
 
