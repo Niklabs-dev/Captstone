@@ -1,0 +1,4 @@
+# Skills de agentes de IA (instalación local de cada desarrollador)
+.agents/
+.claude/skills/
+skills-lock.json
