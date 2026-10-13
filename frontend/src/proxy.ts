@@ -36,15 +36,8 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 }
 export const config = {
   matcher: [
-    '/dashboard/:path*',
-    '/admin/:path*',
-    '/portal/:path*',
-    '/documentos/:path*',
-    '/propinas/:path*',
-    '/ventas/:path*',
-    '/caja/:path*',
-    '/inventario/:path*',
-    '/usuarios/:path*',
-    '/auditoria/:path*',
+    // Las API validan su sesión y permisos y responden JSON, nunca redirecciones HTML.
+    // Inicio y login resuelven su destino en sus propios Server Components.
+    '/((?!$|login(?:/|$)|api(?:/|$)|_next(?:/|$)|favicon\\.ico$|logo\\.png$|robots\\.txt$|sitemap\\.xml$).*)',
   ],
 };

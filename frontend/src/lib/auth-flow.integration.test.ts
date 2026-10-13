@@ -137,6 +137,30 @@ test('Flujo HTTP con Next.js compilado y contrato de backend simulado', async ()
     let response = await fetch(origin + '/dashboard', { redirect: 'manual' });
     assert.equal(response.status, 307);
     assert.ok(response.headers.get('location')?.includes('/login'));
+    // Un módulo futuro queda protegido sin añadirlo a una lista de rutas.
+    for (const path of [
+      '/modulo-nuevo',
+      '/modulo-nuevo/informe.csv',
+      '/login-extra',
+    ]) {
+      response = await fetch(origin + path, { redirect: 'manual' });
+      assert.equal(response.status, 307, path);
+      assert.ok(
+        response.headers.get('location')?.includes('/login?reason=session'),
+      );
+    }
+    // Archivos públicos y API no reciben redirecciones HTML del proxy.
+    for (const path of [
+      '/login',
+      '/logo.png',
+      '/favicon.ico',
+      '/robots.txt',
+      '/api/modulo-nuevo',
+    ]) {
+      response = await fetch(origin + path, { redirect: 'manual' });
+      assert.equal(response.headers.get('location'), null, path);
+      assert.ok([200, 404].includes(response.status), path);
+    }
     response = await fetch(origin + '/api/auth/login', {
       method: 'POST',
       headers: {
@@ -238,6 +262,8 @@ test('Flujo HTTP con Next.js compilado y contrato de backend simulado', async ()
           '/inventario',
           '/usuarios',
           '/auditoria',
+          '/modulo-nuevo',
+          '/modulo-nuevo/informe.csv',
         ]) {
           response = await fetch(origin + path + '?next=https://evil.example', {
             headers,
@@ -261,6 +287,15 @@ test('Flujo HTTP con Next.js compilado y contrato de backend simulado', async ()
           response.headers
             .get('location')
             ?.endsWith('/dashboard?reason=forbidden'),
+        );
+        response = await fetch(origin + '/dashboard?reason=forbidden', {
+          headers,
+        });
+        assert.equal(response.status, 200);
+        assert.ok(
+          (await response.text()).includes(
+            'Tu cuenta no tiene acceso a la página solicitada.',
+          ),
         );
       }
       response = await post('/api/auth/refresh');

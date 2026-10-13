@@ -85,3 +85,31 @@ Integrar primero #16 y luego cambiar la base de #19 a main.
 En revisión (registro local). No se modificó Notion: la integración no tiene acceso a la página
 compartida de Capstone. El registro local documenta el resultado y el hash.
 Solo se marcará Hecho cuando el usuario confirme la revisión.
+
+## Correcciones de revisión — 13 de octubre de 2026
+
+La revisión de Niklabs aprobó funcionalmente T09/T10/T11 y pidió preparar la
+integración en orden #16 → #19 → #18. T09 se actualizó sobre main `3945efd`;
+T11 conserva solo sus commits sobre T09 mientras esta dependencia siga abierta.
+Una vez integrado #16 se reubica T11 sobre main y se cambia la base del PR.
+T10 resuelve sus conflictos sobre T11 para conservar login y navegación por rol.
+
+El proxy protege páginas futuras por defecto y excluye únicamente las rutas
+públicas explícitas, los recursos de Next y las API. Las API mantienen su
+autorización y contratos JSON; no se sustituyen por redirecciones HTML.
+El dashboard muestra un aviso accesible cuando recibe `reason=forbidden`.
+Los scripts ya usan `&&` legible y la integración HTTP ejecuta su build.
+Se retiró el BOM de la página inicial en T09 y su versión de T11.
+
+La regresión HTTP comprueba un módulo aún inexistente, una ruta con extensión,
+los recursos públicos y el aviso del dashboard para los roles autorizados.
+La prueba de navegador también valida esas rutas y los avisos.
+La nueva validación de producción se realiza en Docker porque OneDrive impide
+eliminar archivos de `.next/build/chunks` durante el build local (EPERM).
+No se modifican fuentes de backend ni se suprimen comprobaciones de seguridad.
+
+La exportación del tablero del 13 de octubre confirma vacíos los campos
+`ID commit` y `Comentario`. La conexión de Notion devuelve 404 incluso para
+la ficha exacta de T11; se prepara evidencia local para copiar al tablero vivo.
+Las sugerencias que la revisión pide convertir en tareas nuevas se registran
+aparte, sin atribuirles IDs ni afirmar su creación remota.

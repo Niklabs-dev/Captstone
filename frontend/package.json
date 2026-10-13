@@ -7,12 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsc -p tsconfig.test.json \u0026\u0026 node --test .test-build/auth.test.js",
-    "test:integration": "tsc -p tsconfig.test.json \u0026\u0026 node --test .test-build/auth-flow.integration.test.js",
-    "test:live": "tsc -p tsconfig.test.json \u0026\u0026 node --test .test-build/auth-live.integration.test.js",
+    "test": "tsc -p tsconfig.test.json && node --test .test-build/auth.test.js",
+    "test:integration": "npm run build && tsc -p tsconfig.test.json && node --test .test-build/auth-flow.integration.test.js",
+    "test:live": "tsc -p tsconfig.test.json && node --test .test-build/auth-live.integration.test.js",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"*.{ts,mjs}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.{ts,mjs}\"",
-    "test:portal": "tsc -p tsconfig.test.json \u0026\u0026 node --test .test-build/navigation.test.js",
+    "test:portal": "tsc -p tsconfig.test.json && node --test .test-build/navigation.test.js",
     "test:portal:e2e": "playwright test --config=playwright.portal.config.ts"
   },
   "dependencies": {
