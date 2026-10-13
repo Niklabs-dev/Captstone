@@ -109,3 +109,8 @@ de login, renovación y logout contra frontend, NestJS y PostgreSQL reales aprob
 
 Revalidación final: 13 pruebas unitarias, integración HTTP simulada, flujo con
 servicios reales, lint, formato y build local aprobados después del ajuste visual.
+
+
+## Revisión del 13 de octubre de 2026
+
+Rama rebasada sobre main 3945efd y BOM de la página inicial eliminado (a677328). Verificación final aprobada en Docker: lint, formato, build de producción, 13 unitarias e integración HTTP. El build local encontró EPERM en archivos generados de OneDrive; la validación Linux evita ese bloqueo sin cambiar el código. PR #16 continúa abierto; no se marca Hecho ni se integra sin confirmación de revisión.
