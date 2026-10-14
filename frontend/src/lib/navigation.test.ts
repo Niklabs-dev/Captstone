@@ -37,6 +37,7 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
     { href: '/dashboard', label: 'Inicio' },
     { href: '/admin/usuarios', label: 'Usuarios' },
     { href: '/admin/auditoria', label: 'Auditoría' },
+    { href: '/admin/alertas-dt', label: 'Alertas DT' },
   ]);
 });
 
@@ -126,4 +127,21 @@ test('El cliente rechaza destinos externos o no autorizados', () => {
     assert.equal(isHomePath(destination), false);
   assert.equal(isHomePath('/portal'), true);
   assert.equal(isHomePath('/dashboard'), true);
+});
+
+test('El módulo de SPRINT-2-T11 usa la navegación común y respeta los roles', () => {
+  assert.deepEqual(getNavigationView('/admin/alertas-dt'), {
+    href: '/admin/alertas-dt',
+    title: 'Alertas de registro en la DT',
+  });
+  for (const role of ROLES) {
+    const allowed = role === 'ADMINISTRADOR';
+    assert.equal(
+      getNavigationItems(role).some(
+        (item) => item.href === '/admin/alertas-dt',
+      ),
+      allowed,
+    );
+    assert.equal(getPageRedirect(role, '/admin/alertas-dt') === null, allowed);
+  }
 });
