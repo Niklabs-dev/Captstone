@@ -3,7 +3,7 @@ import type { Role } from './auth';
 export type HomePath = '/portal' | '/dashboard';
 
 export interface NavigationItem {
-  href: HomePath | '/admin/usuarios' | '/admin/auditoria';
+  href: HomePath | '/admin/usuarios' | '/admin/auditoria' | '/admin/documentos';
   label: string;
 }
 
@@ -12,6 +12,7 @@ export function getNavigationView(pathname: string): {
   title: string;
 } {
   const views = [
+    { href: '/admin/documentos', title: 'Gestor documental' },
     { href: '/dashboard', title: 'Inicio' },
     { href: '/admin/usuarios', title: 'Usuarios y roles' },
     { href: '/admin/auditoria', title: 'Auditoría del sistema' },
@@ -35,6 +36,7 @@ export function getNavigationItems(
         home,
         { href: '/admin/usuarios', label: 'Usuarios' },
         { href: '/admin/auditoria', label: 'Auditoría' },
+        { href: '/admin/documentos', label: 'Documentos' },
       ]
     : [home];
 }
