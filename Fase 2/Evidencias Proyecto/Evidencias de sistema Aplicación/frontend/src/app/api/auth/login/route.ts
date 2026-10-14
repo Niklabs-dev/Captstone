@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { hasTrustedOrigin, parseCredentials } from '@/lib/auth';
 import { requestTokens } from '@/lib/auth-backend';
 import { setSessionCookies } from '@/lib/session';
+import { getHomePath } from '@/lib/navigation';
 export async function POST(request: Request): Promise<NextResponse> {
   if (!hasTrustedOrigin(request))
     return NextResponse.json(
@@ -21,9 +22,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       { message: result.message },
       { status: result.status },
     );
-  // La redirección por rol pertenece a SPRINT-1-T11; aquí se entrega un destino protegido común.
   return setSessionCookies(
-    NextResponse.json({ redirectTo: '/dashboard' }),
+    NextResponse.json({ redirectTo: getHomePath(result.data.user.role) }),
     result.data,
   );
 }
