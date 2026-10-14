@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "tsc -p tsconfig.test.json && node --test .test-build/auth.test.js",
+    "test:integration": "tsc -p tsconfig.test.json && node --test .test-build/auth-flow.integration.test.js",
+    "test:live": "tsc -p tsconfig.test.json && node --test .test-build/auth-live.integration.test.js",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"*.{ts,mjs}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.{ts,mjs}\""
   },
