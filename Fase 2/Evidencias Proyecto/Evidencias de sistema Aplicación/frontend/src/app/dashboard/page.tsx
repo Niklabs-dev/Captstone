@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import type { ReactElement } from 'react';
 import { getSession } from '@/lib/session';
 import { SessionActions } from '@/components/SessionActions';
@@ -36,6 +37,15 @@ export default async function DashboardPage({
           Sesión iniciada como {session.data.email}.
         </p>
         <SessionActions />
+        {session.data.role === 'ADMINISTRADOR' && (
+          <Link
+            href="/admin/documentos"
+            prefetch={false}
+            className="mt-5 inline-block text-sm font-semibold text-salmon-ink underline underline-offset-4"
+          >
+            Abrir gestor documental
+          </Link>
+        )}
       </section>
     </main>
   );
