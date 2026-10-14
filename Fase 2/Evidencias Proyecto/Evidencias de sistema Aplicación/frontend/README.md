@@ -124,3 +124,48 @@ desde la carpeta de la aplicación y comprobar:
 
 La aprobación del PR, el merge y la aceptación en Sprint Review quedan pendientes
 de revisión del equipo antes de marcar la tarea como Hecho.
+
+## SPRINT-1-T10: administración de usuarios
+
+Vista: `/admin/usuarios`. Crear, listar, buscar, filtrar por rol, local y estado,
+y desactivar cuentas con confirmación. Solo el administrador puede acceder.
+La sesión `mf_access` se verifica mediante NestJS; ni el JWT ni las contraseñas
+guardadas se exponen en las respuestas al navegador. Las mutaciones requieren
+el origen del frontend y el backend conserva la auditoría de las operaciones.
+
+T10 se entrega sobre T11 (PR #19), que depende del login T09 (PR #16). El diff del PR contiene solo usuarios. Se integran #16, #19 y después #18; tras integrar T11 se cambia la base de #18 a main.
+
+Configuración del servidor: `BACKEND_INTERNAL_URL` y, opcionalmente,
+`USER_MANAGEMENT_STORES` (ver `.env.example`). Como el backend todavía no expone
+un catálogo de locales, se combinan los locales de usuarios existentes con los
+locales configurados. Los IDs deben corresponder a locales activos en PostgreSQL;
+el backend verifica su existencia. Sin locales disponibles solo se pueden crear
+administradores y contadores. No se inventan IDs ni se muestran campos técnicos
+para asignar un local.
+
+```powershell
+npm ci
+npm run lint
+npm run format:check
+npm run test:users
+npm run build
+npm run test:users:integration
+npx playwright install chromium
+```
+
+Las pruebas de navegador usan un proyecto Docker exclusivo y datos ficticios.
+Configura `TEST_USERS_ADMIN_EMAIL` y `TEST_USERS_ADMIN_PASSWORD` con las credenciales
+del seed de desarrollo y ejecuta desde `frontend/`:
+
+```powershell
+./scripts/test-users.ps1
+```
+
+El script usa puertos 3102 (frontend), 3103 (backend) y 5434 (PostgreSQL), crea
+un local ficticio y ejecuta Playwright en escritorio y móvil. Las cuentas de
+prueba quedan desactivadas; el volumen y la auditoría se conservan exclusivamente
+en `capstone-sprint1-t10` para inspección. No ejecutar contra datos de producción.
+Las capturas y trazas se guardan en `test-results/`, fuera de Git.
+
+
+La sesión de usuarios se limpia mediante /admin/usuarios/session-expired cuando la cuenta ya no está activa. Este Route Handler de navegación revalida la cuenta antes de borrar cookies y conserva el host público usando Location relativa. Las API de usuarios siguen respondiendo JSON. test:users:integration ejecuta su build automáticamente.

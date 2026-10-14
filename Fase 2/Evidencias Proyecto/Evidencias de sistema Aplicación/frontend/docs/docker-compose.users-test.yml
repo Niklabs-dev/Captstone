@@ -1,0 +1,21 @@
+# Entorno exclusivo de SPRINT-1-T10: no reutiliza la base de datos de otra tarea.
+services:
+  db:
+    container_name: capstone_t10_db
+    ports: !override
+      - "5434:5432"
+  backend:
+    container_name: capstone_t10_backend
+    ports: !override
+      - "3103:3001"
+  migrate:
+    container_name: capstone_t10_migrate
+  seed:
+    container_name: capstone_t10_seed
+  frontend:
+    container_name: capstone_t10_frontend
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:3001
+      USER_MANAGEMENT_STORES: ${USER_MANAGEMENT_STORES:-[]}
+    ports: !override
+      - "3102:3000"
