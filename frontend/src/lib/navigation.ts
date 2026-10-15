@@ -3,7 +3,7 @@ import type { Role } from './auth';
 export type HomePath = '/portal' | '/dashboard';
 
 export interface NavigationItem {
-  href: HomePath | '/admin/usuarios' | '/admin/auditoria';
+  href: HomePath | '/admin/usuarios' | '/admin/auditoria' | '/liquidaciones';
   label: string;
 }
 
@@ -12,6 +12,7 @@ export function getNavigationView(pathname: string): {
   title: string;
 } {
   const views = [
+    { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
     { href: '/dashboard', title: 'Inicio' },
     { href: '/admin/usuarios', title: 'Usuarios y roles' },
     { href: '/admin/auditoria', title: 'Auditoría del sistema' },
@@ -35,8 +36,11 @@ export function getNavigationItems(
         home,
         { href: '/admin/usuarios', label: 'Usuarios' },
         { href: '/admin/auditoria', label: 'Auditoría' },
+        { href: '/liquidaciones', label: 'Liquidaciones' },
       ]
-    : [home];
+    : role === 'CONTADOR'
+      ? [home, { href: '/liquidaciones', label: 'Liquidaciones' }]
+      : [home];
 }
 
 export function getHomePath(role: Role): HomePath {
@@ -49,6 +53,12 @@ export function getPageRedirect(role: Role, pathname: string): string | null {
   if (role === 'TRABAJADOR')
     return inPortal ? null : '/portal?reason=forbidden';
   if (inPortal) return '/dashboard?reason=forbidden';
+  if (
+    (pathname === '/liquidaciones' || pathname.startsWith('/liquidaciones/')) &&
+    role !== 'ADMINISTRADOR' &&
+    role !== 'CONTADOR'
+  )
+    return '/dashboard?reason=forbidden';
   const inAdmin = pathname === '/admin' || pathname.startsWith('/admin/');
   if (inAdmin && role !== 'ADMINISTRADOR') return '/dashboard?reason=forbidden';
   return null;

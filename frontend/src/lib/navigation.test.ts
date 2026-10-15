@@ -37,6 +37,7 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
     { href: '/dashboard', label: 'Inicio' },
     { href: '/admin/usuarios', label: 'Usuarios' },
     { href: '/admin/auditoria', label: 'Auditoría' },
+    { href: '/liquidaciones', label: 'Liquidaciones' },
   ]);
 });
 
@@ -45,7 +46,7 @@ test('Cada rol recibe únicamente enlaces permitidos y el trabajador conserva su
     for (const item of getNavigationItems(role))
       assert.equal(getPageRedirect(role, item.href), null);
     assert.equal(getNavigationItems(role)[0].href, getHomePath(role));
-    if (role !== 'ADMINISTRADOR')
+    if (role !== 'ADMINISTRADOR' && role !== 'CONTADOR')
       assert.equal(getNavigationItems(role).length, 1);
   }
   assert.deepEqual(getNavigationItems(null), [
@@ -126,4 +127,19 @@ test('El cliente rechaza destinos externos o no autorizados', () => {
     assert.equal(isHomePath(destination), false);
   assert.equal(isHomePath('/portal'), true);
   assert.equal(isHomePath('/dashboard'), true);
+});
+
+test('El módulo de SPRINT-2-T16 usa la navegación común y respeta los roles', () => {
+  assert.deepEqual(getNavigationView('/liquidaciones'), {
+    href: '/liquidaciones',
+    title: 'Gestión de liquidaciones',
+  });
+  for (const role of ROLES) {
+    const allowed = role === 'ADMINISTRADOR' || role === 'CONTADOR';
+    assert.equal(
+      getNavigationItems(role).some((item) => item.href === '/liquidaciones'),
+      allowed,
+    );
+    assert.equal(getPageRedirect(role, '/liquidaciones') === null, allowed);
+  }
 });
