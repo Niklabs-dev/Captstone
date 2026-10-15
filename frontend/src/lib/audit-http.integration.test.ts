@@ -40,7 +40,7 @@ test('Auditoría HTTP: autorización, filtros, paginación, proyección segura y
       response.end(JSON.stringify({ ...user, role: roleMap[token] }));
       return;
     }
-    if (request.url === '/users') {
+    if (request.url === '/users' || request.url?.startsWith('/users?')) {
       response.end(
         JSON.stringify(
           usersMalformed
@@ -48,14 +48,20 @@ test('Auditoría HTTP: autorización, filtros, paginación, proyección segura y
             : [
                 {
                   id: user.id,
+                  email: user.email,
+                  firstName: 'Administrador',
+                  lastName: 'Prueba',
                   isActive: active,
-                  role: { code: role },
+                  role: { code: role, name: role },
                   store: null,
                 },
                 {
                   id: store.id,
+                  email: 'worker@example.test',
+                  firstName: 'Trabajador',
+                  lastName: 'Prueba',
                   isActive: true,
-                  role: { code: 'TRABAJADOR' },
+                  role: { code: 'TRABAJADOR', name: 'Trabajador' },
                   store,
                 },
               ],
@@ -233,8 +239,50 @@ test('Auditoría HTTP: autorización, filtros, paginación, proyección segura y
     usersMalformed = true;
     response = await fetch(origin + '/api/audit-logs', { headers });
     assert.equal(response.status, 502);
+    response = await fetch(origin + '/session-expired', {
+      headers,
+      redirect: 'manual',
+    });
+    assert.equal(response.status, 502);
+    assert.equal(response.headers.get('set-cookie'), null);
     usersMalformed = false;
+    response = await fetch(origin + '/session-expired', {
+      headers,
+      redirect: 'manual',
+    });
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), '/dashboard');
+    assert.equal(response.headers.get('set-cookie'), null);
     active = false;
+    // Abrir la página primero reproduce el fallo: la API no limpia previamente el navegador.
+    response = await fetch(origin + '/admin/auditoria', {
+      headers,
+      redirect: 'manual',
+    });
+    if (response.status === 307) {
+      assert.equal(response.headers.get('location'), '/session-expired');
+    } else {
+      // Con loading.tsx, Next puede enviar la redirección dentro de la respuesta en streaming.
+      assert.equal(response.status, 200);
+      const redirectHtml = await response.text();
+      assert.ok(redirectHtml.includes('NEXT_REDIRECT'));
+      assert.ok(redirectHtml.includes('/session-expired'));
+      assert.ok(!redirectHtml.includes('USER_CREATED'));
+    }
+    response = await fetch(origin + '/session-expired', {
+      headers,
+      redirect: 'manual',
+    });
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), '/login?reason=session');
+    for (const name of ['mf_access', 'mf_refresh']) {
+      const cookie = response.headers
+        .getSetCookie()
+        .find((value) => value.startsWith(name + '='));
+      assert.ok(cookie?.includes('Max-Age=0'));
+      assert.ok(cookie?.includes('HttpOnly'));
+    }
+    assert.ok(response.headers.get('cache-control')?.includes('no-store'));
     response = await fetch(origin + '/api/audit-logs', { headers });
     assert.equal(response.status, 401);
     assert.ok(
@@ -246,6 +294,16 @@ test('Auditoría HTTP: autorización, filtros, paginación, proyección segura y
     role = 'CONTADOR';
     response = await fetch(origin + '/api/audit-logs', { headers });
     assert.equal(response.status, 403);
+    response = await fetch(origin + '/session-expired', {
+      headers,
+      redirect: 'manual',
+    });
+    assert.equal(response.status, 303);
+    assert.equal(
+      response.headers.get('location'),
+      '/dashboard?reason=forbidden',
+    );
+    assert.equal(response.headers.get('set-cookie'), null);
     role = 'ADMINISTRADOR';
     auditStatus = 503;
     response = await fetch(origin + '/api/audit-logs', { headers });

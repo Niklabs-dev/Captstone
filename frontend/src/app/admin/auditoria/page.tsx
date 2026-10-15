@@ -21,7 +21,7 @@ export default async function AuditPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }): Promise<ReactElement> {
   const session = await getAuditSession();
-  if (!session.ok && session.status === 401) redirect('/login?reason=session');
+  if (!session.ok && session.status === 401) redirect('/session-expired');
   if (!session.ok && session.status === 403)
     redirect('/dashboard?reason=forbidden');
   const search = await searchParams;
@@ -39,7 +39,7 @@ export default async function AuditPage({
       ? await fetchAuditPage(session.data.token, filters.data)
       : null;
   if (result && !result.ok && result.status === 401)
-    redirect('/login?reason=session');
+    redirect('/session-expired');
   if (result && !result.ok && result.status === 403)
     redirect('/dashboard?reason=forbidden');
   const stores = mergeAuditStores(

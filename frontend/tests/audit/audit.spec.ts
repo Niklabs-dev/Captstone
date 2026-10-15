@@ -283,6 +283,13 @@ test('Cuenta administradora desactivada pierde acceso aunque conserve un JWT vá
       httpOnly: true,
       sameSite: 'Lax',
     },
+    {
+      name: 'mf_refresh',
+      value: tokens.refreshToken,
+      url: baseURL!,
+      httpOnly: true,
+      sameSite: 'Lax',
+    },
   ]);
   expect((await page.context().request.get('/api/audit-logs')).status()).toBe(
     200,
@@ -294,9 +301,21 @@ test('Cuenta administradora desactivada pierde acceso aunque conserve un JWT vá
       })
     ).status(),
   ).toBe(200);
-  const response = await page.context().request.get('/api/audit-logs');
+  const response = await request.get(baseURL! + '/api/audit-logs', {
+    headers: { Cookie: 'mf_access=' + tokens.accessToken },
+  });
+  for (const name of ['mf_access', 'mf_refresh'])
+    expect(
+      (await page.context().cookies()).some((cookie) => cookie.name === name),
+    ).toBe(true);
   expect(response.status()).toBe(401);
   await page.goto('/admin/auditoria');
+  await expect(page).toHaveURL(/\/login\?reason=session$/);
+  for (const name of ['mf_access', 'mf_refresh'])
+    expect(
+      (await page.context().cookies()).some((cookie) => cookie.name === name),
+    ).toBe(false);
+  await page.reload();
   await expect(page).toHaveURL(/\/login\?reason=session$/);
 });
 

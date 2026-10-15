@@ -49,10 +49,7 @@ página actual. Debe contener la lista de UUID/nombres reales del despliegue.
 Configuración inválida produce error explícito y no consulta resultados.
 Un UUID válido en la URL también permite consultar un local fuera del selector.
 
-La tarea depende de T11 (PR #19), a su vez dependiente del login (PR #16).
-Se entrega un PR separado sobre T11 para revisar únicamente esta tarea.
-La gestión de usuarios de T10 permanece independiente.
-Integrar primero las dependencias y luego cambiar la base a main.
+T09, T11 y T10 ya están integradas en main 89877cd. La rama de T16 incorpora ese main mediante merge, conservando su historial y el PR #20 separado, con base main.
 
 ## Validación
 
@@ -81,3 +78,34 @@ No se marca Hecho ni se fusiona el PR sin confirmación de revisión.
 ## Compatibilidad con la revisión del 13 de octubre
 
 Rama reubicada sobre T11 corregido, manteniendo el diff exclusivamente en T16. Commit de implementación vigente: 7b1017d (los hashes anteriores son históricos). Se aprobaron nuevamente build Docker, lint, formato, 12 unitarias de auditoría, integración HTTP de auditoría y regresión HTTP de autenticación. Se conservan las diez ejecuciones de navegador aprobadas en la entrega original; no se atribuyen a esta revisión. PR #20 sigue pendiente de revisión.
+
+## Correcciones de revisión — 15 de octubre de 2026
+
+Merge de origin/main (89877cd) en la rama existente, sin rebase ni force push.
+Se resolvieron exactamente tres conflictos: docker-compose.yml conserva
+USER_MANAGEMENT_STORES y AUDIT_STORES; package.json conserva test:users* y
+test:audit*; .env.example conserva ambos bloques y elimina el comentario huérfano.
+El script test:audit:integration compila con npm run build antes de probar.
+
+Usuarios y auditoría redirigen sus errores 401 a /session-expired. Este handler
+común revalida la cuenta y borra mf_access y mf_refresh solo ante 401; responde
+303 con Location relativa al login. Una cuenta activa vuelve al dashboard sin
+borrar cookies; permisos cambiados vuelven al dashboard con aviso; un error de
+verificación conserva las cookies. La ruta anterior de usuarios queda como alias.
+El proxy permite que la ruta común resuelva su propia sesión, incluso sin token.
+
+Se reforzaron las pruebas para conservar ambas cookies antes de abrir cada página:
+las consultas API se realizan con un contexto separado y no pueden ocultar el
+fallo limpiando previamente el navegador. Se comprueba la eliminación de ambas
+cookies y, en auditoría, que recargar el login no regrese al dashboard.
+
+Validación: 44 unitarias (13 autenticación, 5 navegación, 14 usuarios, 12 auditoría),
+3 integraciones HTTP y 12 escenarios de navegador pasan (10 auditoría y 2 de sesión
+inactiva de usuarios, en escritorio/móvil). Build de producción Docker, lint y
+formato de ambos proyectos pasan. TypeScript y formato de las pruebas verifican
+la versión final. Navegador contra Next.js, NestJS y PostgreSQL reales del proyecto
+exclusivo capstone-sprint1-t16; no se modifican datos de producción.
+
+No se cambia backend, schema ni migraciones. Endpoint de locales y validación de
+isActive en JwtStrategy quedan como tareas independientes, tal como la revisión
+los identifica. PR #20 permanece en revisión; no se fusiona ni marca Hecho.
