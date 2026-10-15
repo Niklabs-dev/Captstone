@@ -1,4 +1,3 @@
-import { ApplicationShell } from '@/components/ApplicationShell';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
@@ -14,18 +13,14 @@ export default async function UsersPage(): Promise<ReactElement> {
     if (session.status === 401) redirect('/session-expired');
     if (session.status === 403) redirect('/dashboard?reason=forbidden');
     return (
-      <ApplicationShell
-        user={null}
-        activePath="/admin/usuarios"
-        title="Usuarios y roles"
-      >
+      <>
         <p role="alert" className="mt-4 text-u-crit">
           {session.message}
         </p>
         <Link href="/admin/usuarios" className="mt-4 inline-block underline">
           Intentar nuevamente
         </Link>
-      </ApplicationShell>
+      </>
     );
   }
   const result = await listManagedUsers(session.token);
@@ -45,17 +40,13 @@ export default async function UsersPage(): Promise<ReactElement> {
       'No se pudo cargar el catálogo de locales. Intenta nuevamente más tarde.';
   }
   return (
-    <ApplicationShell
-      user={{ email: session.user.email, role: 'ADMINISTRADOR' }}
-      activePath="/admin/usuarios"
-      title="Usuarios y roles"
-    >
+    <>
       <UsersPanel
         initialUsers={users}
         initialError={error}
         currentUserId={session.user.id}
         stores={stores}
       />
-    </ApplicationShell>
+    </>
   );
 }

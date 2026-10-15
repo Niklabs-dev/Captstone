@@ -6,7 +6,31 @@ import {
   getPageRedirect,
   isHomePath,
   getNavigationItems,
+  getNavigationView,
 } from './navigation';
+
+test('El layout identifica la vista activa y el título sin confundir prefijos de rutas', () => {
+  assert.deepEqual(getNavigationView('/dashboard'), {
+    href: '/dashboard',
+    title: 'Inicio',
+  });
+  assert.deepEqual(getNavigationView('/admin/usuarios/123'), {
+    href: '/admin/usuarios',
+    title: 'Usuarios y roles',
+  });
+  assert.deepEqual(getNavigationView('/admin/auditoria'), {
+    href: '/admin/auditoria',
+    title: 'Auditoría del sistema',
+  });
+  assert.deepEqual(getNavigationView('/portal/liquidaciones'), {
+    href: '/portal',
+    title: 'Portal del Trabajador',
+  });
+  assert.deepEqual(getNavigationView('/admin/usuarios-publicos'), {
+    href: null,
+    title: 'Gestión interna',
+  });
+});
 
 test('La navegación permite recorrer inicio, usuarios y auditoría al administrador', () => {
   assert.deepEqual(getNavigationItems('ADMINISTRADOR'), [

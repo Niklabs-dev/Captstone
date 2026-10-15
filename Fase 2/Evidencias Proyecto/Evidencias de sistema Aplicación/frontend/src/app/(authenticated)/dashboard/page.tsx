@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { ReactElement } from 'react';
 import { getSession } from '@/lib/session';
-import { ApplicationShell } from '@/components/ApplicationShell';
 import { getPageRedirect } from '@/lib/navigation';
 export default async function DashboardPage({
   searchParams,
@@ -18,11 +17,7 @@ export default async function DashboardPage({
   if (destination) redirect(destination);
   const params = await searchParams;
   return (
-    <ApplicationShell
-      user={session.data}
-      activePath="/dashboard"
-      title="Inicio"
-    >
+    <>
       <section className="max-w-3xl rounded-[14px] border border-line bg-bg p-6">
         <h2 className="mb-3 text-xl font-bold">Bienvenido al sistema</h2>
         {params.reason === 'forbidden' && (
@@ -56,6 +51,6 @@ export default async function DashboardPage({
           </div>
         )}
       </section>
-    </ApplicationShell>
+    </>
   );
 }
