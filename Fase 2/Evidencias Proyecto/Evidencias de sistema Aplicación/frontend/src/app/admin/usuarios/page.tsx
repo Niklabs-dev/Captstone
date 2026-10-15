@@ -11,7 +11,7 @@ export const metadata: Metadata = { title: 'Usuarios | MoiFood' };
 export default async function UsersPage(): Promise<ReactElement> {
   const session = await getUsersSession();
   if (!session.ok) {
-    if (session.status === 401) redirect('/admin/usuarios/session-expired');
+    if (session.status === 401) redirect('/session-expired');
     if (session.status === 403) redirect('/dashboard?reason=forbidden');
     return (
       <main className="mx-auto max-w-lg p-6">
@@ -26,8 +26,7 @@ export default async function UsersPage(): Promise<ReactElement> {
     );
   }
   const result = await listManagedUsers(session.token);
-  if (!result.ok && result.status === 401)
-    redirect('/admin/usuarios/session-expired');
+  if (!result.ok && result.status === 401) redirect('/session-expired');
   if (!result.ok && result.status === 403)
     redirect('/dashboard?reason=forbidden');
   const users = result.ok ? result.data : [];

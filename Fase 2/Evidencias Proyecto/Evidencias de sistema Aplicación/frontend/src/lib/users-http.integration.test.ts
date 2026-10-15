@@ -209,19 +209,17 @@ test(
       assert.ok(!html.includes('passwordHash'));
       assert.ok(!html.includes('admin-token'));
       // La transición de sesión no cierra una cuenta todavía activa.
-      const activeSession = await send('/admin/usuarios/session-expired');
+      const activeSession = await send('/session-expired');
       assert.equal(activeSession.status, 303);
-      assert.equal(activeSession.headers.get('location'), '/admin/usuarios');
+      assert.equal(activeSession.headers.get('location'), '/dashboard');
       assert.equal(activeSession.headers.get('set-cookie'), null);
       administrator.isActive = false;
       const inactivePage = await send('/admin/usuarios');
       assert.equal(inactivePage.status, 307);
       assert.ok(
-        inactivePage.headers
-          .get('location')
-          ?.endsWith('/admin/usuarios/session-expired'),
+        inactivePage.headers.get('location')?.endsWith('/session-expired'),
       );
-      const expiredSession = await send('/admin/usuarios/session-expired');
+      const expiredSession = await send('/session-expired');
       assert.equal(expiredSession.status, 303);
       assert.equal(
         expiredSession.headers.get('location'),

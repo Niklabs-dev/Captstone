@@ -204,7 +204,28 @@ test('Bloquea un administrador desactivado aunque su JWT siga vigente', async ({
   if (!isObject(user) || typeof user.id !== 'string')
     throw new Error('Alta inválida.');
   const restricted = await browser.newContext();
-  await authenticate(restricted, await login(request, email, password));
+  const session = await request.post(`${backendUrl}/auth/login`, {
+    data: { email, password },
+  });
+  expect(session.status()).toBe(200);
+  const tokens: unknown = await session.json();
+  if (
+    !isObject(tokens) ||
+    typeof tokens.accessToken !== 'string' ||
+    typeof tokens.refreshToken !== 'string'
+  )
+    throw new Error('Login de prueba sin ambas credenciales.');
+  await authenticate(restricted, tokens.accessToken);
+  await restricted.addCookies([
+    {
+      name: 'mf_refresh',
+      value: tokens.refreshToken,
+      url: frontendUrl,
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+    },
+  ]);
   expect(
     (await restricted.request.get(`${frontendUrl}/api/users`)).status(),
   ).toBe(200);
@@ -217,16 +238,27 @@ test('Bloquea un administrador desactivado aunque su JWT siga vigente', async ({
     ).status(),
   ).toBe(200);
   expect(
-    (await restricted.request.get(`${frontendUrl}/api/users`)).status(),
+    (
+      await request.get(`${frontendUrl}/api/users`, {
+        headers: { Cookie: `mf_access=${tokens.accessToken}` },
+      })
+    ).status(),
   ).toBe(401);
   expect(
     (
-      await restricted.request.post(`${frontendUrl}/api/users`, {
-        headers: { Origin: frontendUrl },
+      await request.post(`${frontendUrl}/api/users`, {
+        headers: {
+          Origin: frontendUrl,
+          Cookie: `mf_access=${tokens.accessToken}`,
+        },
         data: {},
       })
     ).status(),
   ).toBe(401);
+  for (const name of ['mf_access', 'mf_refresh'])
+    expect(
+      (await restricted.cookies()).some((cookie) => cookie.name === name),
+    ).toBe(true);
   const page = await restricted.newPage();
   await page.goto(`${frontendUrl}/admin/usuarios`);
   expect(page.url()).toContain('/login?reason=session');

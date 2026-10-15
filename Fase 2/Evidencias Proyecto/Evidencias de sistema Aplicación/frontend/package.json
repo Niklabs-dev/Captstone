@@ -14,6 +14,9 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.{ts,mjs}\"",
     "test:portal": "tsc -p tsconfig.test.json && node --test .test-build/navigation.test.js",
     "test:portal:e2e": "playwright test --config=playwright.portal.config.ts",
+    "test:audit": "tsc -p tsconfig.test.json && node --test .test-build/audit.test.js",
+    "test:audit:integration": "npm run build && tsc -p tsconfig.test.json && node --test .test-build/audit-http.integration.test.js",
+    "test:audit:e2e": "playwright test --config=playwright.audit.config.ts",
     "test:users": "tsc -p tsconfig.users-test.json && node --test .users-test-build/users.test.js",
     "test:users:integration": "npm run build && tsc -p tsconfig.users-test.json && node --test .users-test-build/users-http.integration.test.js",
     "test:users:e2e": "playwright test --config playwright.users.config.ts"
