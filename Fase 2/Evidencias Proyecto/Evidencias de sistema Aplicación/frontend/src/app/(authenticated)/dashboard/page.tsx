@@ -51,6 +51,16 @@ export default async function DashboardPage({
             </Link>
           </div>
         )}
+        {(session.data.role === 'ADMINISTRADOR' ||
+          session.data.role === 'CONTADOR') && (
+          <Link
+            href="/liquidaciones"
+            prefetch={false}
+            className={`${buttonClass} mt-4`}
+          >
+            Abrir liquidaciones
+          </Link>
+        )}
       </section>
     </>
   );
