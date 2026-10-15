@@ -57,6 +57,13 @@ export default async function WorkerPortalPage({
           >
             Inicio
           </Link>
+          <Link
+            href="/portal/liquidaciones"
+            prefetch={false}
+            className="mt-1 block rounded-[9px] px-3 py-2.5 text-[13.5px] font-semibold text-ink2 hover:bg-tint"
+          >
+            Mis liquidaciones
+          </Link>
         </nav>
         <div className="hidden border-t border-line px-5 py-4 lg:mt-auto lg:block">
           <p className="break-all text-[13px] font-semibold">
