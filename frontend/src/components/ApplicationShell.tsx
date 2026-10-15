@@ -1,8 +1,10 @@
 import Image from 'next/image';
-import Link from 'next/link';
 import type { ReactElement, ReactNode } from 'react';
 import type { Role } from '@/lib/auth';
-import { getNavigationItems } from '@/lib/navigation';
+import {
+  ApplicationNavigation,
+  ApplicationHeading,
+} from './ApplicationNavigation';
 import { SessionActions } from './SessionActions';
 
 const roleLabels: Record<Role, string> = {
@@ -14,13 +16,9 @@ const roleLabels: Record<Role, string> = {
 
 export function ApplicationShell({
   user,
-  activePath,
-  title,
   children,
 }: {
-  user: { email: string; role: Role } | null;
-  activePath: string;
-  title: string;
+  user: { email: string; role: Role };
   children: ReactNode;
 }): ReactElement {
   return (
@@ -48,44 +46,25 @@ export function ApplicationShell({
             <p className="mt-0.5 text-xs text-ink2">Gestión interna</p>
           </div>
         </div>
-        <nav
-          aria-label="Navegación principal"
-          className="flex flex-wrap gap-1 px-2.5 py-3 lg:block lg:space-y-1 lg:py-4"
-        >
-          {getNavigationItems(user?.role ?? null).map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              prefetch={false}
-              aria-current={activePath === item.href ? 'page' : undefined}
-              className={`rounded-[9px] px-3 py-2.5 text-[13.5px] outline-offset-2 focus-visible:outline-2 focus-visible:outline-salmon-ink lg:block ${activePath === item.href ? 'bg-tint2 font-semibold text-salmon-ink' : 'text-ink2 hover:bg-tint'}`}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-        {user && (
-          <div className="border-t border-line px-5 py-3 lg:mt-auto lg:py-4">
-            <p className="break-all text-[13px] font-semibold">{user.email}</p>
-            <p className="mt-1 text-xs text-salmon-ink">
-              {roleLabels[user.role]}
-            </p>
-          </div>
-        )}
+        <ApplicationNavigation role={user.role} />
+        <div className="border-t border-line px-5 py-3 lg:mt-auto lg:py-4">
+          <p className="break-all text-[13px] font-semibold">{user.email}</p>
+          <p className="mt-1 text-xs text-salmon-ink">
+            {roleLabels[user.role]}
+          </p>
+        </div>
       </aside>
       <div className="min-w-0">
         <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-line bg-bg px-5 py-3 lg:px-7">
-          <h1 className="text-[17px] font-bold tracking-tight">{title}</h1>
-          {user && (
-            <details className="max-w-full rounded-lg border border-line2 px-3 py-2">
-              <summary className="cursor-pointer text-sm font-semibold text-salmon-ink">
-                Mi sesión
-              </summary>
-              <div className="mt-3">
-                <SessionActions />
-              </div>
-            </details>
-          )}
+          <ApplicationHeading />
+          <details className="max-w-full rounded-lg border border-line2 px-3 py-2">
+            <summary className="cursor-pointer text-sm font-semibold text-salmon-ink">
+              Mi sesión
+            </summary>
+            <div className="mt-3">
+              <SessionActions />
+            </div>
+          </details>
         </header>
         <main
           id="application-content"

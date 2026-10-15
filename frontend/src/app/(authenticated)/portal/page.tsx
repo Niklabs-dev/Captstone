@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation';
 import type { ReactElement } from 'react';
-import { ApplicationShell } from '@/components/ApplicationShell';
 import { getPageRedirect } from '@/lib/navigation';
 import { getSession } from '@/lib/session';
 
@@ -18,11 +17,7 @@ export default async function WorkerPortalPage({
   if (destination) redirect(destination);
   const params = await searchParams;
   return (
-    <ApplicationShell
-      user={session.data}
-      activePath="/portal"
-      title="Portal del Trabajador"
-    >
+    <>
       <div className="max-w-5xl space-y-5">
         {params.reason === 'forbidden' && (
           <p
@@ -64,6 +59,6 @@ export default async function WorkerPortalPage({
           </p>
         </section>
       </div>
-    </ApplicationShell>
+    </>
   );
 }

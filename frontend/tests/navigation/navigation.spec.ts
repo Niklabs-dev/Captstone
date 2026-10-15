@@ -100,6 +100,10 @@ test('El administrador recorre las tres vistas con el mismo menú y un solo enla
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await login(page, adminEmail!, adminPassword!);
+  const originalNavigation = await page
+    .getByRole('navigation', { name: 'Navegación principal', exact: true })
+    .elementHandle();
+  if (!originalNavigation) throw new Error('Falta la navegación inicial.');
   const folder = `output/playwright/navigation/${info.project.name}`;
   await mkdir(folder, { recursive: true });
   for (const route of [...routes, routes[0]]) {
@@ -109,8 +113,23 @@ test('El administrador recorre las tres vistas con el mismo menú y un solo enla
     });
     await nav.getByRole('link', { name: route.label, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(route.href + '$'));
+    expect(
+      await originalNavigation.evaluate((element) => element.isConnected),
+    ).toBe(true);
     await expect(
       page.getByRole('heading', { level: 1, name: route.title, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', {
+        level: 2,
+        name:
+          route.label === 'Inicio'
+            ? 'Bienvenido al sistema'
+            : route.label === 'Usuarios'
+              ? 'Usuarios del sistema'
+              : 'Registro de operaciones',
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(nav.getByRole('link')).toHaveText(
       routes.map((item) => item.label),
@@ -218,4 +237,37 @@ test('Renovar desde Usuarios vuelve a Inicio con la misma navegación', async ({
       .getByRole('navigation', { name: 'Navegación principal' })
       .getByRole('link'),
   ).toHaveText(routes.map((item) => item.label));
+});
+
+test('Cambiar entre administrador y trabajador no conserva las opciones de la cuenta anterior', async ({
+  page,
+}) => {
+  const worker = accounts.get('TRABAJADOR');
+  if (!worker) throw new Error('Falta el trabajador de prueba.');
+  await login(page, adminEmail!, adminPassword!);
+  for (const identity of [worker.email, adminEmail!]) {
+    await page.getByText('Mi sesión', { exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Cerrar sesión', exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/login$/);
+    await login(
+      page,
+      identity,
+      identity === worker.email ? password : adminPassword!,
+    );
+    const nav = page.getByRole('navigation', {
+      name: 'Navegación principal',
+      exact: true,
+    });
+    await expect(nav.getByRole('link')).toHaveText(
+      identity === worker.email ? ['Inicio'] : routes.map((item) => item.label),
+    );
+    await expect(
+      page.getByRole('complementary').getByText(identity, { exact: true }),
+    ).toBeVisible();
+    expect((await page.request.get('/api/users')).status()).toBe(
+      identity === worker.email ? 403 : 200,
+    );
+  }
 });

@@ -7,6 +7,23 @@ export interface NavigationItem {
   label: string;
 }
 
+export function getNavigationView(pathname: string): {
+  href: NavigationItem['href'] | null;
+  title: string;
+} {
+  const views = [
+    { href: '/dashboard', title: 'Inicio' },
+    { href: '/admin/usuarios', title: 'Usuarios y roles' },
+    { href: '/admin/auditoria', title: 'Auditoría del sistema' },
+    { href: '/portal', title: 'Portal del Trabajador' },
+  ] as const;
+  return (
+    views.find(
+      (view) => pathname === view.href || pathname.startsWith(`${view.href}/`),
+    ) ?? { href: null, title: 'Gestión interna' }
+  );
+}
+
 // Una sola fuente de enlaces para todas las vistas; los permisos siguen en el servidor.
 export function getNavigationItems(
   role: Role | null,

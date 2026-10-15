@@ -12,7 +12,6 @@ import {
 } from '@/lib/audit';
 import { fetchAuditPage } from '@/lib/audit-backend';
 import { getAuditSession } from '@/lib/audit-session';
-import { ApplicationShell } from '@/components/ApplicationShell';
 
 export default async function AuditPage({
   searchParams,
@@ -58,11 +57,7 @@ export default async function AuditPage({
           ? result.message
           : null;
   return (
-    <ApplicationShell
-      user={session.ok ? session.data.user : null}
-      activePath="/admin/auditoria"
-      title="Auditoría del sistema"
-    >
+    <>
       <p className="text-sm text-ink2">
         Consulta las operaciones registradas. El registro es de solo lectura y
         no se puede editar ni eliminar.
@@ -102,6 +97,6 @@ export default async function AuditPage({
       {result?.ok && filters.ok && (
         <AuditTable page={result.data} filters={filters.data} />
       )}
-    </ApplicationShell>
+    </>
   );
 }
