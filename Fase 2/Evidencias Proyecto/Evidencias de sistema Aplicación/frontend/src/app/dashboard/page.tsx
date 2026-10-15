@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import type { ReactElement } from 'react';
 import { getSession } from '@/lib/session';
 import { SessionActions } from '@/components/SessionActions';
@@ -36,6 +37,16 @@ export default async function DashboardPage({
           Sesión iniciada como {session.data.email}.
         </p>
         <SessionActions />
+        {(session.data.role === 'CONTADOR' ||
+          session.data.role === 'ADMINISTRADOR') && (
+          <Link
+            href="/liquidaciones"
+            prefetch={false}
+            className="mt-6 inline-flex min-h-11 items-center rounded-lg bg-salmon-ink px-4 py-2 text-sm font-semibold text-white hover:bg-ink"
+          >
+            Abrir liquidaciones
+          </Link>
+        )}
       </section>
     </main>
   );

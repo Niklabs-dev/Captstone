@@ -12,3 +12,6 @@ Dockerfile
 
 test-results/
 playwright-report/
+
+output/playwright/
+.playwright-cli/
