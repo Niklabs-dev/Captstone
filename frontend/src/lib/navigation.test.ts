@@ -23,8 +23,8 @@ test('El layout identifica la vista activa y el título sin confundir prefijos d
     title: 'Auditoría del sistema',
   });
   assert.deepEqual(getNavigationView('/portal/liquidaciones'), {
-    href: '/portal',
-    title: 'Portal del Trabajador',
+    href: '/portal/liquidaciones',
+    title: 'Mis liquidaciones',
   });
   assert.deepEqual(getNavigationView('/admin/usuarios-publicos'), {
     href: null,
@@ -45,7 +45,7 @@ test('Cada rol recibe únicamente enlaces permitidos y el trabajador conserva su
     for (const item of getNavigationItems(role))
       assert.equal(getPageRedirect(role, item.href), null);
     assert.equal(getNavigationItems(role)[0].href, getHomePath(role));
-    if (role !== 'ADMINISTRADOR')
+    if (role !== 'ADMINISTRADOR' && role !== 'TRABAJADOR')
       assert.equal(getNavigationItems(role).length, 1);
   }
   assert.deepEqual(getNavigationItems(null), [
@@ -126,4 +126,24 @@ test('El cliente rechaza destinos externos o no autorizados', () => {
     assert.equal(isHomePath(destination), false);
   assert.equal(isHomePath('/portal'), true);
   assert.equal(isHomePath('/dashboard'), true);
+});
+
+test('El módulo de SPRINT-2-T17 usa la navegación común y respeta los roles', () => {
+  assert.deepEqual(getNavigationView('/portal/liquidaciones'), {
+    href: '/portal/liquidaciones',
+    title: 'Mis liquidaciones',
+  });
+  for (const role of ROLES) {
+    const allowed = role === 'TRABAJADOR';
+    assert.equal(
+      getNavigationItems(role).some(
+        (item) => item.href === '/portal/liquidaciones',
+      ),
+      allowed,
+    );
+    assert.equal(
+      getPageRedirect(role, '/portal/liquidaciones') === null,
+      allowed,
+    );
+  }
 });
