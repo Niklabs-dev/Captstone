@@ -2,6 +2,26 @@ import type { Role } from './auth';
 
 export type HomePath = '/portal' | '/dashboard';
 
+export interface NavigationItem {
+  href: HomePath | '/admin/usuarios' | '/admin/auditoria';
+  label: string;
+}
+
+// Una sola fuente de enlaces para todas las vistas; los permisos siguen en el servidor.
+export function getNavigationItems(
+  role: Role | null,
+): readonly NavigationItem[] {
+  if (role === 'TRABAJADOR') return [{ href: '/portal', label: 'Inicio' }];
+  const home: NavigationItem = { href: '/dashboard', label: 'Inicio' };
+  return role === 'ADMINISTRADOR'
+    ? [
+        home,
+        { href: '/admin/usuarios', label: 'Usuarios' },
+        { href: '/admin/auditoria', label: 'Auditoría' },
+      ]
+    : [home];
+}
+
 export function getHomePath(role: Role): HomePath {
   return role === 'TRABAJADOR' ? '/portal' : '/dashboard';
 }

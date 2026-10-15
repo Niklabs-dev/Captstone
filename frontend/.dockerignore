@@ -3,6 +3,8 @@ node_modules
 .test-build
 .users-test-build
 test-results
+output
+.playwright-cli
 .env*
 !.env.example
 *.log
