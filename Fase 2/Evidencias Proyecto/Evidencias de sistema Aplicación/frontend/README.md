@@ -2,6 +2,10 @@
 
 Aplicación Next.js 16 con App Router, TypeScript estricto y Tailwind CSS.
 
+Dashboard, Usuarios, Auditoría y Portal del Trabajador comparten la estructura
+de navegación y sesión. Ver [navegación compartida](docs/NAVEGACION-COMPARTIDA.md)
+para permisos, alcance y pruebas de regresión.
+
 ## Desarrollo
 
 1. Ejecutar `npm ci`.
