@@ -3,7 +3,8 @@ import type { Role } from './auth';
 export type HomePath = '/portal' | '/dashboard';
 
 export interface NavigationItem {
-  href: HomePath | '/admin/usuarios' | '/admin/auditoria';
+  href:
+    HomePath | '/admin/usuarios' | '/admin/auditoria' | '/portal/liquidaciones';
   label: string;
 }
 
@@ -12,6 +13,7 @@ export function getNavigationView(pathname: string): {
   title: string;
 } {
   const views = [
+    { href: '/portal/liquidaciones', title: 'Mis liquidaciones' },
     { href: '/dashboard', title: 'Inicio' },
     { href: '/admin/usuarios', title: 'Usuarios y roles' },
     { href: '/admin/auditoria', title: 'Auditoría del sistema' },
@@ -28,7 +30,11 @@ export function getNavigationView(pathname: string): {
 export function getNavigationItems(
   role: Role | null,
 ): readonly NavigationItem[] {
-  if (role === 'TRABAJADOR') return [{ href: '/portal', label: 'Inicio' }];
+  if (role === 'TRABAJADOR')
+    return [
+      { href: '/portal', label: 'Inicio' },
+      { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
+    ];
   const home: NavigationItem = { href: '/dashboard', label: 'Inicio' };
   return role === 'ADMINISTRADOR'
     ? [
