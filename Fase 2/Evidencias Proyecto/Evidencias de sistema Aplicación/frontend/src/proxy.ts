@@ -38,6 +38,6 @@ export const config = {
   matcher: [
     // Las API validan su sesión y permisos y responden JSON, nunca redirecciones HTML.
     // Inicio y login resuelven su destino en sus propios Server Components.
-    '/((?!$|login(?:/|$)|api(?:/|$)|_next(?:/|$)|favicon\\.ico$|logo\\.png$|robots\\.txt$|sitemap\\.xml$).*)',
+    '/((?!$|login(?:/|$)|session-expired(?:/|$)|api(?:/|$)|_next(?:/|$)|favicon\\.ico$|logo\\.png$|robots\\.txt$|sitemap\\.xml$).*)',
   ],
 };
