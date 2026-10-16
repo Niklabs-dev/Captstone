@@ -14,6 +14,7 @@ import {
   BYTES_PER_MB,
   DEFAULT_MAX_SIZE_MB,
   EXTENSION_BY_MIME_TYPE,
+  MAX_ALLOWED_SIZE_MB,
   type StoredFile,
 } from './types/storage.types.js';
 import { detectMimeType } from './utils/file-signature.util.js';
@@ -28,9 +29,13 @@ export class StorageService {
   private readonly maxSizeMb: number;
 
   constructor(config: ConfigService) {
-    this.rootPath = path.resolve(
-      config.getOrThrow<string>('DOCUMENTS_STORAGE_PATH'),
-    );
+    // getOrThrow solo lanza si la variable no existe; vacía, path.resolve('')
+    // apuntaría al directorio de trabajo.
+    const storagePath = config.getOrThrow<string>('DOCUMENTS_STORAGE_PATH');
+    if (String(storagePath).trim() === '') {
+      throw new Error('DOCUMENTS_STORAGE_PATH no puede estar vacía');
+    }
+    this.rootPath = path.resolve(storagePath);
     this.maxSizeMb = parseMaxSizeMb(
       config.get<string>('DOCUMENTS_MAX_SIZE_MB'),
     );
@@ -56,7 +61,7 @@ export class StorageService {
     }
     if (
       declaredMimeType !== undefined &&
-      declaredMimeType.trim().toLowerCase() !== mimeType
+      normalizeMimeType(declaredMimeType) !== mimeType
     ) {
       throw new UnsupportedMediaTypeException(
         'El tipo declarado no coincide con el contenido del archivo',
@@ -76,9 +81,10 @@ export class StorageService {
 
     // Escritura atómica: se escribe un temporal y se renombra, así nunca queda
     // un archivo final a medio escribir. Si algo falla, se borra el temporal.
-    await fs.mkdir(path.dirname(finalPath), { recursive: true });
+    // Permisos solo para el dueño (documentos laborales); en Windows no aplican.
+    await fs.mkdir(path.dirname(finalPath), { recursive: true, mode: 0o700 });
     try {
-      await fs.writeFile(tempPath, content, { flag: 'wx' });
+      await fs.writeFile(tempPath, content, { flag: 'wx', mode: 0o600 });
       await fs.rename(tempPath, finalPath);
     } catch (error) {
       await fs.rm(tempPath, { force: true });
@@ -104,7 +110,13 @@ export class StorageService {
     try {
       return await fs.readFile(filePath);
     } catch (error) {
-      if (isErrnoException(error) && error.code === 'ENOENT') {
+      // EISDIR/ENOTDIR: la ruta es una carpeta o pasa por un archivo.
+      if (
+        isErrnoException(error) &&
+        (error.code === 'ENOENT' ||
+          error.code === 'EISDIR' ||
+          error.code === 'ENOTDIR')
+      ) {
         throw new NotFoundException('Archivo no encontrado');
       }
       throw error;
@@ -145,15 +157,28 @@ export class StorageService {
   }
 }
 
-// DOCUMENTS_MAX_SIZE_MB es opcional; si viene, debe ser un entero positivo.
+// Algunos clientes declaran los JPEG como "image/jpg" (no estándar).
+function normalizeMimeType(mimeType: string): string {
+  const normalized = mimeType.trim().toLowerCase();
+  return normalized === 'image/jpg' ? 'image/jpeg' : normalized;
+}
+
+// DOCUMENTS_MAX_SIZE_MB es opcional; si viene, debe ser un entero entre 1 y
+// MAX_ALLOWED_SIZE_MB.
 function parseMaxSizeMb(value: string | undefined): number {
   if (value === undefined || value === '') return DEFAULT_MAX_SIZE_MB;
-  if (!/^[1-9]\d*$/.test(String(value).trim())) {
+  const trimmed = String(value).trim();
+  const parsed = Number(trimmed);
+  if (
+    !/^[1-9]\d*$/.test(trimmed) ||
+    !Number.isSafeInteger(parsed) ||
+    parsed > MAX_ALLOWED_SIZE_MB
+  ) {
     throw new Error(
-      `DOCUMENTS_MAX_SIZE_MB debe ser un entero positivo (valor recibido: "${value}")`,
+      `DOCUMENTS_MAX_SIZE_MB debe ser un entero entre 1 y ${MAX_ALLOWED_SIZE_MB} (valor recibido: "${value}")`,
     );
   }
-  return Number(value);
+  return parsed;
 }
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
