@@ -145,6 +145,7 @@ test('Login del trabajador, m처dulos restringidos, renovaci처n y cierre de sesi�
     fullPage: true,
   });
   const before = cookies.find((cookie) => cookie.name === 'mf_refresh')?.value;
+  await page.getByText('Mi sesi처n', { exact: true }).click();
   await page.getByRole('button', { name: 'Renovar sesi처n' }).click();
   await expect
     .poll(
@@ -155,6 +156,8 @@ test('Login del trabajador, m처dulos restringidos, renovaci처n y cierre de sesi�
     )
     .not.toBe(before);
   await expect(page).toHaveURL(/\/portal$/);
+  if (!(await page.getByRole('button', { name: 'Cerrar sesi처n' }).isVisible()))
+    await page.getByText('Mi sesi처n', { exact: true }).click();
   await page.getByRole('button', { name: 'Cerrar sesi처n' }).click();
   await expect(page).toHaveURL(/\/login$/);
   await page.goto('/portal');

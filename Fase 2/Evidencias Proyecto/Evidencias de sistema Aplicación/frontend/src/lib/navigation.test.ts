@@ -1,7 +1,57 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ROLES } from './auth';
-import { getHomePath, getPageRedirect, isHomePath } from './navigation';
+import {
+  getHomePath,
+  getPageRedirect,
+  isHomePath,
+  getNavigationItems,
+  getNavigationView,
+} from './navigation';
+
+test('El layout identifica la vista activa y el título sin confundir prefijos de rutas', () => {
+  assert.deepEqual(getNavigationView('/dashboard'), {
+    href: '/dashboard',
+    title: 'Inicio',
+  });
+  assert.deepEqual(getNavigationView('/admin/usuarios/123'), {
+    href: '/admin/usuarios',
+    title: 'Usuarios y roles',
+  });
+  assert.deepEqual(getNavigationView('/admin/auditoria'), {
+    href: '/admin/auditoria',
+    title: 'Auditoría del sistema',
+  });
+  assert.deepEqual(getNavigationView('/portal/liquidaciones'), {
+    href: '/portal',
+    title: 'Portal del Trabajador',
+  });
+  assert.deepEqual(getNavigationView('/admin/usuarios-publicos'), {
+    href: null,
+    title: 'Gestión interna',
+  });
+});
+
+test('La navegación permite recorrer inicio, usuarios y auditoría al administrador', () => {
+  assert.deepEqual(getNavigationItems('ADMINISTRADOR'), [
+    { href: '/dashboard', label: 'Inicio' },
+    { href: '/admin/usuarios', label: 'Usuarios' },
+    { href: '/admin/auditoria', label: 'Auditoría' },
+  ]);
+});
+
+test('Cada rol recibe únicamente enlaces permitidos y el trabajador conserva su portal', () => {
+  for (const role of ROLES) {
+    for (const item of getNavigationItems(role))
+      assert.equal(getPageRedirect(role, item.href), null);
+    assert.equal(getNavigationItems(role)[0].href, getHomePath(role));
+    if (role !== 'ADMINISTRADOR')
+      assert.equal(getNavigationItems(role).length, 1);
+  }
+  assert.deepEqual(getNavigationItems(null), [
+    { href: '/dashboard', label: 'Inicio' },
+  ]);
+});
 
 test('El trabajador inicia en su portal y los otros roles en el dashboard', () => {
   for (const role of ROLES)
