@@ -77,6 +77,13 @@ describe('StorageService (SPRINT-2-T04)', () => {
     expect(jpeg.relativePath).toMatch(/\.jpg$/);
   });
 
+  it('acepta un JPEG declarado como image/jpg', async () => {
+    const jpeg = await service.save(JPEG, 'image/jpg');
+
+    expect(jpeg.mimeType).toBe('image/jpeg');
+    expect(jpeg.relativePath).toMatch(/\.jpg$/);
+  });
+
   it('genera un nombre aleatorio AAAA/MM/uuid.ext sin datos del archivo original', async () => {
     const first = await service.save(PDF);
     const second = await service.save(PDF);
@@ -148,6 +155,14 @@ describe('StorageService (SPRINT-2-T04)', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('read lanza 404 si la ruta es una carpeta', async () => {
+    await fs.mkdir(path.join(rootPath, '2026'));
+
+    await expect(service.read('2026')).rejects.toThrow(
+      new NotFoundException('Archivo no encontrado'),
+    );
+  });
+
   it('rechaza rutas que salen de la carpeta o son absolutas', async () => {
     const invalid = new BadRequestException('Ruta de archivo no válida');
     const outside = path.join(rootPath, '..', 'fuera.pdf');
@@ -171,12 +186,25 @@ describe('StorageService (SPRINT-2-T04)', () => {
 
   it('valida DOCUMENTS_STORAGE_PATH y DOCUMENTS_MAX_SIZE_MB al iniciar', () => {
     expect(() => new StorageService(new ConfigService())).toThrow();
+    expect(() => createService({ DOCUMENTS_STORAGE_PATH: '' })).toThrow(
+      'DOCUMENTS_STORAGE_PATH no puede estar vacía',
+    );
+    expect(() => createService({ DOCUMENTS_STORAGE_PATH: '   ' })).toThrow(
+      'DOCUMENTS_STORAGE_PATH no puede estar vacía',
+    );
     expect(() => createService({ DOCUMENTS_MAX_SIZE_MB: '0' })).toThrow(
       /DOCUMENTS_MAX_SIZE_MB/,
     );
     expect(() => createService({ DOCUMENTS_MAX_SIZE_MB: '-5' })).toThrow();
     expect(() => createService({ DOCUMENTS_MAX_SIZE_MB: '2.5' })).toThrow();
     expect(() => createService({ DOCUMENTS_MAX_SIZE_MB: 'abc' })).toThrow();
+    expect(() =>
+      createService({ DOCUMENTS_MAX_SIZE_MB: '99999999999999999999' }),
+    ).toThrow(/DOCUMENTS_MAX_SIZE_MB/);
+    expect(() => createService({ DOCUMENTS_MAX_SIZE_MB: '101' })).toThrow(
+      /DOCUMENTS_MAX_SIZE_MB/,
+    );
     expect(() => createService({ DOCUMENTS_MAX_SIZE_MB: '25' })).not.toThrow();
+    expect(() => createService({ DOCUMENTS_MAX_SIZE_MB: '100' })).not.toThrow();
   });
 });

@@ -1,6 +1,5 @@
 // Tipos y constantes del almacenamiento de archivos (SPRINT-2-T04).
-// Deben coincidir con el frontend (DOCUMENT_MIMES y MAX_DOCUMENT_BYTES en
-// frontend/src/lib/documents.ts).
+// Deben coincidir con el frontend de S2-T10 (PR #21, `frontend/src/lib/documents.ts`).
 
 export const ALLOWED_MIME_TYPES = [
   'application/pdf',
@@ -18,6 +17,9 @@ export const EXTENSION_BY_MIME_TYPE: Record<AllowedMimeType, string> = {
 
 // Tamaño máximo por archivo si no se define DOCUMENTS_MAX_SIZE_MB.
 export const DEFAULT_MAX_SIZE_MB = 25;
+
+// Tope de DOCUMENTS_MAX_SIZE_MB: el archivo se procesa completo en memoria.
+export const MAX_ALLOWED_SIZE_MB = 100;
 
 // Un MB = 1024 * 1024 bytes, igual que MAX_DOCUMENT_BYTES del frontend.
 export const BYTES_PER_MB = 1024 * 1024;
