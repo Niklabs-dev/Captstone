@@ -1,7 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type {
-  DocumentResponse,
-  DocumentVersionResponse,
+import {
+  INTEGRITY_STATUSES,
+  type DocumentListResponse,
+  type DocumentResponse,
+  type DocumentVersionHistory,
+  type DocumentVersionResponse,
+  type IntegrityCheckResponse,
+  type IntegrityStatus,
+  type UploadPolicy,
 } from '../types/documents.types.js';
 
 export class DocumentVersionResponseDto implements DocumentVersionResponse {
@@ -129,4 +135,106 @@ export class DocumentResponseDto implements DocumentResponse {
     type: DocumentVersionResponseDto,
   })
   latestVersion: DocumentVersionResponseDto;
+}
+
+export class UploadPolicyDto implements UploadPolicy {
+  @ApiProperty({
+    description: 'Tamaño máximo por archivo, en bytes.',
+    example: 26214400,
+  })
+  maxBytes: number;
+
+  @ApiProperty({
+    description: 'Tipos de archivo aceptados.',
+    example: ['application/pdf', 'image/png', 'image/jpeg'],
+    type: [String],
+  })
+  allowedMimes: string[];
+
+  @ApiProperty({
+    description: 'true si el usuario actual puede cargar documentos.',
+    example: true,
+  })
+  canUpload: boolean;
+}
+
+// Listado de documentos con las reglas de carga (SPRINT-2-T06).
+export class DocumentListResponseDto implements DocumentListResponse {
+  @ApiProperty({
+    description: 'Documentos visibles, del más reciente al más antiguo.',
+    type: [DocumentResponseDto],
+  })
+  items: DocumentResponseDto[];
+
+  @ApiProperty({
+    description: 'Reglas de carga para el usuario actual.',
+    type: UploadPolicyDto,
+  })
+  policy: UploadPolicyDto;
+}
+
+// Historial completo de versiones de un documento (SPRINT-2-T06).
+export class DocumentVersionHistoryDto implements DocumentVersionHistory {
+  @ApiProperty({
+    description: 'ID del documento (UUID).',
+    example: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+  })
+  documentId: string;
+
+  @ApiProperty({
+    description: 'ID del trabajador dueño del documento (UUID).',
+    example: '3f8c2c1e-4a5b-4c6d-8e9f-0a1b2c3d4e5f',
+  })
+  workerId: string;
+
+  @ApiProperty({
+    description:
+      'Versiones de la más nueva a la más antigua; todas son inmutables.',
+    type: [DocumentVersionResponseDto],
+  })
+  versions: DocumentVersionResponseDto[];
+}
+
+// Resultado de la verificación de integridad (SPRINT-2-T06).
+export class IntegrityCheckResponseDto implements IntegrityCheckResponse {
+  @ApiProperty({
+    description: 'ID de la versión verificada (UUID).',
+    example: '0b6a1c52-9a3e-4a8f-b1d4-2f6e8c9d7a10',
+  })
+  versionId: string;
+
+  @ApiProperty({
+    description:
+      'VALID: el archivo coincide con el hash registrado; ALTERED: fue modificado; MISSING: no está en el almacenamiento.',
+    example: 'VALID',
+    enum: INTEGRITY_STATUSES,
+  })
+  status: IntegrityStatus;
+
+  @ApiProperty({
+    description: 'true solo si status es VALID.',
+    example: true,
+  })
+  valid: boolean;
+
+  @ApiProperty({
+    description: 'Hash SHA-256 registrado al cargar la versión.',
+    example: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
+  })
+  expectedHash: string;
+
+  @ApiProperty({
+    description:
+      'Hash SHA-256 recalculado del archivo guardado; null si no está en el almacenamiento.',
+    example: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
+    nullable: true,
+    type: String,
+  })
+  actualHash: string | null;
+
+  @ApiProperty({
+    description: 'Fecha y hora de la verificación (ISO 8601).',
+    example: '2026-10-17T16:00:00.000Z',
+  })
+  checkedAt: Date;
 }
