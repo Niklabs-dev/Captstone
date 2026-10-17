@@ -101,6 +101,8 @@ describe('Autorización por rol y local (SPRINT-1-T07)', () => {
 
   beforeAll(async () => {
     process.env.JWT_SECRET = 'secreto-de-pruebas';
+    // AppModule incluye el gestor documental (SPRINT-2-T05); estos tests no suben archivos.
+    process.env.DOCUMENTS_STORAGE_PATH = './storage/test-documents';
     process.env.JWT_EXPIRES_IN = '1h';
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
