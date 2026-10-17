@@ -1,7 +1,14 @@
 import {
   Body,
   Controller,
+  Get,
+  Header,
+  Param,
+  ParseUUIDPipe,
   Post,
+  Query,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -14,38 +21,55 @@ import {
   ApiConsumes,
   ApiCreatedResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiPayloadTooLargeResponse,
+  ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
   ApiUnsupportedMediaTypeResponse,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { ROLE } from '../auth/constants/roles.constants.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
+import { ALLOWED_MIME_TYPES } from '../storage/types/storage.types.js';
 import { DocumentsService } from './documents.service.js';
-import { DocumentResponseDto } from './dto/document-response.dto.js';
+import {
+  DocumentListResponseDto,
+  DocumentResponseDto,
+  DocumentVersionHistoryDto,
+  IntegrityCheckResponseDto,
+} from './dto/document-response.dto.js';
+import { ListDocumentsQueryDto } from './dto/list-documents-query.dto.js';
 import {
   UploadDocumentDto,
   UploadDocumentFormDto,
 } from './dto/upload-document.dto.js';
-import type {
-  DocumentResponse,
-  UploadedDocumentFile,
+import {
+  DOCUMENT_READER_ROLES,
+  type DocumentListResponse,
+  type DocumentResponse,
+  type DocumentVersionHistory,
+  type IntegrityCheckResponse,
+  type UploadedDocumentFile,
 } from './types/documents.types.js';
+import { contentDisposition } from './utils/download-name.util.js';
 
-// Gestor documental (SPRINT-2-T05): carga de documentos laborales por
-// trabajador. Solo el dueño/administrador.
+// Gestor documental: carga de documentos laborales por trabajador, solo el
+// dueño/administrador (SPRINT-2-T05); consulta, descarga y verificación de
+// integridad para el administrador y para cada trabajador sobre sus propios
+// documentos (SPRINT-2-T06).
 @ApiTags('documents')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
-@Roles(ROLE.ADMINISTRADOR)
 @Controller('documents')
 export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
 
   @Post()
+  @Roles(ROLE.ADMINISTRADOR)
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: UploadDocumentFormDto })
@@ -83,5 +107,116 @@ export class DocumentsController {
     @CurrentUser() currentUser: AuthUser,
   ): Promise<DocumentResponse> {
     return this.documentsService.upload(dto, file, currentUser);
+  }
+
+  @Get()
+  @Roles(...DOCUMENT_READER_ROLES)
+  @ApiOperation({
+    summary:
+      'Lista documentos laborales con su versión vigente, con filtros por trabajador, tipo y local',
+    description:
+      'El administrador ve los documentos de todos los locales. Un trabajador o supervisor solo obtiene los suyos; indicar el workerId de otro responde 403.',
+  })
+  @ApiOkResponse({
+    description: 'Documentos visibles y reglas de carga del usuario.',
+    type: DocumentListResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Algún filtro de la consulta no supera la validación.',
+  })
+  list(
+    @Query() query: ListDocumentsQueryDto,
+    @CurrentUser() currentUser: AuthUser,
+  ): Promise<DocumentListResponse> {
+    return this.documentsService.list(query, currentUser);
+  }
+
+  @Get(':id/versions')
+  @Roles(...DOCUMENT_READER_ROLES)
+  @ApiOperation({
+    summary: 'Muestra el historial completo de versiones de un documento',
+    description:
+      'Las versiones son inmutables. Un trabajador o supervisor solo accede a sus propios documentos (403 en otro caso).',
+  })
+  @ApiOkResponse({
+    description: 'Versiones de la más nueva a la más antigua.',
+    type: DocumentVersionHistoryDto,
+  })
+  @ApiBadRequestResponse({ description: 'El ID no es un UUID.' })
+  @ApiNotFoundResponse({ description: 'Documento no encontrado.' })
+  getVersionHistory(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() currentUser: AuthUser,
+  ): Promise<DocumentVersionHistory> {
+    return this.documentsService.getVersionHistory(id, currentUser);
+  }
+
+  @Get('versions/:versionId/download')
+  @Roles(...DOCUMENT_READER_ROLES)
+  @Header('X-Content-Type-Options', 'nosniff')
+  @ApiProduces(...ALLOWED_MIME_TYPES)
+  @ApiOperation({
+    summary: 'Descarga el archivo de una versión de un documento',
+    description:
+      'Recalcula el SHA-256 al descargar: si no coincide con el registrado, el archivo se entrega igual pero con X-Document-Integrity: ALTERED para advertirlo. Un trabajador o supervisor solo descarga sus propios documentos (403 en otro caso).',
+  })
+  @ApiOkResponse({
+    description:
+      'Archivo de la versión, con nombre <TIPO>_<título>_v<N>.<ext> en Content-Disposition.',
+    schema: { type: 'string', format: 'binary' },
+    headers: {
+      'Content-Disposition': {
+        description:
+          'attachment con el nombre del archivo (filename y filename*).',
+        schema: { type: 'string' },
+      },
+      'X-Content-Type-Options': {
+        description: 'Siempre nosniff.',
+        schema: { type: 'string', example: 'nosniff' },
+      },
+      'X-Document-Integrity': {
+        description:
+          'VALID si el archivo coincide con el hash registrado; ALTERED si fue modificado.',
+        schema: { type: 'string', enum: ['VALID', 'ALTERED'] },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'El ID no es un UUID.' })
+  @ApiNotFoundResponse({
+    description: 'Versión no encontrada o archivo ausente del almacenamiento.',
+  })
+  async download(
+    @Param('versionId', new ParseUUIDPipe()) versionId: string,
+    @CurrentUser() currentUser: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const file = await this.documentsService.download(versionId, currentUser);
+    res.setHeader('X-Document-Integrity', file.integrity);
+    return new StreamableFile(file.content, {
+      type: file.mimeType,
+      disposition: contentDisposition(file.fileName),
+      length: file.content.length,
+    });
+  }
+
+  @Get('versions/:versionId/integrity')
+  @Roles(...DOCUMENT_READER_ROLES)
+  @ApiOperation({
+    summary:
+      'Verifica la integridad de una versión recalculando su SHA-256 y comparándolo con el registrado',
+    description:
+      'Responde 200 con status VALID, ALTERED (archivo modificado) o MISSING (archivo ausente). Un trabajador o supervisor solo verifica sus propios documentos (403 en otro caso).',
+  })
+  @ApiOkResponse({
+    description: 'Resultado de la verificación.',
+    type: IntegrityCheckResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'El ID no es un UUID.' })
+  @ApiNotFoundResponse({ description: 'Versión no encontrada.' })
+  checkIntegrity(
+    @Param('versionId', new ParseUUIDPipe()) versionId: string,
+    @CurrentUser() currentUser: AuthUser,
+  ): Promise<IntegrityCheckResponse> {
+    return this.documentsService.checkIntegrity(versionId, currentUser);
   }
 }

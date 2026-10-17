@@ -13,6 +13,14 @@ export const UPLOADABLE_DOCUMENT_TYPES = [
 ] as const;
 export type UploadableDocumentType = (typeof UPLOADABLE_DOCUMENT_TYPES)[number];
 
+// Roles que consultan documentos (SPRINT-2-T06): el administrador ve todos;
+// trabajadores y supervisores, solo los propios (ver document-access.policy).
+export const DOCUMENT_READER_ROLES: readonly RoleCode[] = [
+  ROLE.ADMINISTRADOR,
+  ROLE.SUPERVISOR,
+  ROLE.TRABAJADOR,
+];
+
 // Roles que tienen carpeta digital: los trabajadores de local. Los roles
 // globales (administrador, contador) no tienen local al que asociar el documento.
 export const DOCUMENT_SUBJECT_ROLES: readonly RoleCode[] = [
@@ -59,4 +67,48 @@ export interface DocumentResponse {
   dtRegistrationDueAt: string | null;
   createdAt: Date;
   latestVersion: DocumentVersionResponse;
+}
+
+// Reglas de carga para el usuario actual (las muestra el frontend).
+export interface UploadPolicy {
+  maxBytes: number;
+  allowedMimes: string[];
+  canUpload: boolean;
+}
+
+// Listado de documentos (SPRINT-2-T06).
+export interface DocumentListResponse {
+  items: DocumentResponse[];
+  policy: UploadPolicy;
+}
+
+// Historial de versiones de un documento, de la más nueva a la más antigua.
+export interface DocumentVersionHistory {
+  documentId: string;
+  workerId: string;
+  versions: DocumentVersionResponse[];
+}
+
+// Resultado de comparar el archivo guardado con el hash registrado:
+// VALID coincide, ALTERED no coincide, MISSING no está en disco.
+export const INTEGRITY_STATUSES = ['VALID', 'ALTERED', 'MISSING'] as const;
+export type IntegrityStatus = (typeof INTEGRITY_STATUSES)[number];
+
+export interface IntegrityCheckResponse {
+  versionId: string;
+  status: IntegrityStatus;
+  valid: boolean;
+  expectedHash: string;
+  // Hash recalculado; null si el archivo no está en disco.
+  actualHash: string | null;
+  checkedAt: Date;
+}
+
+// Archivo listo para descargar.
+export interface DocumentDownload {
+  content: Buffer;
+  fileName: string;
+  mimeType: string;
+  // VALID o ALTERED: si falta el archivo la descarga responde 404.
+  integrity: Exclude<IntegrityStatus, 'MISSING'>;
 }
