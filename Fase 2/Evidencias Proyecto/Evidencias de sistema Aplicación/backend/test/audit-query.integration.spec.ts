@@ -92,6 +92,8 @@ describe.skipIf(!databaseUrl)('Consulta de auditoría (SPRINT-1-T14)', () => {
   beforeAll(async () => {
     process.env.DATABASE_URL = databaseUrl;
     process.env.JWT_SECRET = 'secreto-de-pruebas';
+    // AppModule incluye el gestor documental (SPRINT-2-T05); estos tests no suben archivos.
+    process.env.DOCUMENTS_STORAGE_PATH = './storage/test-documents';
     process.env.JWT_EXPIRES_IN = '1h';
     process.env.JWT_REFRESH_EXPIRES_IN = '7d';
 

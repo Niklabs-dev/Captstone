@@ -240,7 +240,9 @@ model Document {
 
 /// Versión INMUTABLE de un documento: archivo en volumen separado (file_path),
 /// hash SHA-256 único que permite verificar la integridad del archivo, y
-/// trazabilidad de quién subió cada versión y cuándo.
+/// trazabilidad de quién subió cada versión y cuándo. Los triggers de la
+/// migración versiones_documento_inmutables (SPRINT-2-T05) rechazan UPDATE,
+/// DELETE y TRUNCATE: una nueva carga siempre crea una versión nueva.
 model DocumentVersion {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   versionNumber Int      @map("version_number")
