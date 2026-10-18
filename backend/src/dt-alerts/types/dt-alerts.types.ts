@@ -49,6 +49,8 @@ export interface DtAlertCollection {
 export interface DtRegistrationResponse {
   alertId: string;
   documentId: string;
+  // Local del documento.
+  storeId: string;
   status: 'REGISTERED';
   registeredAt: Date;
 }

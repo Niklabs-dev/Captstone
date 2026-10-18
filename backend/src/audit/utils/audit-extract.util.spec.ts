@@ -3,6 +3,7 @@ import type { AuditedOptions, AuditRequestInfo } from '../types/audit.types.js';
 import {
   buildAuditEvent,
   buildFailureAuditEvent,
+  resolveAction,
   resolveActor,
   resolveDetail,
   resolveEntityId,
@@ -229,6 +230,129 @@ describe('buildFailureAuditEvent', () => {
       storeId: null,
       ipAddress: '192.168.1.10',
       userAgent: 'agente-de-prueba',
+    });
+  });
+});
+
+// Extensiones para el gestor documental (SPRINT-2-T09).
+const UPLOAD_OPTIONS: AuditedOptions = {
+  action: (requestInfo) =>
+    typeof (requestInfo.body as { documentId?: unknown } | null)?.documentId ===
+    'string'
+      ? AUDIT_ACTION.DOCUMENT_VERSION_ADDED
+      : AUDIT_ACTION.DOCUMENT_UPLOADED,
+  entityType: 'documents',
+  entityIdFrom: 'response.id',
+  detailFromBody: ['workerId'],
+  detailFromResponse: {
+    versionNumber: 'latestVersion.number',
+    sha256: 'latestVersion.sha256',
+  },
+};
+
+const DELETE_OPTIONS: AuditedOptions = {
+  action: AUDIT_ACTION.DOCUMENT_DELETED,
+  entityType: 'documents',
+  entityIdFrom: 'params.id',
+  failureAction: AUDIT_ACTION.DOCUMENT_DELETION_BLOCKED,
+  failureStatuses: [409],
+};
+
+const UPLOADED_DOCUMENT = {
+  id: 'doc-1',
+  storeId: 'store-3',
+  latestVersion: { number: 2, sha256: 'a'.repeat(64) },
+};
+
+describe('auditoría del gestor documental (SPRINT-2-T09)', () => {
+  it('elige la acción según la solicitud', () => {
+    expect(
+      resolveAction(UPLOAD_OPTIONS, info({ body: { workerId: 'w-1' } }), {}),
+    ).toBe('DOCUMENT_UPLOADED');
+    expect(
+      resolveAction(
+        UPLOAD_OPTIONS,
+        info({ body: { documentId: 'doc-1' } }),
+        {},
+      ),
+    ).toBe('DOCUMENT_VERSION_ADDED');
+  });
+
+  it('toma el ID de cualquier parámetro de la ruta', () => {
+    const entityId = resolveEntityId(
+      { ...DELETE_OPTIONS, entityIdFrom: 'params.versionId' },
+      info({ params: { versionId: 'version-1' } }),
+      undefined,
+    );
+    expect(entityId).toBe('version-1');
+  });
+
+  it('copia de la respuesta solo las rutas declaradas, nunca el resto', () => {
+    const detail = resolveDetail(
+      UPLOAD_OPTIONS,
+      info({ body: { workerId: 'w-1', title: 'Contrato' } }),
+      { ...UPLOADED_DOCUMENT, content: 'contenido del archivo' },
+    );
+    expect(detail).toEqual({
+      workerId: 'w-1',
+      versionNumber: 2,
+      sha256: 'a'.repeat(64),
+    });
+  });
+
+  it('usa el local del documento de la respuesta o del contexto del endpoint', () => {
+    expect(resolveActor(info(), UPLOADED_DOCUMENT).storeId).toBe('store-3');
+    expect(
+      resolveActor(info({ context: { storeId: 'store-4' } }), undefined)
+        .storeId,
+    ).toBe('store-4');
+  });
+
+  it('agrega al detalle lo que aporta el endpoint (ej. una descarga)', () => {
+    const event = buildAuditEvent(
+      {
+        action: AUDIT_ACTION.DOCUMENT_DOWNLOADED,
+        entityType: 'document_versions',
+        entityIdFrom: 'params.versionId',
+      },
+      info({
+        params: { versionId: 'version-1' },
+        context: {
+          storeId: 'store-3',
+          detail: { documentId: 'doc-1', integrity: 'VALID' },
+        },
+      }),
+      // La respuesta de una descarga es el archivo: no se copia nada de ella.
+      Buffer.from('%PDF-1.7'),
+    );
+    expect(event).toMatchObject({
+      action: 'DOCUMENT_DOWNLOADED',
+      entityId: 'version-1',
+      storeId: 'store-3',
+      detail: { documentId: 'doc-1', integrity: 'VALID' },
+    });
+  });
+
+  it('identifica la entidad de un rechazo cuando su ID viaja en la ruta', () => {
+    const event = buildFailureAuditEvent(
+      DELETE_OPTIONS,
+      AUDIT_ACTION.DOCUMENT_DELETION_BLOCKED,
+      info({
+        params: { id: 'doc-1' },
+        user: {
+          id: 'admin-1',
+          email: 'admin@moi-food.cl',
+          role: 'ADMINISTRADOR',
+          storeId: null,
+        },
+      }),
+    );
+    expect(event).toMatchObject({
+      action: 'DOCUMENT_DELETION_BLOCKED',
+      entityType: 'documents',
+      entityId: 'doc-1',
+      userId: 'admin-1',
+      detail: null,
     });
   });
 });

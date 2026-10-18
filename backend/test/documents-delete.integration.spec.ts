@@ -16,6 +16,7 @@ import type {
   DocumentResponse,
 } from '../src/documents/types/documents.types.js';
 import { PrismaClient } from '../src/generated/prisma/client.js';
+import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
 
 type App = Parameters<typeof request>[0];
 
@@ -54,6 +55,14 @@ describe.skipIf(!databaseUrl)(
         const where = { subjectUser: { email: { endsWith: DOMAIN } } };
         await tx.documentVersion.deleteMany({ where: { document: where } });
         await tx.document.deleteMany({ where });
+      });
+      // Las operaciones del gestor documental quedan auditadas (SPRINT-2-T09)
+      // y audit_logs impide borrar usuarios o locales con historial.
+      await purgeTestAuditLogs(prisma, {
+        OR: [
+          { user: { email: { endsWith: DOMAIN } } },
+          { store: { name: STORE_NAME } },
+        ],
       });
       await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
       await prisma.store.deleteMany({ where: { name: STORE_NAME } });
@@ -235,6 +244,7 @@ describe.skipIf(!databaseUrl)(
       const res = await remove(contrato.id, 'admin').expect(200);
       expect(res.body as DocumentDeletionResponse).toEqual({
         id: contrato.id,
+        storeId: contrato.storeId,
         retainUntil: '2025-03-02',
         deletedVersions: 2,
       });

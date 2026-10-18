@@ -4,14 +4,24 @@ import type { AuditAction } from '../constants/audit-actions.constants.js';
 // Orígenes soportados para el ID de la entidad en una operación exitosa:
 // - 'response.id': la respuesta es la entidad (ej. usuario creado).
 // - 'response.user.id': la entidad viene anidada en la respuesta (ej. login).
-// - 'params.id': el ID viaja en la ruta (ej. PATCH /users/:id/deactivate).
+// - 'params.<nombre>': el ID viaja en la ruta (ej. 'params.id' en
+//   PATCH /users/:id/deactivate o 'params.versionId' en la descarga de una
+//   versión). Es el único origen disponible también en los rechazos.
 export type AuditEntityIdSource =
-  'response.id' | 'response.user.id' | 'params.id';
+  'response.id' | 'response.user.id' | `params.${string}`;
+
+// Elige la acción según la solicitud y la respuesta, para endpoints con más
+// de un resultado posible (ej. carga de un documento nuevo o de una nueva
+// versión, SPRINT-2-T09).
+export type AuditActionResolver = (
+  info: AuditRequestInfo,
+  response: unknown,
+) => AuditAction;
 
 // Metadatos que @Audited() declara en un endpoint crítico (SPRINT-1-T13).
 export interface AuditedOptions {
   /** Acción a registrar cuando la operación tiene éxito. */
-  action: AuditAction;
+  action: AuditAction | AuditActionResolver;
   /** Tipo de entidad afectada: tabla o módulo, ej. 'users', 'auth'. */
   entityType: string;
   /** De dónde tomar el ID de la entidad; si se omite, queda null. */
@@ -22,12 +32,28 @@ export interface AuditedOptions {
    */
   detailFromBody?: string[];
   /**
+   * Campos de la respuesta que se copian a detail: clave en detail → ruta en
+   * la respuesta, con puntos para campos anidados (ej. versionNumber →
+   * 'latestVersion.number'). También es una lista blanca.
+   */
+  detailFromResponse?: Record<string, string>;
+  /**
    * Si se define, los rechazos cuyo estado HTTP esté en failureStatuses
    * también se auditan, con esta acción (ej. login fallido).
    */
   failureAction?: AuditAction;
   /** Estados HTTP de error que se auditan con failureAction (defecto [401]). */
   failureStatuses?: number[];
+}
+
+// Datos que el propio endpoint aporta al evento cuando la respuesta no los
+// trae, por ejemplo una descarga, que responde con el archivo (SPRINT-2-T09).
+// Se fijan con setAuditContext (utils/audit-context.util.ts).
+export interface AuditContext {
+  /** Local de la entidad afectada. */
+  storeId?: string | null;
+  /** Campos adicionales para detail; nunca contenido de archivos. */
+  detail?: Record<string, unknown>;
 }
 
 // Datos de la solicitud HTTP que el interceptor extrae para armar el evento.
@@ -40,6 +66,8 @@ export interface AuditRequestInfo {
   body: unknown;
   ip?: string;
   userAgent?: string;
+  // Contexto fijado por el endpoint durante la solicitud, si lo hay.
+  context?: AuditContext;
 }
 
 // Evento de auditoría listo para persistir en audit_logs.
