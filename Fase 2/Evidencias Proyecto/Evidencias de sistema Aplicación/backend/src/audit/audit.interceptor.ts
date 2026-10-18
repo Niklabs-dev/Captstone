@@ -6,7 +6,7 @@ import {
   type NestInterceptor,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import {
   catchError,
   concatMap,
@@ -19,6 +19,7 @@ import type { AuthUser } from '../auth/types/auth.types.js';
 import { AuditService } from './audit.service.js';
 import { AUDITED_KEY } from './decorators/audited.decorator.js';
 import type { AuditedOptions, AuditRequestInfo } from './types/audit.types.js';
+import { getAuditContext } from './utils/audit-context.util.js';
 import {
   buildAuditEvent,
   buildFailureAuditEvent,
@@ -46,11 +47,12 @@ export class AuditInterceptor implements NestInterceptor<unknown, unknown> {
     );
     if (!options) return next.handle();
 
-    const info = this.requestInfo(context);
+    // Los datos de la solicitud se leen al terminar el endpoint: así incluyen
+    // el contexto que haya fijado con setAuditContext.
     return next.handle().pipe(
       concatMap(async (response: unknown) => {
         await this.auditService.record(
-          buildAuditEvent(options, info, response),
+          buildAuditEvent(options, this.requestInfo(context), response),
         );
         return response;
       }),
@@ -59,7 +61,11 @@ export class AuditInterceptor implements NestInterceptor<unknown, unknown> {
         if (failureAction === null) return throwError(() => error);
         return from(
           this.auditService.record(
-            buildFailureAuditEvent(options, failureAction, info),
+            buildFailureAuditEvent(
+              options,
+              failureAction,
+              this.requestInfo(context),
+            ),
           ),
         ).pipe(mergeMap(() => throwError(() => error)));
       }),
@@ -67,10 +73,10 @@ export class AuditInterceptor implements NestInterceptor<unknown, unknown> {
   }
 
   private requestInfo(context: ExecutionContext): AuditRequestInfo {
-    const request = context
-      .switchToHttp()
-      .getRequest<Request & { user?: AuthUser }>();
+    const http = context.switchToHttp();
+    const request = http.getRequest<Request & { user?: AuthUser }>();
     return {
+      context: getAuditContext(http.getResponse<Response>()),
       user: request.user,
       params: request.params,
       body: request.body as unknown,

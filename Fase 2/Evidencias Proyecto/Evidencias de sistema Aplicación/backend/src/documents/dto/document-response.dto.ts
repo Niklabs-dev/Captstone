@@ -265,6 +265,12 @@ export class DocumentDeletionResponseDto implements DocumentDeletionResponse {
   id: string;
 
   @ApiProperty({
+    description: 'ID del local del documento (UUID).',
+    example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d',
+  })
+  storeId: string;
+
+  @ApiProperty({
     description:
       'Fecha hasta la que debía conservarse (YYYY-MM-DD); ya estaba vencida.',
     example: '2031-10-17',

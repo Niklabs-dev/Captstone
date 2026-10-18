@@ -140,6 +140,21 @@ curl "http://localhost:3001/audit-logs?storeId=<uuid>&from=2026-10-01&to=2026-10
   -H "Authorization: Bearer <access_token>"
 ```
 
+### Operaciones auditadas
+
+Los endpoints marcados con `@Audited()` quedan registrados automáticamente (`AuditInterceptor`):
+
+| `action` | Operación |
+| --- | --- |
+| `USER_LOGIN` / `USER_LOGIN_FAILED` | Inicio de sesión exitoso o rechazado (401). |
+| `USER_CREATED` / `USER_DEACTIVATED` | Creación y desactivación de usuarios. |
+| `DOCUMENT_UPLOADED` / `DOCUMENT_VERSION_ADDED` | Carga de un documento laboral o de una nueva versión (detalle: trabajador, tipo, versión y SHA-256). |
+| `DOCUMENT_DOWNLOADED` | Descarga de una versión (detalle: documento y resultado de integridad `VALID`/`ALTERED`). |
+| `DOCUMENT_DELETED` / `DOCUMENT_DELETION_BLOCKED` | Eliminación vencido el plazo de conservación, o intento rechazado (409) antes de que venza. |
+| `DOCUMENT_DT_REGISTERED` | Confirmación del registro de un documento en la DT. |
+
+El detalle se arma solo con campos declarados (listas blancas): nunca incluye contraseñas ni el contenido de los archivos.
+
 ### Inmutabilidad del registro
 
 Una operación registrada no se puede modificar ni eliminar (criterio 2 de E1-H2):

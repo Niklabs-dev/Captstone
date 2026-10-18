@@ -17,6 +17,8 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { AUDIT_ACTION } from '../audit/constants/audit-actions.constants.js';
+import { Audited } from '../audit/decorators/audited.decorator.js';
 import { ROLE } from '../auth/constants/roles.constants.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
@@ -59,6 +61,12 @@ export class DtAlertsController {
 
   @Post(':alertId/registration')
   @HttpCode(200)
+  @Audited({
+    action: AUDIT_ACTION.DOCUMENT_DT_REGISTERED,
+    entityType: 'documents',
+    entityIdFrom: 'params.alertId',
+    detailFromResponse: { registeredAt: 'registeredAt' },
+  })
   @ApiOperation({
     summary: 'Marca un documento como registrado en la DT',
     description:

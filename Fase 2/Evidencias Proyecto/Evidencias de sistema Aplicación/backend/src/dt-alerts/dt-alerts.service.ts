@@ -114,6 +114,7 @@ export class DtAlertsService {
       return {
         alertId,
         documentId: registered.id,
+        storeId: registered.storeId,
         status: 'REGISTERED',
         // dtRegisteredAt acaba de fijarse.
         registeredAt: registered.dtRegisteredAt ?? new Date(),
