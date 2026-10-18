@@ -4,6 +4,7 @@ import {
   businessDateOf,
   computeDocumentDeadlines,
   formatDbDate,
+  isRetentionExpired,
 } from './document-dates.util.js';
 
 describe('Plazos de documentos (SPRINT-2-T05)', () => {
@@ -64,5 +65,35 @@ describe('Plazos de documentos (SPRINT-2-T05)', () => {
     expect(deadlines.issuedAt).toBeNull();
     expect(formatDbDate(deadlines.retainUntil)).toBe('2031-10-17');
     expect(deadlines.dtRegistrationDueAt).toBeNull();
+  });
+});
+
+describe('Vencimiento del plazo de conservación (SPRINT-2-T07)', () => {
+  const retainUntil = new Date('2031-10-17T00:00:00.000Z');
+
+  it('se conserva hasta retain_until inclusive', () => {
+    expect(
+      isRetentionExpired(retainUntil, new Date('2031-10-16T15:00:00.000Z')),
+    ).toBe(false);
+    expect(
+      isRetentionExpired(retainUntil, new Date('2031-10-17T15:00:00.000Z')),
+    ).toBe(false);
+  });
+
+  it('vence desde el día siguiente', () => {
+    expect(
+      isRetentionExpired(retainUntil, new Date('2031-10-18T15:00:00.000Z')),
+    ).toBe(true);
+  });
+
+  it('cuenta el día en hora de Chile, no en UTC', () => {
+    // 02:30 UTC del 18-10 son las 23:30 del 17-10 en Chile: aún no vence.
+    expect(
+      isRetentionExpired(retainUntil, new Date('2031-10-18T02:30:00.000Z')),
+    ).toBe(false);
+    // 03:30 UTC del 18-10 ya son las 00:30 del 18-10 en Chile.
+    expect(
+      isRetentionExpired(retainUntil, new Date('2031-10-18T03:30:00.000Z')),
+    ).toBe(true);
   });
 });

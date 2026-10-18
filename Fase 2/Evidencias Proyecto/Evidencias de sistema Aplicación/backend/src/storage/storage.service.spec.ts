@@ -177,6 +177,20 @@ describe('StorageService (SPRINT-2-T04)', () => {
     );
   });
 
+  it('remove elimina el archivo y no falla si ya no existe (SPRINT-2-T07)', async () => {
+    const stored = await service.save(PDF);
+
+    await service.remove(stored.relativePath);
+    expect(await listFiles(rootPath)).toHaveLength(0);
+    await expect(service.read(stored.relativePath)).rejects.toThrow(
+      NotFoundException,
+    );
+    await expect(service.remove(stored.relativePath)).resolves.toBeUndefined();
+    await expect(service.remove('../fuera.pdf')).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
   it('borra el temporal si falla la escritura atómica', async () => {
     vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disco lleno'));
 

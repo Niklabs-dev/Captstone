@@ -351,7 +351,12 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
     expect(inactivos.some((u) => u.id === creado.id)).toBe(true);
     await deactivate(creado.id).expect(200);
 
-    await prisma.document.delete({ where: { id: documento.id } });
+    // El contrato está en su plazo de conservación (SPRINT-2-T07): se purga
+    // como mantenimiento, omitiendo los triggers.
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
+      await tx.document.delete({ where: { id: documento.id } });
+    });
   });
 
   it('no permite desactivar la cuenta propia ni usuarios inexistentes', async () => {

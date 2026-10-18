@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
   INTEGRITY_STATUSES,
+  type DocumentDeletionResponse,
   type DocumentListResponse,
   type DocumentResponse,
   type DocumentVersionHistory,
@@ -237,4 +238,25 @@ export class IntegrityCheckResponseDto implements IntegrityCheckResponse {
     example: '2026-10-17T16:00:00.000Z',
   })
   checkedAt: Date;
+}
+
+export class DocumentDeletionResponseDto implements DocumentDeletionResponse {
+  @ApiProperty({
+    description: 'ID del documento eliminado (UUID).',
+    example: '5c1f3a7e-2b4d-4e8a-9f60-1d2c3b4a5e6f',
+  })
+  id: string;
+
+  @ApiProperty({
+    description:
+      'Fecha hasta la que debía conservarse (YYYY-MM-DD); ya estaba vencida.',
+    example: '2031-10-17',
+  })
+  retainUntil: string;
+
+  @ApiProperty({
+    description: 'Cantidad de versiones eliminadas junto con el documento.',
+    example: 2,
+  })
+  deletedVersions: number;
 }
