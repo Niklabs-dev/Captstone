@@ -65,6 +65,10 @@ export interface DocumentResponse {
   issuedAt: string | null;
   retainUntil: string;
   dtRegistrationDueAt: string | null;
+  // true mientras no venza el plazo de conservación (SPRINT-2-T07).
+  deletionBlocked: boolean;
+  // Motivo del bloqueo; null si el documento ya puede eliminarse.
+  deletionReason: string | null;
   createdAt: Date;
   latestVersion: DocumentVersionResponse;
 }

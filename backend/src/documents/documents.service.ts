@@ -107,6 +107,12 @@ function toVersionResponse(
   };
 }
 
+// Motivo por el que un documento no puede eliminarse antes de su plazo de
+// conservación (SPRINT-2-T07).
+function retentionReason(retainUntil: string): string {
+  return `El documento debe conservarse hasta el ${retainUntil} (art. 9 bis del Código del Trabajo)`;
+}
+
 function toDocumentResponse(document: DocumentWithRelations): DocumentResponse {
   const version = document.currentVersion;
   // La carga siempre deja un trabajador y una versión vigente; si faltan, el
@@ -116,6 +122,8 @@ function toDocumentResponse(document: DocumentWithRelations): DocumentResponse {
       `El documento ${document.id} no tiene versión o trabajador`,
     );
   }
+  const retainUntil = formatDbDate(document.retainUntil);
+  const deletionBlocked = !isRetentionExpired(document.retainUntil, new Date());
   return {
     id: document.id,
     workerId: document.subjectUserId,
@@ -123,10 +131,12 @@ function toDocumentResponse(document: DocumentWithRelations): DocumentResponse {
     type: document.documentType.code,
     title: document.title,
     issuedAt: document.issuedAt ? formatDbDate(document.issuedAt) : null,
-    retainUntil: formatDbDate(document.retainUntil),
+    retainUntil,
     dtRegistrationDueAt: document.dtRegistrationDueAt
       ? formatDbDate(document.dtRegistrationDueAt)
       : null,
+    deletionBlocked,
+    deletionReason: deletionBlocked ? retentionReason(retainUntil) : null,
     createdAt: document.createdAt,
     latestVersion: toVersionResponse(version),
   };
@@ -488,7 +498,7 @@ export class DocumentsService {
     const retainUntil = formatDbDate(document.retainUntil);
     if (!isRetentionExpired(document.retainUntil, new Date())) {
       throw new ConflictException(
-        `El documento debe conservarse hasta el ${retainUntil} (art. 9 bis del Código del Trabajo): no se puede eliminar antes`,
+        `${retentionReason(retainUntil)}: no se puede eliminar antes`,
       );
     }
 
