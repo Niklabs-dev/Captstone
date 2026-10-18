@@ -112,3 +112,13 @@ export interface DocumentDownload {
   // VALID o ALTERED: si falta el archivo la descarga responde 404.
   integrity: Exclude<IntegrityStatus, 'MISSING'>;
 }
+
+// Resultado de eliminar un documento con el plazo de conservación vencido
+// (SPRINT-2-T07).
+export interface DocumentDeletionResponse {
+  id: string;
+  // Fecha YYYY-MM-DD hasta la que debía conservarse.
+  retainUntil: string;
+  // Versiones eliminadas junto con el documento.
+  deletedVersions: number;
+}

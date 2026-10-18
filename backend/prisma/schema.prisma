@@ -203,6 +203,9 @@ enum DocumentStatus {
 ///   documento en la Dirección del Trabajo; NULL si su tipo no lo exige.
 /// - dt_registered_at / dt_registered_by_id: cuándo y quién marcó el registro en
 ///   la DT como realizado; mientras sea NULL la alerta sigue activa.
+/// Conservación (SPRINT-2-T07): los triggers de la migración
+/// bloqueo_eliminacion_documentos rechazan eliminar el documento mientras no
+/// venza retain_until (en hora de Chile), acortar retain_until y TRUNCATE.
 model Document {
   id                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   title               String         @db.VarChar(160)
@@ -241,8 +244,9 @@ model Document {
 /// Versión INMUTABLE de un documento: archivo en volumen separado (file_path),
 /// hash SHA-256 único que permite verificar la integridad del archivo, y
 /// trazabilidad de quién subió cada versión y cuándo. Los triggers de la
-/// migración versiones_documento_inmutables (SPRINT-2-T05) rechazan UPDATE,
-/// DELETE y TRUNCATE: una nueva carga siempre crea una versión nueva.
+/// migración versiones_documento_inmutables (SPRINT-2-T05) rechazan UPDATE y
+/// TRUNCATE: una nueva carga siempre crea una versión nueva. DELETE solo se
+/// admite vencido el plazo de conservación del documento (SPRINT-2-T07).
 model DocumentVersion {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   versionNumber Int      @map("version_number")

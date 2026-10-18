@@ -9,6 +9,9 @@ import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 const IMMUTABLE = /Las versiones de documentos son inmutables/;
+// Desde SPRINT-2-T07 una versión solo se elimina vencido el plazo de
+// conservación de su documento (ver document-retention.integration.spec.ts).
+const RETENTION = /antes de su plazo de conservación/;
 
 class Rollback extends Error {
   constructor() {
@@ -148,12 +151,12 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
-    it('rechaza eliminar una versión', async () => {
+    it('rechaza eliminar una versión durante el plazo de conservación', async () => {
       await withinRollback(async (tx) => {
         const { versionId } = await createVersionFixture(tx);
         await expect(
           tx.documentVersion.delete({ where: { id: versionId } }),
-        ).rejects.toThrow(IMMUTABLE);
+        ).rejects.toThrow(RETENTION);
       });
     });
 

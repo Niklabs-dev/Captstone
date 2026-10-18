@@ -53,6 +53,16 @@ export function formatDbDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+// Indica si venció el plazo de conservación (SPRINT-2-T07): el documento se
+// conserva hasta retain_until inclusive y solo puede eliminarse desde el día
+// siguiente, contado en hora de Chile. Misma regla que el trigger
+// documents_enforce_retention de la base de datos.
+export function isRetentionExpired(retainUntil: Date, now: Date): boolean {
+  return (
+    formatDbDate(toDbDate(businessDateOf(now))) > formatDbDate(retainUntil)
+  );
+}
+
 export interface DocumentDeadlineInput {
   // Fecha de celebración (firma) informada; null si no se indicó.
   issuedAt: CalendarDate | null;

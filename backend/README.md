@@ -150,6 +150,16 @@ Una operación registrada no se puede modificar ni eliminar (criterio 2 de E1-H2
 
 Los triggers solo se omiten con `session_replication_role = replica`, que exige superusuario (mantenimiento de la base de datos). Los tests de integración que ejercitan la API por HTTP lo usan para purgar sus propios registros (`test/helpers/audit-cleanup.ts`), por lo que `TEST_DATABASE_URL` debe conectarse con un superusuario, como el `postgres` de docker compose.
 
+## Conservación de documentos laborales
+
+Los documentos laborales deben conservarse 5 años (art. 9 bis del Código del
+Trabajo) hasta su `retainUntil` inclusive (criterio 3 de E1-H3):
+
+- **API:** `DELETE /documents/:id` (solo `ADMINISTRADOR`) responde 409 mientras no venza el plazo y deja el documento intacto. Vencido, elimina el documento, todas sus versiones y sus archivos.
+- **Base de datos:** la migración `bloqueo_eliminacion_documentos` instala triggers que rechazan eliminar un documento o una versión antes de que venza su plazo (el día se cuenta en hora de Chile), acortar `retain_until` y `TRUNCATE` sobre `documents`. Las versiones siguen sin poder modificarse nunca.
+
+Igual que en la auditoría, los triggers solo se omiten con `session_replication_role = replica` (superusuario); los tests HTTP lo usan para purgar sus documentos de prueba.
+
 ## Documentación interactiva (Swagger / OpenAPI)
 
 La API genera su documentación OpenAPI con `@nestjs/swagger`:

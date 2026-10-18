@@ -12,7 +12,10 @@ import {
   type CalendarDate,
 } from '../audit/utils/business-day.util.js';
 import { ROLE } from '../auth/constants/roles.constants.js';
-import { hasAnyRole } from '../auth/policies/store-access.policy.js';
+import {
+  canAccessStore,
+  hasAnyRole,
+} from '../auth/policies/store-access.policy.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -27,6 +30,7 @@ import {
 import {
   DOCUMENT_SUBJECT_ROLES,
   UPLOADABLE_DOCUMENT_TYPES,
+  type DocumentDeletionResponse,
   type DocumentDownload,
   type DocumentListResponse,
   type DocumentResponse,
@@ -39,6 +43,7 @@ import {
 import {
   computeDocumentDeadlines,
   formatDbDate,
+  isRetentionExpired,
 } from './utils/document-dates.util.js';
 import { buildDownloadFileName } from './utils/download-name.util.js';
 import { maxUploadBytes } from './utils/upload-limits.util.js';
@@ -139,7 +144,8 @@ function sanitizeFileName(originalName: string): string {
 
 // Gestor documental: carga de documentos laborales en la carpeta digital de
 // un trabajador con versiones inmutables (SPRINT-2-T05), y su consulta,
-// descarga y verificación de integridad (SPRINT-2-T06).
+// descarga y verificación de integridad (SPRINT-2-T06), y su eliminación
+// solo vencido el plazo de conservación (SPRINT-2-T07).
 @Injectable()
 export class DocumentsService {
   private readonly logger = new Logger(DocumentsService.name);
@@ -459,6 +465,63 @@ export class DocumentsService {
       }
       throw error;
     }
+  }
+
+  // Elimina un documento laboral con todas sus versiones y archivos, solo si
+  // venció su plazo de conservación (art. 9 bis CT): antes responde 409 y no
+  // toca nada. La base de datos aplica la misma regla con triggers
+  // (migración bloqueo_eliminacion_documentos).
+  async remove(
+    documentId: string,
+    currentUser: AuthUser,
+  ): Promise<DocumentDeletionResponse> {
+    const document = await this.prisma.document.findFirst({
+      where: { id: documentId, ...LABOR_DOCUMENT_WHERE },
+      include: { versions: { select: { filePath: true } } },
+    });
+    if (!document) {
+      throw new NotFoundException('Documento no encontrado');
+    }
+    if (!canAccessStore(currentUser, document.storeId)) {
+      throw new ForbiddenException(DOCUMENT_FORBIDDEN_MESSAGE);
+    }
+    const retainUntil = formatDbDate(document.retainUntil);
+    if (!isRetentionExpired(document.retainUntil, new Date())) {
+      throw new ConflictException(
+        `El documento debe conservarse hasta el ${retainUntil} (art. 9 bis del Código del Trabajo): no se puede eliminar antes`,
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      // La versión vigente apunta al documento y viceversa: se suelta primero.
+      await tx.document.update({
+        where: { id: documentId },
+        data: { currentVersionId: null },
+      });
+      await tx.documentVersion.deleteMany({ where: { documentId } });
+      await tx.document.delete({ where: { id: documentId } });
+    });
+
+    // Los archivos se eliminan después de confirmar la transacción: si
+    // fallara, la base de datos seguiría apuntando a archivos inexistentes.
+    // Un archivo que no se pudo eliminar queda huérfano (su nombre no contiene
+    // datos personales) y se informa en el log.
+    for (const version of document.versions) {
+      try {
+        await this.storage.remove(version.filePath);
+      } catch (error) {
+        this.logger.error(
+          `No se pudo eliminar el archivo ${version.filePath} del documento ${documentId}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+
+    return {
+      id: documentId,
+      retainUntil,
+      deletedVersions: document.versions.length,
+    };
   }
 
   // El hash SHA-256 es único en document_versions: un mismo archivo no puede
