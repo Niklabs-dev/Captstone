@@ -1,3 +1,4 @@
+import { brandTitleClass, brandCaptionClass } from '@/components/ui/styles';
 import Image from 'next/image';
 import type { ReactElement, ReactNode } from 'react';
 import type { Role } from '@/lib/auth';
@@ -40,10 +41,10 @@ export function ApplicationShell({
             priority
           />
           <div>
-            <p className="text-base font-extrabold tracking-tight">
+            <p className={brandTitleClass}>
               Moi<span className="text-salmon-deep">Food</span>
             </p>
-            <p className="mt-0.5 text-xs text-ink2">Gestión interna</p>
+            <p className={`${brandCaptionClass} mt-0.5`}>Gestión interna</p>
           </div>
         </div>
         <ApplicationNavigation role={user.role} />
@@ -57,11 +58,11 @@ export function ApplicationShell({
       <div className="min-w-0">
         <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-line bg-bg px-5 py-3 lg:px-7">
           <ApplicationHeading />
-          <details className="max-w-full rounded-lg border border-line2 px-3 py-2">
-            <summary className="cursor-pointer text-sm font-semibold text-salmon-ink">
+          <details className="relative max-w-full">
+            <summary className="min-h-11 cursor-pointer rounded-lg border border-line2 px-3 py-2.5 text-sm font-semibold text-salmon-ink hover:bg-tint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink">
               Mi sesión
             </summary>
-            <div className="mt-3">
+            <div className="absolute top-full right-0 z-30 mt-2 w-80 max-w-[calc(100vw-2.5rem)] rounded-xl border border-line bg-bg p-4 shadow-lg">
               <SessionActions />
             </div>
           </details>

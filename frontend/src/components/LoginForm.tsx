@@ -1,4 +1,10 @@
 'use client';
+import {
+  inputClass,
+  buttonClass,
+  primaryButtonClass,
+  labelClass,
+} from '@/components/ui/styles';
 import { useState, type FormEvent, type ReactElement } from 'react';
 import { useRouter } from 'next/navigation';
 import { isRecord } from '@/lib/auth';
@@ -74,10 +80,7 @@ export function LoginForm({
         </p>
       )}
       <div className="space-y-2">
-        <label
-          htmlFor="email"
-          className="block text-[12.5px] font-semibold text-ink2"
-        >
+        <label htmlFor="email" className={labelClass}>
           Correo electrónico
         </label>
         <input
@@ -89,15 +92,12 @@ export function LoginForm({
           maxLength={254}
           disabled={loading}
           aria-describedby={error ? 'login-error' : undefined}
-          className="w-full rounded-lg border border-line2 px-3 py-2.5 outline-none focus:ring-2 focus:ring-salmon-deep disabled:opacity-60"
+          className={inputClass}
           placeholder="nombre@moi-food.cl"
         />
       </div>
       <div className="space-y-2">
-        <label
-          htmlFor="password"
-          className="block text-[12.5px] font-semibold text-ink2"
-        >
+        <label htmlFor="password" className={labelClass}>
           Contraseña
         </label>
         <input
@@ -109,13 +109,13 @@ export function LoginForm({
           maxLength={128}
           disabled={loading}
           aria-describedby={error ? 'login-error' : undefined}
-          className="w-full rounded-lg border border-line2 px-3 py-2.5 outline-none focus:ring-2 focus:ring-salmon-deep disabled:opacity-60"
+          className={inputClass}
         />
       </div>
       <button
         type="submit"
         disabled={loading}
-        className="w-full rounded-lg bg-salmon px-3.5 py-2.5 text-sm font-semibold text-white hover:bg-salmon-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-deep disabled:opacity-60"
+        className={`${primaryButtonClass} w-full`}
       >
         {loading ? 'Conectando…' : 'Ingresar'}
       </button>
@@ -124,7 +124,7 @@ export function LoginForm({
           type="button"
           disabled={loading}
           onClick={() => authenticate('/api/auth/refresh')}
-          className="w-full rounded-lg border border-line2 px-3.5 py-2.5 text-sm font-semibold text-salmon-ink disabled:opacity-60"
+          className={`${buttonClass} w-full`}
         >
           Renovar sesión anterior
         </button>

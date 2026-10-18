@@ -1,3 +1,4 @@
+import { buttonClass } from '@/components/ui/styles';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { ReactElement } from 'react';
@@ -37,14 +38,14 @@ export default async function DashboardPage({
             <Link
               href="/admin/usuarios"
               prefetch={false}
-              className="mb-6 inline-block rounded-lg border border-line2 px-4 py-2 text-sm font-semibold text-salmon-ink hover:bg-tint"
+              className={buttonClass}
             >
               Gestionar usuarios
             </Link>
             <Link
               href="/admin/auditoria"
               prefetch={false}
-              className="mb-6 inline-block rounded-lg border border-line2 px-4 py-2 text-sm font-semibold text-salmon-ink hover:bg-tint"
+              className={buttonClass}
             >
               Consultar auditoría
             </Link>

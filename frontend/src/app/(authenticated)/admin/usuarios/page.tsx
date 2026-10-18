@@ -6,6 +6,7 @@ import { UsersPanel } from '@/components/users/UsersPanel';
 import { getUsersSession } from '@/lib/users-session';
 import { listManagedUsers } from '@/lib/users-backend';
 import { collectStores, type StoreOption } from '@/lib/users';
+import { buttonClass } from '@/components/ui/styles';
 export const metadata: Metadata = { title: 'Usuarios | MoiFood' };
 export default async function UsersPage(): Promise<ReactElement> {
   const session = await getUsersSession();
@@ -14,10 +15,10 @@ export default async function UsersPage(): Promise<ReactElement> {
     if (session.status === 403) redirect('/dashboard?reason=forbidden');
     return (
       <>
-        <p role="alert" className="mt-4 text-u-crit">
+        <p role="alert" className="mt-4 text-crit">
           {session.message}
         </p>
-        <Link href="/admin/usuarios" className="mt-4 inline-block underline">
+        <Link href="/admin/usuarios" className={`${buttonClass} mt-4`}>
           Intentar nuevamente
         </Link>
       </>

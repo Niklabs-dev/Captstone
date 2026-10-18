@@ -7,6 +7,10 @@ autenticado, con navegación y sesión persistentes y opciones según el rol val
 en el servidor. Ver [navegación compartida](docs/NAVEGACION-COMPARTIDA.md)
 para permisos, alcance y pruebas de regresión.
 
+Los controles, tablas y marca usan la paleta global y estilos comunes. Ver
+[revisión de consistencia visual](docs/CONSISTENCIA-VISUAL.md) para los ajustes
+y las pruebas de carga, error, foco de teclado y contraste.
+
 ## Desarrollo
 
 1. Ejecutar `npm ci`.

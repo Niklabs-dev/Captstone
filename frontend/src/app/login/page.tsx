@@ -1,3 +1,4 @@
+import { brandTitleClass, brandCaptionClass } from '@/components/ui/styles';
 import { cookies } from 'next/headers';
 import Image from 'next/image';
 import { redirect } from 'next/navigation';
@@ -30,12 +31,10 @@ export default async function LoginPage({
             className="mb-3 rounded-xl border border-line"
             priority
           />
-          <p className="text-[17px] font-extrabold tracking-tight">
+          <p className={brandTitleClass}>
             Moi<span className="text-salmon-deep">Food</span>
           </p>
-          <p className="mt-1 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted">
-            Gestión interna
-          </p>
+          <p className={`${brandCaptionClass} mt-1`}>Gestión interna</p>
         </div>
         <h1 id="login-title" className="mb-2 text-lg font-bold">
           Iniciar sesión
