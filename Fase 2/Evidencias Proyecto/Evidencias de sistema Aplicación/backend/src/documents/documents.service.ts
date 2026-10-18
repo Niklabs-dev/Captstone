@@ -269,6 +269,8 @@ export class DocumentsService {
       ),
       mimeType: version.mimeType,
       integrity,
+      documentId: version.documentId,
+      storeId: version.document.storeId,
     };
   }
 
@@ -529,6 +531,7 @@ export class DocumentsService {
 
     return {
       id: documentId,
+      storeId: document.storeId,
       retainUntil,
       deletedVersions: document.versions.length,
     };

@@ -31,6 +31,9 @@ import {
   ApiUnsupportedMediaTypeResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
+import { AUDIT_ACTION } from '../audit/constants/audit-actions.constants.js';
+import { Audited } from '../audit/decorators/audited.decorator.js';
+import { setAuditContext } from '../audit/utils/audit-context.util.js';
 import { ROLE } from '../auth/constants/roles.constants.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
@@ -64,7 +67,9 @@ import { contentDisposition } from './utils/download-name.util.js';
 // dueño/administrador (SPRINT-2-T05); consulta, descarga y verificación de
 // integridad para el administrador y para cada trabajador sobre sus propios
 // documentos (SPRINT-2-T06). La eliminación, solo del administrador, se
-// bloquea mientras no venza el plazo de conservación (SPRINT-2-T07).
+// bloquea mientras no venza el plazo de conservación (SPRINT-2-T07). La carga,
+// la descarga y la eliminación (también la bloqueada) quedan en la auditoría
+// (SPRINT-2-T09), sin el contenido de los archivos.
 @ApiTags('documents')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
@@ -75,6 +80,22 @@ export class DocumentsController {
   @Post()
   @Roles(ROLE.ADMINISTRADOR)
   @UseInterceptors(FileInterceptor('file'))
+  @Audited({
+    // Con documentId en el cuerpo es una nueva versión de un documento.
+    action: (info) =>
+      typeof (info.body as { documentId?: unknown } | null)?.documentId ===
+      'string'
+        ? AUDIT_ACTION.DOCUMENT_VERSION_ADDED
+        : AUDIT_ACTION.DOCUMENT_UPLOADED,
+    entityType: 'documents',
+    entityIdFrom: 'response.id',
+    detailFromBody: ['workerId', 'documentTypeCode'],
+    detailFromResponse: {
+      versionId: 'latestVersion.id',
+      versionNumber: 'latestVersion.number',
+      sha256: 'latestVersion.sha256',
+    },
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: UploadDocumentFormDto })
   @ApiOperation({
@@ -158,6 +179,11 @@ export class DocumentsController {
   @Get('versions/:versionId/download')
   @Roles(...DOCUMENT_READER_ROLES)
   @Header('X-Content-Type-Options', 'nosniff')
+  @Audited({
+    action: AUDIT_ACTION.DOCUMENT_DOWNLOADED,
+    entityType: 'document_versions',
+    entityIdFrom: 'params.versionId',
+  })
   @ApiProduces(...ALLOWED_MIME_TYPES)
   @ApiOperation({
     summary: 'Descarga el archivo de una versión de un documento',
@@ -196,6 +222,11 @@ export class DocumentsController {
   ): Promise<StreamableFile> {
     const file = await this.documentsService.download(versionId, currentUser);
     res.setHeader('X-Document-Integrity', file.integrity);
+    // La respuesta es el archivo: el local y el detalle se aportan aparte.
+    setAuditContext(res, {
+      storeId: file.storeId,
+      detail: { documentId: file.documentId, integrity: file.integrity },
+    });
     return new StreamableFile(file.content, {
       type: file.mimeType,
       disposition: contentDisposition(file.fileName),
@@ -226,6 +257,18 @@ export class DocumentsController {
 
   @Delete(':id')
   @Roles(ROLE.ADMINISTRADOR)
+  @Audited({
+    action: AUDIT_ACTION.DOCUMENT_DELETED,
+    entityType: 'documents',
+    entityIdFrom: 'params.id',
+    detailFromResponse: {
+      retainUntil: 'retainUntil',
+      deletedVersions: 'deletedVersions',
+    },
+    // Intento de eliminar antes del plazo de conservación.
+    failureAction: AUDIT_ACTION.DOCUMENT_DELETION_BLOCKED,
+    failureStatuses: [409],
+  })
   @ApiOperation({
     summary:
       'Elimina un documento laboral con sus versiones, solo si venció su plazo de conservación',

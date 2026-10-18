@@ -133,6 +133,12 @@ export class DtRegistrationResponseDto implements DtRegistrationResponse {
   documentId: string;
 
   @ApiProperty({
+    description: 'ID del local del documento (UUID).',
+    example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d',
+  })
+  storeId: string;
+
+  @ApiProperty({
     description: 'Siempre REGISTERED.',
     enum: ['REGISTERED'],
     example: 'REGISTERED',

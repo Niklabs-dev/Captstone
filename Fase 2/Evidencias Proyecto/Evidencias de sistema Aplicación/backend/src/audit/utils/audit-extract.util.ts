@@ -18,29 +18,50 @@ function asString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+// Valor de una ruta con puntos dentro de un objeto (ej. 'latestVersion.number').
+function valueAt(value: unknown, path: string): unknown {
+  let current: unknown = value;
+  for (const key of path.split('.')) {
+    const record = asRecord(current);
+    if (record === null || !(key in record)) return undefined;
+    current = record[key];
+  }
+  return current;
+}
+
+const PARAMS_PREFIX = 'params.';
+
+// Acción declarada en @Audited(), o la que elige su función según la
+// solicitud y la respuesta.
+export function resolveAction(
+  options: AuditedOptions,
+  info: AuditRequestInfo,
+  response: unknown,
+): string {
+  return typeof options.action === 'function'
+    ? options.action(info, response)
+    : options.action;
+}
+
 // ID de la entidad afectada según el origen declarado en @Audited().
 export function resolveEntityId(
   options: AuditedOptions,
   info: AuditRequestInfo,
   response: unknown,
 ): string | null {
-  const responseRecord = asRecord(response);
-  switch (options.entityIdFrom) {
-    case 'params.id':
-      return asString(info.params.id);
-    case 'response.id':
-      return asString(responseRecord?.id);
-    case 'response.user.id':
-      return asString(asRecord(responseRecord?.user)?.id);
-    default:
-      return null;
+  const source = options.entityIdFrom;
+  if (source === undefined) return null;
+  if (source.startsWith(PARAMS_PREFIX)) {
+    return asString(info.params[source.slice(PARAMS_PREFIX.length)]);
   }
+  return asString(valueAt(response, source.slice('response.'.length)));
 }
 
 // Responsable de la operación: el usuario autenticado o, en endpoints
 // públicos como el login, el usuario que devuelve la respuesta exitosa.
-// El local se toma de la entidad afectada (respuesta) antes que del actor:
-// un administrador global no tiene local, pero el usuario que crea sí.
+// El local se toma de la entidad afectada (respuesta o contexto del endpoint)
+// antes que del actor: un administrador global no tiene local, pero el
+// usuario que crea o el documento que carga sí.
 export function resolveActor(
   info: AuditRequestInfo,
   response: unknown,
@@ -52,24 +73,34 @@ export function resolveActor(
     storeId:
       asString(responseUser?.storeId) ??
       asString(asRecord(responseRecord?.store)?.id) ??
+      asString(responseRecord?.storeId) ??
+      asString(info.context?.storeId) ??
       info.user?.storeId ??
       null,
   };
 }
 
-// Copia del cuerpo solo los campos declarados en detailFromBody (lista
-// blanca): el cuerpo puede traer contraseñas que nunca deben auditarse.
+// Copia solo los campos declarados (listas blancas): del cuerpo los de
+// detailFromBody, que puede traer contraseñas que nunca deben auditarse; de
+// la respuesta los de detailFromResponse; y el detalle que aportó el endpoint
+// con setAuditContext. Sin respuesta (rechazos) solo cuerpo y contexto.
 export function resolveDetail(
   options: AuditedOptions,
   info: AuditRequestInfo,
+  response?: unknown,
 ): Record<string, unknown> | null {
-  const fields = options.detailFromBody ?? [];
-  const body = asRecord(info.body);
-  if (fields.length === 0 || body === null) return null;
   const detail: Record<string, unknown> = {};
-  for (const field of fields) {
-    if (field in body) detail[field] = body[field];
+  const body = asRecord(info.body);
+  if (body !== null) {
+    for (const field of options.detailFromBody ?? []) {
+      if (field in body) detail[field] = body[field];
+    }
   }
+  for (const [key, path] of Object.entries(options.detailFromResponse ?? {})) {
+    const value = valueAt(response, path);
+    if (value !== undefined) detail[key] = value;
+  }
+  Object.assign(detail, info.context?.detail);
   return Object.keys(detail).length > 0 ? detail : null;
 }
 
@@ -81,10 +112,10 @@ export function buildAuditEvent(
 ): AuditEvent {
   const actor = resolveActor(info, response);
   return {
-    action: options.action,
+    action: resolveAction(options, info, response),
     entityType: options.entityType,
     entityId: resolveEntityId(options, info, response),
-    detail: resolveDetail(options, info),
+    detail: resolveDetail(options, info, response),
     userId: actor.userId,
     storeId: actor.storeId,
     ipAddress: info.ip ?? null,
@@ -92,9 +123,10 @@ export function buildAuditEvent(
   };
 }
 
-// Evento de una operación rechazada (ej. login con credenciales inválidas):
-// no hay respuesta, así que la entidad queda sin identificar y el actor solo
-// se conoce si venía autenticado.
+// Evento de una operación rechazada (ej. login con credenciales inválidas o
+// eliminación bloqueada de un documento): no hay respuesta, así que la entidad
+// solo se identifica si su ID viaja en la ruta y el actor solo se conoce si
+// venía autenticado.
 export function buildFailureAuditEvent(
   options: AuditedOptions,
   action: string,
@@ -103,10 +135,10 @@ export function buildFailureAuditEvent(
   return {
     action,
     entityType: options.entityType,
-    entityId: null,
+    entityId: resolveEntityId(options, info, undefined),
     detail: resolveDetail(options, info),
     userId: info.user?.id ?? null,
-    storeId: info.user?.storeId ?? null,
+    storeId: asString(info.context?.storeId) ?? info.user?.storeId ?? null,
     ipAddress: info.ip ?? null,
     userAgent: info.userAgent ?? null,
   };
