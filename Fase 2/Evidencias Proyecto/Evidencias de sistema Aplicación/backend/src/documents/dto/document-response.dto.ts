@@ -126,6 +126,23 @@ export class DocumentResponseDto implements DocumentResponse {
   dtRegistrationDueAt: string | null;
 
   @ApiProperty({
+    description:
+      'true mientras no venza el plazo de conservación: el documento no se puede eliminar.',
+    example: true,
+  })
+  deletionBlocked: boolean;
+
+  @ApiProperty({
+    description:
+      'Motivo del bloqueo de eliminación; null si el documento ya puede eliminarse.',
+    example:
+      'El documento debe conservarse hasta el 2031-10-01 (art. 9 bis del Código del Trabajo)',
+    nullable: true,
+    type: String,
+  })
+  deletionReason: string | null;
+
+  @ApiProperty({
     description: 'Fecha de creación del documento (ISO 8601).',
     example: '2026-10-17T15:00:00.000Z',
   })

@@ -162,6 +162,10 @@ describe.skipIf(!databaseUrl)(
 
     it('rechaza vaciar la tabla con TRUNCATE', async () => {
       await withinRollback(async (tx) => {
+        // Mismo orden de bloqueo que la aplicación (documents y luego
+        // document_versions): sin esto, TRUNCATE ... CASCADE puede caer en un
+        // deadlock con los tests HTTP que corren en paralelo.
+        await tx.$executeRaw`LOCK TABLE documents, document_versions IN ACCESS EXCLUSIVE MODE`;
         await expect(
           tx.$executeRaw`TRUNCATE TABLE document_versions CASCADE`,
         ).rejects.toThrow(IMMUTABLE);

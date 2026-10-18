@@ -199,6 +199,10 @@ describe.skipIf(!databaseUrl)(
       const issuedAt = new Date().toISOString().slice(0, 10);
       const contrato = await uploadContract(issuedAt);
       const files = await storedFiles(contrato.id);
+      expect(contrato.deletionBlocked).toBe(true);
+      expect(contrato.deletionReason).toBe(
+        `El documento debe conservarse hasta el ${contrato.retainUntil} (art. 9 bis del Código del Trabajo)`,
+      );
 
       const res = await remove(contrato.id, 'admin').expect(409);
       expect((res.body as { message: string }).message).toContain(
@@ -219,7 +223,11 @@ describe.skipIf(!databaseUrl)(
     it('vencido el plazo, elimina el documento con todas sus versiones y archivos', async () => {
       // Celebrado en 2020: debía conservarse hasta 2025-03-02.
       const contrato = await uploadContract('2020-03-02');
-      expect(contrato.retainUntil).toBe('2025-03-02');
+      expect(contrato).toMatchObject({
+        retainUntil: '2025-03-02',
+        deletionBlocked: false,
+        deletionReason: null,
+      });
       await uploadContract('2020-03-02', contrato.id);
       const files = await storedFiles(contrato.id);
       expect(files).toHaveLength(2);
