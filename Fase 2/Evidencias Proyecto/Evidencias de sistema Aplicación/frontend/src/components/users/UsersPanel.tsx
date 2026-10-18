@@ -15,10 +15,23 @@ import {
 import { CreateUserForm } from './CreateUserForm';
 import { UserDialog } from './UserDialog';
 import {
-  primaryUserButtonClass,
-  userButtonClass,
-  userInputClass,
-} from './styles';
+  primaryButtonClass,
+  buttonClass,
+  inputClass,
+  labelClass,
+  tableClass,
+  tableHeadClass,
+  tableHeadingClass,
+  tableCellClass,
+  dangerButtonClass,
+  introClass,
+  filterPanelClass,
+  panelTitleClass,
+  tablePanelClass,
+  tableHeaderClass,
+  tableDescriptionClass,
+  badgeClass,
+} from '@/components/ui/styles';
 export function UsersPanel({
   initialUsers,
   initialError,
@@ -143,110 +156,123 @@ export function UsersPanel({
     }
   }
   return (
-    <div className="space-y-4" aria-busy={busy}>
-      <div className="flex flex-wrap items-end gap-2.5">
-        <label className="min-w-48 flex-1 space-y-1.5 text-xs text-u-ink2">
-          <span>Buscar usuario</span>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Nombre o correo…"
-            className={userInputClass}
-          />
-        </label>
-        <label className="space-y-1.5 text-xs text-u-ink2">
-          <span>Rol</span>
-          <select
-            value={role}
-            onChange={(event) => setRole(event.target.value)}
-            className={userInputClass}
+    <div className="space-y-5" aria-busy={busy}>
+      <p className={introClass}>
+        Administra las cuentas, sus roles y el acceso a los locales.
+      </p>
+      <section
+        className={filterPanelClass}
+        aria-labelledby="users-filter-title"
+      >
+        <h2 id="users-filter-title" className={panelTitleClass}>
+          Filtrar usuarios
+        </h2>
+        <div className="mt-4 grid items-end gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))]">
+          <label className={`${labelClass} min-w-0 space-y-2`}>
+            <span>Buscar usuario</span>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Nombre o correo…"
+              className={inputClass}
+            />
+          </label>
+          <label className={`${labelClass} min-w-0 space-y-2`}>
+            <span>Rol</span>
+            <select
+              value={role}
+              onChange={(event) => setRole(event.target.value)}
+              className={inputClass}
+            >
+              <option value="">Todos los roles</option>
+              {USER_ROLES.map((code) => (
+                <option key={code} value={code}>
+                  {ROLE_LABELS[code]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={`${labelClass} min-w-0 space-y-2`}>
+            <span>Estado</span>
+            <select
+              value={active}
+              onChange={(event) => setActive(event.target.value)}
+              className={inputClass}
+            >
+              <option value="">Todos</option>
+              <option value="true">Activos</option>
+              <option value="false">Desactivados</option>
+            </select>
+          </label>
+          <label className={`${labelClass} min-w-0 space-y-2`}>
+            <span>Local</span>
+            <select
+              value={storeId}
+              onChange={(event) => setStoreId(event.target.value)}
+              className={inputClass}
+            >
+              <option value="">Todos los locales</option>
+              {stores.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {store.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button onClick={reload} disabled={busy} className={buttonClass}>
+            {busy && !creating && !target ? 'Cargando…' : 'Actualizar'}
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => {
+              setCreating(true);
+              setDialogError('');
+            }}
+            className={primaryButtonClass}
           >
-            <option value="">Todos los roles</option>
-            {USER_ROLES.map((code) => (
-              <option key={code} value={code}>
-                {ROLE_LABELS[code]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="space-y-1.5 text-xs text-u-ink2">
-          <span>Estado</span>
-          <select
-            value={active}
-            onChange={(event) => setActive(event.target.value)}
-            className={userInputClass}
-          >
-            <option value="">Todos</option>
-            <option value="true">Activos</option>
-            <option value="false">Desactivados</option>
-          </select>
-        </label>
-        <label className="space-y-1.5 text-xs text-u-ink2">
-          <span>Local</span>
-          <select
-            value={storeId}
-            onChange={(event) => setStoreId(event.target.value)}
-            className={userInputClass}
-          >
-            <option value="">Todos los locales</option>
-            {stores.map((store) => (
-              <option key={store.id} value={store.id}>
-                {store.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button onClick={reload} disabled={busy} className={userButtonClass}>
-          {busy && !creating && !target ? 'Cargando…' : 'Actualizar'}
-        </button>
-        <button
-          disabled={busy}
-          onClick={() => {
-            setCreating(true);
-            setDialogError('');
-          }}
-          className={primaryUserButtonClass}
-        >
-          ＋ Crear usuario
-        </button>
-      </div>
+            ＋ Crear usuario
+          </button>
+        </div>
+      </section>
       {error && (
         <p
           role="alert"
-          className="rounded-lg border border-u-crit/20 bg-u-crit-bg px-3.5 py-3 text-sm text-u-crit"
+          className="rounded-lg border border-crit/20 bg-crit-bg px-3.5 py-3 text-sm text-crit"
         >
           {error}
         </p>
       )}
-      <p role="status" className="text-sm text-u-ink2">
+      <p role="status" className="text-sm text-ink2">
         {notice}
       </p>
-      <section
-        className="rounded-[14px] border border-u-line bg-u-bg px-4 py-[18px] sm:px-5"
-        aria-labelledby="users-heading"
-      >
-        <div className="mb-3.5">
-          <h2 id="users-heading" className="text-sm font-bold">
-            Usuarios del sistema
-          </h2>
-          <p className="mt-1 font-u-mono text-[9.5px] uppercase tracking-[0.14em] text-u-muted">
-            Control de acceso por rol · mínimo privilegio
-          </p>
+      <section className={tablePanelClass} aria-labelledby="users-heading">
+        <div className={tableHeaderClass}>
+          <div>
+            <h2 id="users-heading" className={panelTitleClass}>
+              Usuarios del sistema
+            </h2>
+            <p className={tableDescriptionClass}>
+              Control de acceso por rol · mínimo privilegio
+            </p>
+          </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-[13px]">
+        <div
+          role="region"
+          aria-label="Tabla de usuarios desplazable"
+          tabIndex={0}
+          className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-salmon-ink"
+        >
+          <table className={`${tableClass} min-w-[640px]`}>
             <caption className="sr-only">
               Cuentas de usuario, roles, alcance y estado
             </caption>
-            <thead>
+            <thead className={tableHeadClass}>
               <tr>
                 {['Usuario', 'Rol', 'Alcance', 'Estado', 'Acciones'].map(
                   (heading) => (
-                    <th
-                      key={heading}
-                      scope="col"
-                      className="whitespace-nowrap border-b border-u-line2 px-3 py-[9px] font-u-mono text-[9.5px] font-semibold uppercase tracking-[0.13em] text-u-muted"
-                    >
+                    <th key={heading} scope="col" className={tableHeadingClass}>
                       {heading}
                     </th>
                   ),
@@ -257,29 +283,29 @@ export function UsersPanel({
               {visible.map((user) => (
                 <tr
                   key={user.id}
-                  className="border-b border-u-line last:border-0 hover:bg-u-tint"
+                  className="border-b border-line last:border-0 hover:bg-tint"
                 >
-                  <td className="px-3 py-[11px]">
+                  <td className={tableCellClass}>
                     <p className="font-semibold">
                       {user.firstName} {user.lastName}
                     </p>
-                    <p className="mt-0.5 font-u-mono text-[10.5px] text-u-muted">
+                    <p className="mt-1 break-all text-[11px] text-muted">
                       {user.email}
                     </p>
                   </td>
-                  <td className="px-3 py-[11px]">
+                  <td className={tableCellClass}>
                     <span
-                      className={`inline-flex rounded-full px-[9px] py-1 font-u-mono text-[10px] font-semibold uppercase tracking-[0.08em] ${user.role.code === 'ADMINISTRADOR' ? 'bg-u-tint2 text-u-salmon-ink' : user.role.code === 'CONTADOR' ? 'bg-u-info-bg text-u-info' : 'bg-u-tint text-u-ink2'}`}
+                      className={`${badgeClass} ${user.role.code === 'ADMINISTRADOR' ? 'bg-tint2 text-salmon-ink' : user.role.code === 'CONTADOR' ? 'bg-info-bg text-info' : 'bg-tint text-ink2'}`}
                     >
                       {ROLE_LABELS[user.role.code]}
                     </span>
                   </td>
-                  <td className="px-3 py-[11px]">
+                  <td className={tableCellClass}>
                     {user.store?.name ?? 'Todos los locales'}
                   </td>
-                  <td className="px-3 py-[11px]">
+                  <td className={tableCellClass}>
                     <span
-                      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-[9px] py-1 font-u-mono text-[10px] font-semibold uppercase tracking-[0.08em] ${user.isActive ? 'bg-u-ok-bg text-u-ok' : 'bg-u-crit-bg text-u-crit'}`}
+                      className={`${badgeClass} ${user.isActive ? 'bg-ok-bg text-ok' : 'bg-crit-bg text-crit'}`}
                     >
                       <span
                         aria-hidden="true"
@@ -288,12 +314,12 @@ export function UsersPanel({
                       {user.isActive ? 'Activo' : 'Desactivado'}
                     </span>
                   </td>
-                  <td className="px-3 py-[11px]">
+                  <td className={tableCellClass}>
                     {user.id === currentUserId ? (
-                      <span className="text-xs text-u-ink2">Tu cuenta</span>
+                      <span className="text-xs text-ink2">Tu cuenta</span>
                     ) : user.isActive ? (
                       <button
-                        className={userButtonClass}
+                        className={buttonClass}
                         disabled={busy}
                         aria-label={`Desactivar a ${user.firstName} ${user.lastName}`}
                         onClick={() => {
@@ -304,7 +330,7 @@ export function UsersPanel({
                         Desactivar
                       </button>
                     ) : (
-                      <span className="text-u-muted">—</span>
+                      <span className="text-muted">—</span>
                     )}
                   </td>
                 </tr>
@@ -313,7 +339,7 @@ export function UsersPanel({
           </table>
         </div>
         {visible.length === 0 && (
-          <p className="py-8 text-center text-sm text-u-ink2">
+          <p className="py-8 text-center text-sm text-ink2">
             {error
               ? 'La lista no está disponible. Intenta actualizarla.'
               : users.length === 0
@@ -321,7 +347,7 @@ export function UsersPanel({
                 : 'No hay usuarios que coincidan con los filtros.'}
           </p>
         )}
-        <p className="mt-4 text-xs text-u-ink2">
+        <p className="border-t border-line px-5 py-4 text-xs text-ink2">
           {visible.length} de {users.length} usuarios
         </p>
       </section>
@@ -352,20 +378,20 @@ export function UsersPanel({
             if (!busy) setTarget(null);
           }}
         >
-          <p className="text-sm leading-6 text-u-ink2">
+          <p className="text-sm leading-6 text-ink2">
             <strong>
               {target.firstName} {target.lastName}
             </strong>{' '}
             no podrá iniciar ni renovar sesión. Sus datos y documentos se
             conservarán. La cuenta no podrá reactivarse desde esta pantalla.
           </p>
-          <p className="mt-3 text-sm leading-6 text-u-ink2">
+          <p className="mt-3 text-sm leading-6 text-ink2">
             Las sesiones ya abiertas pueden seguir vigentes hasta que venzan.
           </p>
           {dialogError && (
             <p
               role="alert"
-              className="mt-4 rounded-lg bg-u-crit-bg p-3 text-sm text-u-crit"
+              className="mt-4 rounded-lg bg-crit-bg p-3 text-sm text-crit"
             >
               {dialogError}
             </p>
@@ -374,14 +400,14 @@ export function UsersPanel({
             <button
               disabled={busy}
               onClick={() => setTarget(null)}
-              className={userButtonClass}
+              className={buttonClass}
             >
               Cancelar
             </button>
             <button
               disabled={busy}
               onClick={deactivate}
-              className={`${userButtonClass} border-u-crit bg-u-crit text-white hover:bg-u-crit/90`}
+              className={dangerButtonClass}
             >
               {busy ? 'Desactivando…' : 'Confirmar desactivación'}
             </button>

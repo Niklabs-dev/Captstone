@@ -1,4 +1,5 @@
 'use client';
+import { buttonClass, primaryButtonClass } from '@/components/ui/styles';
 import { useState, type ReactElement } from 'react';
 import { useRouter } from 'next/navigation';
 import { isRecord } from '@/lib/auth';
@@ -45,14 +46,14 @@ export function SessionActions(): ReactElement {
         <button
           disabled={loading}
           onClick={() => perform('refresh')}
-          className="rounded-lg border border-line2 px-4 py-2 font-medium text-salmon-ink disabled:opacity-60"
+          className={buttonClass}
         >
           Renovar sesión
         </button>
         <button
           disabled={loading}
           onClick={() => perform('logout')}
-          className="rounded-lg bg-salmon px-4 py-2 font-medium text-white disabled:opacity-60"
+          className={primaryButtonClass}
         >
           Cerrar sesión
         </button>

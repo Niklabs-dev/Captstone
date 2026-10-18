@@ -12,6 +12,7 @@ import {
 } from '@/lib/audit';
 import { fetchAuditPage } from '@/lib/audit-backend';
 import { getAuditSession } from '@/lib/audit-session';
+import { buttonClass, introClass } from '@/components/ui/styles';
 
 export default async function AuditPage({
   searchParams,
@@ -58,7 +59,7 @@ export default async function AuditPage({
           : null;
   return (
     <>
-      <p className="text-sm text-ink2">
+      <p className={introClass}>
         Consulta las operaciones registradas. El registro es de solo lectura y
         no se puede editar ni eliminar.
       </p>
@@ -87,7 +88,7 @@ export default async function AuditPage({
                   : '/admin/auditoria'
               }
               prefetch={false}
-              className="mt-3 inline-block text-sm font-semibold text-salmon-ink underline"
+              className={`${buttonClass} mt-3`}
             >
               Reintentar
             </Link>
