@@ -65,6 +65,10 @@ export interface DocumentResponse {
   issuedAt: string | null;
   retainUntil: string;
   dtRegistrationDueAt: string | null;
+  // true mientras no venza el plazo de conservación (SPRINT-2-T07).
+  deletionBlocked: boolean;
+  // Motivo del bloqueo; null si el documento ya puede eliminarse.
+  deletionReason: string | null;
   createdAt: Date;
   latestVersion: DocumentVersionResponse;
 }
@@ -111,4 +115,14 @@ export interface DocumentDownload {
   mimeType: string;
   // VALID o ALTERED: si falta el archivo la descarga responde 404.
   integrity: Exclude<IntegrityStatus, 'MISSING'>;
+}
+
+// Resultado de eliminar un documento con el plazo de conservación vencido
+// (SPRINT-2-T07).
+export interface DocumentDeletionResponse {
+  id: string;
+  // Fecha YYYY-MM-DD hasta la que debía conservarse.
+  retainUntil: string;
+  // Versiones eliminadas junto con el documento.
+  deletedVersions: number;
 }

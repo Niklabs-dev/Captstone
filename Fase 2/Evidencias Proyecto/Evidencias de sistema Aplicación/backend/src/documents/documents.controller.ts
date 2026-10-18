@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   Param,
@@ -37,6 +38,7 @@ import type { AuthUser } from '../auth/types/auth.types.js';
 import { ALLOWED_MIME_TYPES } from '../storage/types/storage.types.js';
 import { DocumentsService } from './documents.service.js';
 import {
+  DocumentDeletionResponseDto,
   DocumentListResponseDto,
   DocumentResponseDto,
   DocumentVersionHistoryDto,
@@ -49,6 +51,7 @@ import {
 } from './dto/upload-document.dto.js';
 import {
   DOCUMENT_READER_ROLES,
+  type DocumentDeletionResponse,
   type DocumentListResponse,
   type DocumentResponse,
   type DocumentVersionHistory,
@@ -60,7 +63,8 @@ import { contentDisposition } from './utils/download-name.util.js';
 // Gestor documental: carga de documentos laborales por trabajador, solo el
 // dueño/administrador (SPRINT-2-T05); consulta, descarga y verificación de
 // integridad para el administrador y para cada trabajador sobre sus propios
-// documentos (SPRINT-2-T06).
+// documentos (SPRINT-2-T06). La eliminación, solo del administrador, se
+// bloquea mientras no venza el plazo de conservación (SPRINT-2-T07).
 @ApiTags('documents')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
@@ -218,5 +222,30 @@ export class DocumentsController {
     @CurrentUser() currentUser: AuthUser,
   ): Promise<IntegrityCheckResponse> {
     return this.documentsService.checkIntegrity(versionId, currentUser);
+  }
+
+  @Delete(':id')
+  @Roles(ROLE.ADMINISTRADOR)
+  @ApiOperation({
+    summary:
+      'Elimina un documento laboral con sus versiones, solo si venció su plazo de conservación',
+    description:
+      'Los documentos laborales deben conservarse 5 años (art. 9 bis del Código del Trabajo) hasta retainUntil inclusive. Antes de esa fecha la eliminación se rechaza con 409 y el documento queda intacto; la base de datos aplica la misma regla con triggers. Vencido el plazo, elimina el documento, sus versiones y sus archivos.',
+  })
+  @ApiOkResponse({
+    description: 'Documento eliminado junto con sus versiones y archivos.',
+    type: DocumentDeletionResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'El ID no es un UUID.' })
+  @ApiNotFoundResponse({ description: 'Documento no encontrado.' })
+  @ApiConflictResponse({
+    description:
+      'El plazo de conservación no ha vencido: el documento no se puede eliminar.',
+  })
+  remove(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() currentUser: AuthUser,
+  ): Promise<DocumentDeletionResponse> {
+    return this.documentsService.remove(id, currentUser);
   }
 }

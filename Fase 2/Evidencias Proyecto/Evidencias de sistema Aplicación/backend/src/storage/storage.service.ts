@@ -123,6 +123,19 @@ export class StorageService {
     }
   }
 
+  // Elimina un archivo guardado (SPRINT-2-T07: documentos con el plazo de
+  // conservación vencido). Un archivo que ya no existe no es un error: no
+  // queda nada que eliminar.
+  async remove(relativePath: string): Promise<void> {
+    const filePath = this.resolveSafePath(relativePath);
+    try {
+      await fs.unlink(filePath);
+    } catch (error) {
+      if (isErrnoException(error) && error.code === 'ENOENT') return;
+      throw error;
+    }
+  }
+
   // Recalcula el hash del archivo guardado; false significa que fue alterado.
   async verifyIntegrity(
     relativePath: string,
