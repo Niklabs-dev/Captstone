@@ -160,6 +160,18 @@ Trabajo) hasta su `retainUntil` inclusive (criterio 3 de E1-H3):
 
 Igual que en la auditoría, los triggers solo se omiten con `session_replication_role = replica` (superusuario); los tests HTTP lo usan para purgar sus documentos de prueba.
 
+## Alertas de registro en la Dirección del Trabajo
+
+Contratos, anexos y finiquitos deben registrarse en la DT dentro de 15 días
+corridos desde su celebración (o desde la carga si no se indicó la fecha). El
+plazo se fija al cargar el documento (`dtRegistrationDueAt`). Endpoints
+exclusivos del rol `ADMINISTRADOR` (403 para el resto):
+
+| Endpoint | Descripción |
+| --- | --- |
+| `GET /dt-alerts` | Documentos pendientes de registro: `deadline`, `daysRemaining` (días corridos en hora de Chile; 0 el último día, negativo si venció) y `status` `UPCOMING`/`OVERDUE`. Primero los vencidos, luego los más próximos. Incluye `calculatedAt`. |
+| `POST /dt-alerts/:alertId/registration` | Marca el documento como registrado (`dtRegisteredAt` y quién lo confirmó) y la alerta deja de listarse. Cuerpo `{ documentId, revision }`: si el documento ya se registró o cambió desde la consulta (`revision` distinta) responde 409. |
+
 ## Documentación interactiva (Swagger / OpenAPI)
 
 La API genera su documentación OpenAPI con `@nestjs/swagger`:
