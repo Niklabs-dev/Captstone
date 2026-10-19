@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
@@ -13,13 +14,17 @@ import {
 import { ROLE } from '../auth/constants/roles.constants.js';
 import { hasAnyRole } from '../auth/policies/store-access.policy.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
-import { DOCUMENT_SUBJECT_ROLES } from '../documents/types/documents.types.js';
+import {
+  DOCUMENT_SUBJECT_ROLES,
+  type IntegrityStatus,
+} from '../documents/types/documents.types.js';
 import {
   businessDateOf,
   computeDocumentDeadlines,
   formatDbDate,
   toDbDate,
 } from '../documents/utils/document-dates.util.js';
+import { buildDownloadFileName } from '../documents/utils/download-name.util.js';
 import { sanitizeFileName } from '../documents/utils/file-name.util.js';
 import { maxUploadBytes } from '../documents/utils/upload-limits.util.js';
 import { Prisma } from '../generated/prisma/client.js';
@@ -32,6 +37,10 @@ import type { UploadPayslipDto } from './dto/upload-payslip.dto.js';
 import {
   PAYSLIP_DOCUMENT_TYPE,
   PAYSLIP_MIME_TYPE,
+  type OwnPayslip,
+  type OwnPayslipDownload,
+  type OwnPayslipIntegrity,
+  type OwnPayslipList,
   type PayslipCollection,
   type PayslipResponse,
   type PayslipWorker,
@@ -67,6 +76,38 @@ type PayslipWithRelations = Prisma.PayslipGetPayload<{
   include: typeof PAYSLIP_INCLUDE;
 }>;
 
+// Liquidación publicada con el archivo de su versión vigente: la que ve y
+// descarga su trabajador (SPRINT-2-T15).
+const OWN_PAYSLIP_INCLUDE = {
+  document: {
+    select: {
+      title: true,
+      storeId: true,
+      currentVersion: {
+        select: {
+          id: true,
+          versionNumber: true,
+          fileName: true,
+          filePath: true,
+          mimeType: true,
+          sizeBytes: true,
+          sha256Hash: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.PayslipInclude;
+
+type OwnPayslipWithFile = Prisma.PayslipGetPayload<{
+  include: typeof OWN_PAYSLIP_INCLUDE;
+}>;
+
+type PublishedVersion = NonNullable<
+  OwnPayslipWithFile['document']['currentVersion']
+>;
+
+const PAYSLIP_NOT_FOUND_MESSAGE = 'Liquidación no encontrada';
+
 // Trabajadores con carpeta digital (TRABAJADOR y SUPERVISOR) que pueden
 // recibir una liquidación: activos, con local y sin anonimizar.
 const PAYSLIP_WORKER_WHERE = {
@@ -78,6 +119,41 @@ const PAYSLIP_WORKER_WHERE = {
 
 function workerName(worker: { firstName: string; lastName: string }): string {
   return `${worker.firstName} ${worker.lastName}`;
+}
+
+// Versión vigente y fecha de firma de una liquidación publicada: la carga
+// siempre deja la versión y la publicación fija la firma y su fecha.
+function publishedFile(payslip: OwnPayslipWithFile): {
+  version: PublishedVersion;
+  signedAt: Date;
+  publishedAt: Date;
+} {
+  const version = payslip.document.currentVersion;
+  if (!version || !payslip.signedAt || !payslip.publishedAt) {
+    throw new Error(`La liquidación ${payslip.id} no está publicada completa`);
+  }
+  return {
+    version,
+    signedAt: payslip.signedAt,
+    publishedAt: payslip.publishedAt,
+  };
+}
+
+function toOwnPayslip(payslip: OwnPayslipWithFile): OwnPayslip {
+  const { version, signedAt, publishedAt } = publishedFile(payslip);
+  return {
+    id: payslip.id,
+    versionId: version.id,
+    workerId: payslip.workerId,
+    period: formatPayrollPeriod(payslip.period),
+    status: 'PUBLISHED',
+    fileName: version.fileName,
+    mime: version.mimeType,
+    size: Number(version.sizeBytes),
+    sha256: version.sha256Hash,
+    signedAt: formatDbDate(signedAt),
+    publishedAt,
+  };
 }
 
 function toPayslipResponse(
@@ -115,10 +191,12 @@ function toPayslipResponse(
 // Liquidaciones de sueldo (E2-H1): el contador carga la liquidación de un
 // trabajador para un período, que queda pendiente de firma y no visible para
 // el trabajador (SPRINT-2-T13), y luego confirma su publicación
-// (SPRINT-2-T14). El archivo se guarda en el gestor documental como
+// (SPRINT-2-T14); el trabajador ve y descarga solo sus liquidaciones
+// publicadas (SPRINT-2-T15). El archivo se guarda en el gestor documental como
 // documento LIQUIDACION, con su versión y hash SHA-256.
 @Injectable()
 export class PayrollService {
+  private readonly logger = new Logger(PayrollService.name);
   private readonly maxUploadBytes: number;
 
   constructor(
@@ -359,7 +437,7 @@ export class PayrollService {
       },
     });
     if (!current) {
-      throw new NotFoundException('Liquidación no encontrada');
+      throw new NotFoundException(PAYSLIP_NOT_FOUND_MESSAGE);
     }
     const signedAtDb = toDbDate(signedAt);
     if (
@@ -406,6 +484,109 @@ export class PayrollService {
       });
     });
     return toPayslipResponse(published, currentUser);
+  }
+
+  // Liquidaciones publicadas del trabajador autenticado, de la más reciente a
+  // la más antigua. El trabajador sale del token, nunca de un parámetro (Ley
+  // N°21.719); las pendientes de firma no se devuelven (criterio 2 de E2-H1).
+  async listOwn(currentUser: AuthUser): Promise<OwnPayslipList> {
+    const payslips = await this.prisma.payslip.findMany({
+      where: { workerId: currentUser.id, status: 'PUBLISHED' },
+      include: OWN_PAYSLIP_INCLUDE,
+      orderBy: [{ period: 'desc' }, { id: 'asc' }],
+    });
+    return { items: payslips.map(toOwnPayslip) };
+  }
+
+  // Recalcula el SHA-256 del archivo de una liquidación propia y lo compara
+  // con el registrado al cargarla (criterio 3 de E2-H1). Un archivo faltante
+  // es un resultado (MISSING), no un error.
+  async checkOwnIntegrity(
+    payslipId: string,
+    currentUser: AuthUser,
+  ): Promise<OwnPayslipIntegrity> {
+    const payslip = await this.findOwnPublished(payslipId, currentUser);
+    const { version } = publishedFile(payslip);
+    let actualHash: string | null = null;
+    try {
+      actualHash = this.storage.computeSha256(
+        await this.storage.read(version.filePath),
+      );
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) throw error;
+    }
+    const status: IntegrityStatus =
+      actualHash === null
+        ? 'MISSING'
+        : actualHash === version.sha256Hash
+          ? 'VALID'
+          : 'ALTERED';
+    if (status !== 'VALID') {
+      this.logger.warn(
+        `Verificación de la liquidación ${payslip.id}: integridad ${status}`,
+      );
+    }
+    return {
+      payslipId: payslip.id,
+      versionId: version.id,
+      workerId: payslip.workerId,
+      status,
+      valid: status === 'VALID',
+      expectedHash: version.sha256Hash,
+      actualHash,
+      checkedAt: new Date(),
+    };
+  }
+
+  // Archivo de una liquidación propia. Recalcula el hash: si no coincide la
+  // descarga continúa, pero informa ALTERED para advertirlo (igual que el
+  // gestor documental). Si el archivo no está, StorageService responde 404.
+  async downloadOwn(
+    payslipId: string,
+    currentUser: AuthUser,
+  ): Promise<OwnPayslipDownload> {
+    const payslip = await this.findOwnPublished(payslipId, currentUser);
+    const { version } = publishedFile(payslip);
+    const content = await this.storage.read(version.filePath);
+    const integrity =
+      this.storage.computeSha256(content) === version.sha256Hash
+        ? 'VALID'
+        : 'ALTERED';
+    if (integrity === 'ALTERED') {
+      this.logger.warn(
+        `Descarga de la liquidación ${payslip.id} con integridad ALTERED`,
+      );
+    }
+    return {
+      content,
+      fileName: buildDownloadFileName(
+        PAYSLIP_DOCUMENT_TYPE,
+        payslip.document.title,
+        version.versionNumber,
+        version.mimeType,
+      ),
+      mimeType: version.mimeType,
+      integrity,
+      versionId: version.id,
+      storeId: payslip.document.storeId,
+    };
+  }
+
+  // Liquidación publicada del trabajador autenticado. Una ajena, una
+  // pendiente de firma o una inexistente responden igual (404), para no
+  // revelar que existe.
+  private async findOwnPublished(
+    payslipId: string,
+    currentUser: AuthUser,
+  ): Promise<OwnPayslipWithFile> {
+    const payslip = await this.prisma.payslip.findFirst({
+      where: { id: payslipId, workerId: currentUser.id, status: 'PUBLISHED' },
+      include: OWN_PAYSLIP_INCLUDE,
+    });
+    if (!payslip) {
+      throw new NotFoundException(PAYSLIP_NOT_FOUND_MESSAGE);
+    }
+    return payslip;
   }
 
   // Recalcula el SHA-256 del archivo guardado; false si fue alterado o no

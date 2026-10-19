@@ -154,6 +154,7 @@ Los endpoints marcados con `@Audited()` quedan registrados automáticamente (`Au
 | `DOCUMENT_DT_REGISTERED` | Confirmación del registro de un documento en la DT. |
 | `PAYSLIP_UPLOADED` | Carga de una liquidación por el contador (detalle: trabajador, período, SHA-256 y estado), con el local de la liquidación. |
 | `PAYSLIP_PUBLISHED` | Publicación de una liquidación (detalle: trabajador, período, fecha de firma, fecha de publicación y SHA-256); el responsable es el usuario del evento. |
+| `PAYSLIP_DOWNLOADED` | Descarga de una liquidación propia por el trabajador (detalle: versión y resultado de integridad `VALID`/`ALTERED`). |
 
 El detalle se arma solo con campos declarados (listas blancas): nunca incluye contraseñas ni el contenido de los archivos.
 
@@ -201,6 +202,22 @@ se publique. El PDF se guarda en el gestor documental como documento
 | `GET /payroll` | `CONTADOR`, `ADMINISTRADOR` | `{ items, workers, policy }`: liquidaciones (trabajador, local, período `YYYY-MM`, archivo, SHA-256, estado, `revision` y `canPublish`), selector de trabajadores activos para la carga y reglas de carga (solo PDF, `maxBytes`; `canUpload` solo para el contador). Filtros opcionales `storeId`, `period` y `status`. |
 | `POST /payroll` | `CONTADOR` | Multipart `workerId`, `period` (`YYYY-MM`) y `file` (PDF). 400 si el período es posterior al mes en curso o el trabajador no está activo; 409 si ya existe una liquidación suya para ese período o el archivo ya está registrado; 415 si no es PDF. |
 | `POST /payroll/:id/publish` | `CONTADOR` | Cuerpo `{ revision, signedAt? }`. Pasa la liquidación de `PENDING_SIGNATURE` a `PUBLISHED` con fecha de firma (`signedAt`, entre el día de carga y hoy; por defecto hoy), fecha de publicación y responsable. Antes recalcula el SHA-256 del archivo. 409 si ya está publicada, si cambió desde la consulta (`revision`) o si el archivo no coincide con su hash. |
+
+### Mis liquidaciones (portal del trabajador)
+
+Cada trabajador (`TRABAJADOR` o `SUPERVISOR`) ve y descarga **solo sus
+liquidaciones publicadas**: las pendientes de firma no se devuelven (criterio 2
+de E2-H1). El trabajador sale siempre del token, nunca de un parámetro (Ley
+N°21.719); una liquidación ajena, pendiente o inexistente responde 404 sin
+revelar que existe. El contador y el administrador reciben 403.
+
+| Endpoint | Descripción |
+| --- | --- |
+| `GET /payroll/mine` | `{ items }`: liquidaciones publicadas propias, del período más reciente al más antiguo (`id`, `versionId`, `workerId`, `period`, `status`, `fileName`, `mime`, `size`, `sha256`, `signedAt` y `publishedAt`). |
+| `GET /payroll/mine/:id/integrity` | Recalcula el SHA-256 del archivo y responde `VALID`, `ALTERED` o `MISSING` con el hash esperado y el recalculado (criterio 3 de E2-H1). |
+| `GET /payroll/mine/:id/download` | PDF con `X-Document-Integrity` (`VALID`/`ALTERED`, recalculado al descargar), `nosniff` y `Cache-Control: private, no-store`. 404 si el archivo no está en el almacenamiento. |
+
+### Inmutabilidad de las liquidaciones publicadas
 
 Una liquidación publicada **no se puede editar ni eliminar** (criterio 1 de
 E2-H1): la API no tiene rutas para hacerlo y la migración

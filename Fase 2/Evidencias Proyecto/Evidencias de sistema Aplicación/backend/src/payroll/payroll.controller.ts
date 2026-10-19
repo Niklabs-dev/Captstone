@@ -2,12 +2,14 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   Param,
   ParseUUIDPipe,
   Post,
   Query,
   Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -24,6 +26,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiPayloadTooLargeResponse,
+  ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
   ApiUnsupportedMediaTypeResponse,
@@ -36,7 +39,12 @@ import { ROLE } from '../auth/constants/roles.constants.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
+import { contentDisposition } from '../documents/utils/download-name.util.js';
 import { ListPayslipsQueryDto } from './dto/list-payslips-query.dto.js';
+import {
+  OwnPayslipIntegrityDto,
+  OwnPayslipListDto,
+} from './dto/own-payslip-response.dto.js';
 import { PublishPayslipDto } from './dto/publish-payslip.dto.js';
 import {
   PayslipCollectionDto,
@@ -48,7 +56,11 @@ import {
 } from './dto/upload-payslip.dto.js';
 import { PayrollService } from './payroll.service.js';
 import {
+  OWN_PAYSLIP_READER_ROLES,
   PAYROLL_READER_ROLES,
+  PAYSLIP_MIME_TYPE,
+  type OwnPayslipIntegrity,
+  type OwnPayslipList,
   type PayslipCollection,
   type PayslipResponse,
   type UploadedPayslipFile,
@@ -57,8 +69,10 @@ import {
 // Liquidaciones de sueldo (E2-H1): el contador carga la liquidación de cada
 // trabajador por período, que queda pendiente de firma y no visible para el
 // trabajador (SPRINT-2-T13), y confirma su publicación (SPRINT-2-T14). El
-// administrador solo consulta. La carga y la publicación quedan en la
-// auditoría, sin el contenido del archivo.
+// administrador solo consulta. En el portal, cada trabajador ve y descarga
+// solo sus liquidaciones publicadas (SPRINT-2-T15, rutas /payroll/mine). La
+// carga, la publicación y la descarga quedan en la auditoría, sin el
+// contenido del archivo.
 @ApiTags('payroll')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
@@ -89,6 +103,118 @@ export class PayrollController {
     @CurrentUser() currentUser: AuthUser,
   ): Promise<PayslipCollection> {
     return this.payrollService.list(query, currentUser);
+  }
+
+  @Get('mine')
+  @Roles(...OWN_PAYSLIP_READER_ROLES)
+  @ApiOperation({
+    summary: 'Lista las liquidaciones publicadas del trabajador autenticado',
+    description:
+      'El trabajador sale del token, nunca de un parámetro (Ley N°21.719). Solo devuelve liquidaciones publicadas: las pendientes de firma no se muestran.',
+  })
+  @ApiOkResponse({
+    description: 'Liquidaciones publicadas propias.',
+    type: OwnPayslipListDto,
+  })
+  @ApiForbiddenResponse({
+    description: 'El rol no es TRABAJADOR ni SUPERVISOR.',
+  })
+  listOwn(@CurrentUser() currentUser: AuthUser): Promise<OwnPayslipList> {
+    return this.payrollService.listOwn(currentUser);
+  }
+
+  @Get('mine/:id/integrity')
+  @Roles(...OWN_PAYSLIP_READER_ROLES)
+  @ApiOperation({
+    summary:
+      'Verifica la integridad de una liquidación propia recalculando su SHA-256',
+    description:
+      'Responde 200 con status VALID, ALTERED (archivo modificado) o MISSING (archivo ausente). Una liquidación de otro trabajador o pendiente de firma responde 404.',
+  })
+  @ApiOkResponse({
+    description: 'Resultado de la verificación.',
+    type: OwnPayslipIntegrityDto,
+  })
+  @ApiBadRequestResponse({ description: 'El ID no es un UUID.' })
+  @ApiForbiddenResponse({
+    description: 'El rol no es TRABAJADOR ni SUPERVISOR.',
+  })
+  @ApiNotFoundResponse({
+    description:
+      'No existe una liquidación publicada con ese ID para el trabajador autenticado.',
+  })
+  checkOwnIntegrity(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() currentUser: AuthUser,
+  ): Promise<OwnPayslipIntegrity> {
+    return this.payrollService.checkOwnIntegrity(id, currentUser);
+  }
+
+  @Get('mine/:id/download')
+  @Roles(...OWN_PAYSLIP_READER_ROLES)
+  @Header('X-Content-Type-Options', 'nosniff')
+  @Header('Cache-Control', 'private, no-store')
+  @Audited({
+    action: AUDIT_ACTION.PAYSLIP_DOWNLOADED,
+    entityType: 'payslips',
+    entityIdFrom: 'params.id',
+  })
+  @ApiProduces(PAYSLIP_MIME_TYPE)
+  @ApiOperation({
+    summary: 'Descarga el PDF de una liquidación propia publicada',
+    description:
+      'Recalcula el SHA-256 al descargar: si no coincide con el registrado, el archivo se entrega igual pero con X-Document-Integrity: ALTERED para advertirlo. Una liquidación de otro trabajador o pendiente de firma responde 404.',
+  })
+  @ApiOkResponse({
+    description:
+      'PDF de la liquidación, con nombre LIQUIDACION_<título>_v<N>.pdf en Content-Disposition.',
+    schema: { type: 'string', format: 'binary' },
+    headers: {
+      'Content-Disposition': {
+        description:
+          'attachment con el nombre del archivo (filename y filename*).',
+        schema: { type: 'string' },
+      },
+      'Cache-Control': {
+        description: 'Siempre private, no-store: dato personal sensible.',
+        schema: { type: 'string', example: 'private, no-store' },
+      },
+      'X-Content-Type-Options': {
+        description: 'Siempre nosniff.',
+        schema: { type: 'string', example: 'nosniff' },
+      },
+      'X-Document-Integrity': {
+        description:
+          'VALID si el archivo coincide con el hash registrado; ALTERED si fue modificado.',
+        schema: { type: 'string', enum: ['VALID', 'ALTERED'] },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'El ID no es un UUID.' })
+  @ApiForbiddenResponse({
+    description: 'El rol no es TRABAJADOR ni SUPERVISOR.',
+  })
+  @ApiNotFoundResponse({
+    description:
+      'No existe una liquidación publicada con ese ID para el trabajador autenticado, o su archivo no está en el almacenamiento.',
+  })
+  async downloadOwn(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() currentUser: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const file = await this.payrollService.downloadOwn(id, currentUser);
+    res.setHeader('X-Document-Integrity', file.integrity);
+    // La respuesta es el archivo: el local y el detalle se aportan aparte.
+    setAuditContext(res, {
+      storeId: file.storeId,
+      detail: { versionId: file.versionId, integrity: file.integrity },
+    });
+    return new StreamableFile(file.content, {
+      type: file.mimeType,
+      disposition: contentDisposition(file.fileName),
+      length: file.content.length,
+    });
   }
 
   @Post()
