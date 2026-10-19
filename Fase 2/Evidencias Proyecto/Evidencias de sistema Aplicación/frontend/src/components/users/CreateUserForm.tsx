@@ -11,10 +11,11 @@ import {
   type UserRole,
 } from '@/lib/users';
 import {
-  primaryUserButtonClass,
-  userButtonClass,
-  userInputClass,
-} from './styles';
+  primaryButtonClass,
+  buttonClass,
+  inputClass,
+  labelClass,
+} from '@/components/ui/styles';
 export function CreateUserForm({
   stores,
   busy,
@@ -54,7 +55,7 @@ export function CreateUserForm({
       {(error || validationError) && (
         <p
           role="alert"
-          className="rounded-lg bg-u-crit-bg px-3.5 py-3 text-sm text-u-crit"
+          className="rounded-lg bg-crit-bg px-3.5 py-3 text-sm text-crit"
         >
           {error || validationError}
         </p>
@@ -62,10 +63,7 @@ export function CreateUserForm({
       <fieldset disabled={busy} className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
           {(['firstName', 'lastName'] as const).map((field) => (
-            <label
-              key={field}
-              className="block space-y-1.5 text-[12.5px] font-semibold text-u-ink2"
-            >
+            <label key={field} className={`${labelClass} space-y-1.5`}>
               <span>{field === 'firstName' ? 'Nombre' : 'Apellido'}</span>
               <input
                 name={field}
@@ -74,12 +72,12 @@ export function CreateUserForm({
                 autoComplete={
                   field === 'firstName' ? 'given-name' : 'family-name'
                 }
-                className={userInputClass}
+                className={inputClass}
               />
             </label>
           ))}
         </div>
-        <label className="block space-y-1.5 text-[12.5px] font-semibold text-u-ink2">
+        <label className={`${labelClass} space-y-1.5`}>
           <span>Correo electrónico</span>
           <input
             name="email"
@@ -87,10 +85,10 @@ export function CreateUserForm({
             required
             maxLength={160}
             autoComplete="email"
-            className={userInputClass}
+            className={inputClass}
           />
         </label>
-        <label className="block space-y-1.5 text-[12.5px] font-semibold text-u-ink2">
+        <label className={`${labelClass} space-y-1.5`}>
           <span>Contraseña inicial</span>
           <input
             name="password"
@@ -100,18 +98,18 @@ export function CreateUserForm({
             maxLength={72}
             autoComplete="new-password"
             aria-describedby="password-help"
-            className={userInputClass}
+            className={inputClass}
           />
         </label>
-        <p id="password-help" className="text-xs text-u-ink2">
+        <p id="password-help" className="text-xs text-ink2">
           Entre 8 y 72 caracteres. Entrégala al usuario por un medio seguro.
         </p>
-        <label className="block space-y-1.5 text-[12.5px] font-semibold text-u-ink2">
+        <label className={`${labelClass} space-y-1.5`}>
           <span>Rol</span>
           <select
             name="roleCode"
             value={role}
-            className={userInputClass}
+            className={inputClass}
             onChange={(event) => {
               if (isUserRole(event.target.value)) setRole(event.target.value);
             }}
@@ -128,13 +126,13 @@ export function CreateUserForm({
           </select>
         </label>
         {needsStore(role) ? (
-          <label className="block space-y-1.5 text-[12.5px] font-semibold text-u-ink2">
+          <label className={`${labelClass} space-y-1.5`}>
             <span>Local asignado</span>
             <select
               name="storeId"
               required
               defaultValue=""
-              className={userInputClass}
+              className={inputClass}
             >
               <option value="" disabled>
                 Selecciona un local
@@ -147,12 +145,12 @@ export function CreateUserForm({
             </select>
           </label>
         ) : (
-          <p className="rounded-lg bg-u-tint px-3 py-2.5 text-xs text-u-ink2">
+          <p className="rounded-lg bg-tint px-3 py-2.5 text-xs text-ink2">
             Este rol tiene alcance global sobre los locales.
           </p>
         )}
         {stores.length === 0 && (
-          <p className="text-xs text-u-ink2">
+          <p className="text-xs text-ink2">
             No hay locales disponibles para asignar supervisores o trabajadores.
           </p>
         )}
@@ -162,15 +160,11 @@ export function CreateUserForm({
           type="button"
           disabled={busy}
           onClick={onCancel}
-          className={userButtonClass}
+          className={buttonClass}
         >
           Cancelar
         </button>
-        <button
-          type="submit"
-          disabled={busy}
-          className={primaryUserButtonClass}
-        >
+        <button type="submit" disabled={busy} className={primaryButtonClass}>
           {busy ? 'Creando…' : 'Guardar usuario'}
         </button>
       </div>

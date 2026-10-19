@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ACCESS_COOKIE } from '@/lib/auth';
 import { verifyAccessToken } from '@/lib/auth-backend';
-import { getPageRedirect } from '@/lib/navigation';
+import { getNavigationView, getPageRedirect } from '@/lib/navigation';
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   const token = request.cookies.get(ACCESS_COOKIE)?.value;
   const result = token ? await verifyAccessToken(token) : null;
@@ -12,7 +12,14 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     url.searchParams.set('reason', 'session');
     return NextResponse.redirect(url);
   }
-  if (!result.ok)
+  if (!result.ok) {
+    // Las vistas conocidas mantienen sus guardas en servidor y muestran recuperación.
+    // No se concede acceso: layout, páginas y API siguen validando la sesión.
+    if (getNavigationView(request.nextUrl.pathname).href) {
+      const response = NextResponse.next();
+      response.headers.set('Cache-Control', 'private, no-store');
+      return response;
+    }
     return new NextResponse(result.message, {
       status: result.status,
       headers: {
@@ -20,6 +27,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
         'Cache-Control': 'no-store',
       },
     });
+  }
   const destination = getPageRedirect(
     result.data.role,
     request.nextUrl.pathname,
