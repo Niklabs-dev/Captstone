@@ -1,8 +1,13 @@
 import { ROLE, type RoleCode } from '../../auth/constants/roles.constants.js';
+import {
+  DOCUMENT_SUBJECT_ROLES,
+  type IntegrityStatus,
+} from '../../documents/types/documents.types.js';
 
 // Tipos y constantes de las liquidaciones de sueldo (SPRINT-2-T13). Siguen el
 // contrato que consume la vista del contador (SPRINT-2-T16, PR #24,
-// frontend/src/lib/payroll.ts).
+// frontend/src/lib/payroll.ts) y, en el portal del trabajador (SPRINT-2-T15),
+// el de Mis liquidaciones (SPRINT-2-T17, PR #25, frontend/src/lib/my-payslips.ts).
 
 // Código del tipo de documento con que se guarda cada liquidación en el
 // gestor documental.
@@ -20,6 +25,11 @@ export const PAYROLL_READER_ROLES: readonly RoleCode[] = [
   ROLE.CONTADOR,
   ROLE.ADMINISTRADOR,
 ];
+
+// Roles con liquidaciones propias en el portal del trabajador (SPRINT-2-T15):
+// los mismos que tienen carpeta digital.
+export const OWN_PAYSLIP_READER_ROLES: readonly RoleCode[] =
+  DOCUMENT_SUBJECT_ROLES;
 
 // Campos del archivo que entrega Multer (memoria) y que usa el servicio.
 export interface UploadedPayslipFile {
@@ -78,4 +88,52 @@ export interface PayslipCollection {
   items: PayslipResponse[];
   workers: PayslipWorker[];
   policy: PayslipUploadPolicy;
+}
+
+// Liquidación publicada del trabajador autenticado (SPRINT-2-T15).
+export interface OwnPayslip {
+  id: string;
+  // Versión del archivo publicado (la vigente del documento).
+  versionId: string;
+  workerId: string;
+  // Mes de la remuneración, YYYY-MM.
+  period: string;
+  status: 'PUBLISHED';
+  fileName: string;
+  mime: string;
+  size: number;
+  sha256: string;
+  // Fecha de firma, YYYY-MM-DD.
+  signedAt: string;
+  publishedAt: Date;
+}
+
+export interface OwnPayslipList {
+  items: OwnPayslip[];
+}
+
+// Verificación de integridad de una liquidación propia: recalcula el SHA-256
+// del archivo guardado y lo compara con el registrado al cargarla.
+export interface OwnPayslipIntegrity {
+  payslipId: string;
+  versionId: string;
+  workerId: string;
+  status: IntegrityStatus;
+  valid: boolean;
+  expectedHash: string;
+  // Hash recalculado; null si el archivo no está en el almacenamiento.
+  actualHash: string | null;
+  checkedAt: Date;
+}
+
+// Archivo de una liquidación propia listo para descargar.
+export interface OwnPayslipDownload {
+  content: Buffer;
+  fileName: string;
+  mimeType: string;
+  // VALID o ALTERED: si falta el archivo la descarga responde 404.
+  integrity: Exclude<IntegrityStatus, 'MISSING'>;
+  // Datos para la auditoría de la descarga.
+  versionId: string;
+  storeId: string;
 }
