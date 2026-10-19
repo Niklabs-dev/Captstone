@@ -152,6 +152,7 @@ Los endpoints marcados con `@Audited()` quedan registrados automáticamente (`Au
 | `DOCUMENT_DOWNLOADED` | Descarga de una versión (detalle: documento y resultado de integridad `VALID`/`ALTERED`). |
 | `DOCUMENT_DELETED` / `DOCUMENT_DELETION_BLOCKED` | Eliminación vencido el plazo de conservación, o intento rechazado (409) antes de que venza. |
 | `DOCUMENT_DT_REGISTERED` | Confirmación del registro de un documento en la DT. |
+| `PAYSLIP_UPLOADED` | Carga de una liquidación por el contador (detalle: trabajador, período, SHA-256 y estado), con el local de la liquidación. |
 
 El detalle se arma solo con campos declarados (listas blancas): nunca incluye contraseñas ni el contenido de los archivos.
 
@@ -186,6 +187,18 @@ exclusivos del rol `ADMINISTRADOR` (403 para el resto):
 | --- | --- |
 | `GET /dt-alerts` | Documentos pendientes de registro: `deadline`, `daysRemaining` (días corridos en hora de Chile; 0 el último día, negativo si venció) y `status` `UPCOMING`/`OVERDUE`. Primero los vencidos, luego los más próximos. Incluye `calculatedAt`. |
 | `POST /dt-alerts/:alertId/registration` | Marca el documento como registrado (`dtRegisteredAt` y quién lo confirmó) y la alerta deja de listarse. Cuerpo `{ documentId, revision }`: si el documento ya se registró o cambió desde la consulta (`revision` distinta) responde 409. |
+
+## Liquidaciones de sueldo
+
+El contador carga la liquidación de cada trabajador por período (mes). Queda
+**pendiente de firma** (`PENDING_SIGNATURE`) y el trabajador no la ve hasta que
+se publique. El PDF se guarda en el gestor documental como documento
+`LIQUIDACION`, con su versión, su hash SHA-256 y la conservación de 5 años.
+
+| Endpoint | Roles | Descripción |
+| --- | --- | --- |
+| `GET /payroll` | `CONTADOR`, `ADMINISTRADOR` | `{ items, workers, policy }`: liquidaciones (trabajador, local, período `YYYY-MM`, archivo, SHA-256, estado, `revision` y `canPublish`), selector de trabajadores activos para la carga y reglas de carga (solo PDF, `maxBytes`; `canUpload` solo para el contador). Filtros opcionales `storeId`, `period` y `status`. |
+| `POST /payroll` | `CONTADOR` | Multipart `workerId`, `period` (`YYYY-MM`) y `file` (PDF). 400 si el período es posterior al mes en curso o el trabajador no está activo; 409 si ya existe una liquidación suya para ese período o el archivo ya está registrado; 415 si no es PDF. |
 
 ## Documentación interactiva (Swagger / OpenAPI)
 
