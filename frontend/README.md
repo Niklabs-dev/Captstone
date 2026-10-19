@@ -2,6 +2,15 @@
 
 Aplicación Next.js 16 con App Router, TypeScript estricto y Tailwind CSS.
 
+Dashboard, Usuarios, Auditoría y Portal del Trabajador usan un layout general
+autenticado, con navegación y sesión persistentes y opciones según el rol validado
+en el servidor. Ver [navegación compartida](docs/NAVEGACION-COMPARTIDA.md)
+para permisos, alcance y pruebas de regresión.
+
+Los controles, tablas y marca usan la paleta global y estilos comunes. Ver
+[revisión de consistencia visual](docs/CONSISTENCIA-VISUAL.md) para los ajustes
+y las pruebas de carga, error, foco de teclado y contraste.
+
 ## Desarrollo
 
 1. Ejecutar `npm ci`.
@@ -217,6 +226,5 @@ un local ficticio y ejecuta Playwright en escritorio y móvil. Las cuentas de
 prueba quedan desactivadas; el volumen y la auditoría se conservan exclusivamente
 en `capstone-sprint1-t10` para inspección. No ejecutar contra datos de producción.
 Las capturas y trazas se guardan en `test-results/`, fuera de Git.
-
 
 La sesión de usuarios se limpia mediante /admin/usuarios/session-expired cuando la cuenta ya no está activa. Este Route Handler de navegación revalida la cuenta antes de borrar cookies y conserva el host público usando Location relativa. Las API de usuarios siguen respondiendo JSON. test:users:integration ejecuta su build automáticamente.

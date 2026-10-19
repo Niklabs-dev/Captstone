@@ -5,7 +5,7 @@
   --font-mono: var(--font-jbmono);
 }
 
-@theme {
+@theme static {
   --color-bg: #ffffff;
   --color-tint: #fef4ef;
   --color-tint2: #fce9df;
@@ -17,11 +17,15 @@
   --color-salmon-ink: #b44e1b;
   --color-ink: #2e2320;
   --color-ink2: #5c4a41;
-  --color-muted: #97807a;
+  --color-muted: #78645d;
   --color-warn: #d98a1f;
   --color-warn-bg: #fcf2e2;
-  --color-crit: #d9503c;
+  --color-crit: #b4382b;
   --color-crit-bg: #fbebe8;
+  --color-ok: #237a55;
+  --color-ok-bg: #e9f6f0;
+  --color-info: #35669f;
+  --color-info-bg: #ecf2fa;
 }
 
 body {

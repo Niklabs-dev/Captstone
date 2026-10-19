@@ -1,8 +1,8 @@
+import { buttonClass } from '@/components/ui/styles';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { ReactElement } from 'react';
 import { getSession } from '@/lib/session';
-import { SessionActions } from '@/components/SessionActions';
 import { getPageRedirect } from '@/lib/navigation';
 export default async function DashboardPage({
   searchParams,
@@ -18,12 +18,9 @@ export default async function DashboardPage({
   if (destination) redirect(destination);
   const params = await searchParams;
   return (
-    <main className="min-h-screen bg-tint px-5 py-10 text-ink">
-      <section className="mx-auto max-w-xl rounded-2xl border border-line bg-bg p-7 ">
-        <p className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-salmon-ink">
-          Moi-food · Gestión interna
-        </p>
-        <h1 className="my-3 text-2xl font-bold">Bienvenido al sistema</h1>
+    <>
+      <section className="max-w-3xl rounded-[14px] border border-line bg-bg p-6">
+        <h2 className="mb-3 text-xl font-bold">Bienvenido al sistema</h2>
         {params.reason === 'forbidden' && (
           <p
             role="status"
@@ -37,16 +34,24 @@ export default async function DashboardPage({
           Sesión iniciada como {session.data.email}.
         </p>
         {session.data.role === 'ADMINISTRADOR' && (
-          <Link
-            href="/admin/auditoria"
-            prefetch={false}
-            className="mb-6 inline-block rounded-lg border border-line2 px-4 py-2 text-sm font-semibold text-salmon-ink hover:bg-tint"
-          >
-            Consultar auditoría
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/admin/usuarios"
+              prefetch={false}
+              className={buttonClass}
+            >
+              Gestionar usuarios
+            </Link>
+            <Link
+              href="/admin/auditoria"
+              prefetch={false}
+              className={buttonClass}
+            >
+              Consultar auditoría
+            </Link>
+          </div>
         )}
-        <SessionActions />
       </section>
-    </main>
+    </>
   );
 }

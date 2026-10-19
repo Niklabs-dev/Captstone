@@ -1,3 +1,11 @@
+import {
+  inputClass,
+  buttonClass,
+  primaryButtonClass,
+  labelClass,
+  filterPanelClass,
+  panelTitleClass,
+} from '@/components/ui/styles';
 import type { ReactElement } from 'react';
 import { AUDIT_PAGE_SIZE, type AuditStore } from '@/lib/audit';
 
@@ -12,16 +20,11 @@ export function AuditFilters({
   limit: number;
   queryKey: string;
 }): ReactElement {
-  const inputStyle =
-    'mt-2 w-full min-w-0 rounded-lg border border-line2 bg-bg px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-salmon-deep';
   const missingStore =
     selected.storeId && !stores.some((store) => store.id === selected.storeId);
   return (
-    <section
-      aria-labelledby="audit-filter-title"
-      className="rounded-[14px] border border-line bg-bg p-5"
-    >
-      <h2 id="audit-filter-title" className="text-sm font-bold">
+    <section aria-labelledby="audit-filter-title" className={filterPanelClass}>
+      <h2 id="audit-filter-title" className={panelTitleClass}>
         Filtrar operaciones
       </h2>
       {/* El formulario vacío limpia la URL y los campos, incluso antes de aplicar cambios. */}
@@ -39,16 +42,13 @@ export function AuditFilters({
       >
         <input type="hidden" name="limit" value={limit || AUDIT_PAGE_SIZE} />
         <input type="hidden" name="offset" value="0" />
-        <label
-          htmlFor="audit-store"
-          className="min-w-0 text-xs font-semibold text-ink2"
-        >
+        <label htmlFor="audit-store" className={`${labelClass} min-w-0`}>
           Local
           <select
             id="audit-store"
             name="storeId"
             defaultValue={selected.storeId}
-            className={inputStyle}
+            className={`${inputClass} mt-2`}
           >
             <option value="">Todos los locales y operaciones globales</option>
             {missingStore && (
@@ -61,45 +61,36 @@ export function AuditFilters({
             ))}
           </select>
         </label>
-        <label
-          htmlFor="audit-from"
-          className="min-w-0 text-xs font-semibold text-ink2"
-        >
+        <label htmlFor="audit-from" className={`${labelClass} min-w-0`}>
           Desde
           <input
             id="audit-from"
             name="from"
             type="date"
             defaultValue={selected.from}
-            className={inputStyle}
+            className={`${inputClass} mt-2`}
             aria-describedby="audit-date-help"
           />
         </label>
-        <label
-          htmlFor="audit-to"
-          className="min-w-0 text-xs font-semibold text-ink2"
-        >
+        <label htmlFor="audit-to" className={`${labelClass} min-w-0`}>
           Hasta
           <input
             id="audit-to"
             name="to"
             type="date"
             defaultValue={selected.to}
-            className={inputStyle}
+            className={`${inputClass} mt-2`}
             aria-describedby="audit-date-help"
           />
         </label>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="submit"
-            className="rounded-lg bg-salmon px-4 py-2 text-sm font-semibold text-white hover:bg-salmon-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink"
-          >
+          <button type="submit" className={primaryButtonClass}>
             Aplicar filtros
           </button>
           <button
             type="submit"
             form="clear-audit-filters"
-            className="rounded-lg border border-line2 px-4 py-2 text-sm font-semibold text-salmon-ink hover:bg-tint"
+            className={buttonClass}
           >
             Limpiar
           </button>
