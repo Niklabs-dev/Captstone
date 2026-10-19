@@ -6,11 +6,16 @@ import {
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  parseCalendarDate,
+  type CalendarDate,
+} from '../audit/utils/business-day.util.js';
 import { ROLE } from '../auth/constants/roles.constants.js';
 import { hasAnyRole } from '../auth/policies/store-access.policy.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import { DOCUMENT_SUBJECT_ROLES } from '../documents/types/documents.types.js';
 import {
+  businessDateOf,
   computeDocumentDeadlines,
   formatDbDate,
   toDbDate,
@@ -22,6 +27,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import { detectMimeType } from '../storage/utils/file-signature.util.js';
 import type { ListPayslipsQueryDto } from './dto/list-payslips-query.dto.js';
+import type { PublishPayslipDto } from './dto/publish-payslip.dto.js';
 import type { UploadPayslipDto } from './dto/upload-payslip.dto.js';
 import {
   PAYSLIP_DOCUMENT_TYPE,
@@ -108,8 +114,9 @@ function toPayslipResponse(
 
 // Liquidaciones de sueldo (E2-H1): el contador carga la liquidación de un
 // trabajador para un período, que queda pendiente de firma y no visible para
-// el trabajador (SPRINT-2-T13). El archivo se guarda en el gestor documental
-// como documento LIQUIDACION, con su versión y hash SHA-256.
+// el trabajador (SPRINT-2-T13), y luego confirma su publicación
+// (SPRINT-2-T14). El archivo se guarda en el gestor documental como
+// documento LIQUIDACION, con su versión y hash SHA-256.
 @Injectable()
 export class PayrollService {
   private readonly maxUploadBytes: number;
@@ -316,6 +323,104 @@ export class PayrollService {
           'Ya existe una liquidación de este trabajador para el período o el archivo ya está registrado',
         );
       }
+      throw error;
+    }
+  }
+
+  // Publica una liquidación pendiente de firma (SPRINT-2-T14): queda visible
+  // en el portal de su trabajador con fecha de firma, fecha de publicación y
+  // quién la publicó. Solo el paso PENDING_SIGNATURE → PUBLISHED: después la
+  // base de datos rechaza editarla o eliminarla (triggers de la migración
+  // liquidaciones_publicadas_inmutables).
+  async publish(
+    payslipId: string,
+    dto: PublishPayslipDto,
+    currentUser: AuthUser,
+  ): Promise<PayslipResponse> {
+    const now = new Date();
+    const today = businessDateOf(now);
+    let signedAt: CalendarDate = today;
+    if (dto.signedAt !== undefined) {
+      const parsed = parseCalendarDate(dto.signedAt);
+      if (!parsed) {
+        throw new BadRequestException('signedAt no es una fecha válida');
+      }
+      signedAt = parsed;
+    }
+
+    const current = await this.prisma.payslip.findUnique({
+      where: { id: payslipId },
+      include: {
+        document: {
+          select: {
+            currentVersion: { select: { filePath: true, sha256Hash: true } },
+          },
+        },
+      },
+    });
+    if (!current) {
+      throw new NotFoundException('Liquidación no encontrada');
+    }
+    const signedAtDb = toDbDate(signedAt);
+    if (
+      signedAtDb > toDbDate(today) ||
+      signedAtDb < toDbDate(businessDateOf(current.createdAt))
+    ) {
+      throw new BadRequestException(
+        'signedAt debe estar entre el día de carga y hoy',
+      );
+    }
+    // No se publica un archivo distinto al que se cargó: se recalcula su hash
+    // antes de abrir la transacción (lectura de disco).
+    const version = current.document.currentVersion;
+    if (!version || !(await this.isFileIntact(version))) {
+      throw new ConflictException(
+        'El archivo de la liquidación no coincide con el hash registrado: no se puede publicar',
+      );
+    }
+
+    const published = await this.prisma.$transaction(async (tx) => {
+      // Bloquea la fila hasta el fin de la transacción: dos publicaciones
+      // simultáneas se serializan y la segunda ve el estado de la primera.
+      await tx.$queryRaw`SELECT id FROM payslips WHERE id = ${payslipId}::uuid FOR UPDATE`;
+      const payslip = await tx.payslip.findUniqueOrThrow({
+        where: { id: payslipId },
+      });
+      if (payslip.status === 'PUBLISHED') {
+        throw new ConflictException('La liquidación ya está publicada');
+      }
+      if (payslipRevision(payslip.updatedAt) !== dto.revision) {
+        throw new ConflictException(
+          'La liquidación cambió desde que se consultó; actualiza el listado',
+        );
+      }
+      return tx.payslip.update({
+        where: { id: payslipId },
+        data: {
+          status: 'PUBLISHED',
+          signedAt: signedAtDb,
+          publishedAt: now,
+          publishedById: currentUser.id,
+        },
+        include: PAYSLIP_INCLUDE,
+      });
+    });
+    return toPayslipResponse(published, currentUser);
+  }
+
+  // Recalcula el SHA-256 del archivo guardado; false si fue alterado o no
+  // está en el almacenamiento.
+  private async isFileIntact(version: {
+    filePath: string;
+    sha256Hash: string;
+  }): Promise<boolean> {
+    try {
+      return await this.storage.verifyIntegrity(
+        version.filePath,
+        version.sha256Hash,
+      );
+    } catch (error) {
+      if (error instanceof NotFoundException) return false;
       throw error;
     }
   }
