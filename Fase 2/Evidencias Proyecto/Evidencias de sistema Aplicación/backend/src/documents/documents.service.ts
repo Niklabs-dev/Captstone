@@ -46,6 +46,7 @@ import {
   isRetentionExpired,
 } from './utils/document-dates.util.js';
 import { buildDownloadFileName } from './utils/download-name.util.js';
+import { sanitizeFileName } from './utils/file-name.util.js';
 import { maxUploadBytes } from './utils/upload-limits.util.js';
 
 const VERSION_INCLUDE = {
@@ -140,16 +141,6 @@ function toDocumentResponse(document: DocumentWithRelations): DocumentResponse {
     createdAt: document.createdAt,
     latestVersion: toVersionResponse(version),
   };
-}
-
-// Nombre original para mostrar y descargar: sin carpetas ni caracteres de
-// control, y dentro del largo de la columna file_name. El archivo físico usa
-// otro nombre, aleatorio (StorageService).
-function sanitizeFileName(originalName: string): string {
-  const baseName = originalName.split(/[\\/]/).pop() ?? '';
-  // eslint-disable-next-line no-control-regex
-  const clean = baseName.replace(/[\u0000-\u001f\u007f]/g, '').trim();
-  return Array.from(clean).slice(0, 255).join('') || 'documento';
 }
 
 // Gestor documental: carga de documentos laborales en la carpeta digital de
