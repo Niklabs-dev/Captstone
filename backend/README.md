@@ -153,6 +153,7 @@ Los endpoints marcados con `@Audited()` quedan registrados automáticamente (`Au
 | `DOCUMENT_DELETED` / `DOCUMENT_DELETION_BLOCKED` | Eliminación vencido el plazo de conservación, o intento rechazado (409) antes de que venza. |
 | `DOCUMENT_DT_REGISTERED` | Confirmación del registro de un documento en la DT. |
 | `PAYSLIP_UPLOADED` | Carga de una liquidación por el contador (detalle: trabajador, período, SHA-256 y estado), con el local de la liquidación. |
+| `PAYSLIP_PUBLISHED` | Publicación de una liquidación (detalle: trabajador, período, fecha de firma, fecha de publicación y SHA-256); el responsable es el usuario del evento. |
 
 El detalle se arma solo con campos declarados (listas blancas): nunca incluye contraseñas ni el contenido de los archivos.
 
@@ -199,6 +200,15 @@ se publique. El PDF se guarda en el gestor documental como documento
 | --- | --- | --- |
 | `GET /payroll` | `CONTADOR`, `ADMINISTRADOR` | `{ items, workers, policy }`: liquidaciones (trabajador, local, período `YYYY-MM`, archivo, SHA-256, estado, `revision` y `canPublish`), selector de trabajadores activos para la carga y reglas de carga (solo PDF, `maxBytes`; `canUpload` solo para el contador). Filtros opcionales `storeId`, `period` y `status`. |
 | `POST /payroll` | `CONTADOR` | Multipart `workerId`, `period` (`YYYY-MM`) y `file` (PDF). 400 si el período es posterior al mes en curso o el trabajador no está activo; 409 si ya existe una liquidación suya para ese período o el archivo ya está registrado; 415 si no es PDF. |
+| `POST /payroll/:id/publish` | `CONTADOR` | Cuerpo `{ revision, signedAt? }`. Pasa la liquidación de `PENDING_SIGNATURE` a `PUBLISHED` con fecha de firma (`signedAt`, entre el día de carga y hoy; por defecto hoy), fecha de publicación y responsable. Antes recalcula el SHA-256 del archivo. 409 si ya está publicada, si cambió desde la consulta (`revision`) o si el archivo no coincide con su hash. |
+
+Una liquidación publicada **no se puede editar ni eliminar** (criterio 1 de
+E2-H1): la API no tiene rutas para hacerlo y la migración
+`liquidaciones_publicadas_inmutables` instala triggers que rechazan modificarla,
+eliminarla mientras no venza la conservación de su documento, `TRUNCATE` sobre
+`payslips`, y agregar versiones o modificar el documento de su archivo. Igual
+que en la auditoría, solo se omiten con `session_replication_role = replica`
+(superusuario).
 
 ## Documentación interactiva (Swagger / OpenAPI)
 

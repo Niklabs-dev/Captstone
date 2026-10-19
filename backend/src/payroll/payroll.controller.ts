@@ -2,6 +2,9 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Res,
@@ -34,6 +37,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import { ListPayslipsQueryDto } from './dto/list-payslips-query.dto.js';
+import { PublishPayslipDto } from './dto/publish-payslip.dto.js';
 import {
   PayslipCollectionDto,
   PayslipResponseDto,
@@ -52,8 +56,9 @@ import {
 
 // Liquidaciones de sueldo (E2-H1): el contador carga la liquidación de cada
 // trabajador por período, que queda pendiente de firma y no visible para el
-// trabajador (SPRINT-2-T13). El administrador solo consulta. La carga queda
-// en la auditoría, sin el contenido del archivo.
+// trabajador (SPRINT-2-T13), y confirma su publicación (SPRINT-2-T14). El
+// administrador solo consulta. La carga y la publicación quedan en la
+// auditoría, sin el contenido del archivo.
 @ApiTags('payroll')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
@@ -133,6 +138,52 @@ export class PayrollController {
   ): Promise<PayslipResponse> {
     const payslip = await this.payrollService.upload(dto, file, currentUser);
     // El contador es global: el local del evento es el de la liquidación.
+    setAuditContext(res, { storeId: payslip.worker.store.id });
+    return payslip;
+  }
+
+  @Post(':id/publish')
+  @Roles(ROLE.CONTADOR)
+  @HttpCode(200)
+  @Audited({
+    action: AUDIT_ACTION.PAYSLIP_PUBLISHED,
+    entityType: 'payslips',
+    entityIdFrom: 'params.id',
+    detailFromResponse: {
+      workerId: 'worker.id',
+      period: 'period',
+      signedAt: 'signedAt',
+      publishedAt: 'publishedAt',
+      sha256: 'sha256',
+    },
+  })
+  @ApiOperation({
+    summary:
+      'Publica una liquidación pendiente de firma en el portal de su trabajador',
+    description:
+      'Solo CONTADOR y solo el paso PENDING_SIGNATURE → PUBLISHED. Antes de publicar recalcula el SHA-256 del archivo. Registra la fecha de firma, la de publicación y quién publicó, y queda en la auditoría. Publicada, la liquidación ya no se puede editar ni eliminar (la base de datos lo rechaza).',
+  })
+  @ApiOkResponse({
+    description: 'Liquidación publicada (status PUBLISHED, canPublish false).',
+    type: PayslipResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'El ID no es un UUID, falta revision o signedAt no es una fecha válida entre el día de carga y hoy.',
+  })
+  @ApiForbiddenResponse({ description: 'El rol no es CONTADOR.' })
+  @ApiNotFoundResponse({ description: 'Liquidación no encontrada.' })
+  @ApiConflictResponse({
+    description:
+      'La liquidación ya está publicada, cambió desde la consulta (revision distinta) o su archivo no coincide con el hash registrado.',
+  })
+  async publish(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: PublishPayslipDto,
+    @CurrentUser() currentUser: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<PayslipResponse> {
+    const payslip = await this.payrollService.publish(id, dto, currentUser);
     setAuditContext(res, { storeId: payslip.worker.store.id });
     return payslip;
   }
