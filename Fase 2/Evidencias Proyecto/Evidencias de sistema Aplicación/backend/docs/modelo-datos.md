@@ -11,13 +11,13 @@
 | Módulo | Tablas | Propósito |
 | --- | --- | --- |
 | Núcleo | `stores`, `roles`, `users`, `refresh_tokens`, `audit_logs` | Locales, control de acceso por rol y local, autenticación JWT y auditoría inmutable |
-| Gestor Documental | `document_types`, `documents`, `document_versions` | Documentación laboral con hash SHA-256, versionado y conservación por 5 años |
+| Gestor Documental | `document_types`, `documents`, `document_versions`, `payslips` | Documentación laboral con hash SHA-256, versionado y conservación por 5 años; liquidaciones de sueldo con estado de publicación |
 | Propinas | `tip_pools`, `tip_pool_lines` | Reparto proporcional a horas trabajadas con registro escrito (art. 64 CT) |
 | Ventas y Caja | `sales`, `cash_closings`, `cash_closing_lines` | Ventas por local y cierre de caja diario con responsable, desglosado por medio de pago (esperado vs. contado con diferencia por línea) |
 | Inventario | `products`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Stock por libro mayor de movimientos y conteos físicos que detectan mermas |
 | Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
 
-**18 tablas y 10 enums.** El Portal del Trabajador no agrega tablas: es una vista
+**19 tablas y 11 enums.** El Portal del Trabajador no agrega tablas: es una vista
 de solo lectura sobre `users`, `documents`, `tip_pool_lines` y `sales`, con
 aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 
@@ -102,6 +102,20 @@ registrado en la DT si tiene plazo (`documents_dt_registered_requires_due_at`),
 y la fecha de registro y quién lo marcó van siempre juntos
 (`documents_dt_registered_by_consistent`).
 
+## Liquidaciones de sueldo (E2-H1)
+
+Una liquidación (`payslips`, SPRINT-2-T12) es un documento de tipo
+`LIQUIDACION` del gestor documental (`document_id`, único): reutiliza su
+versionado, su hash SHA-256 y su plazo de conservación de 5 años, y agrega el
+período y el estado de publicación.
+
+| Columna | Regla |
+| --- | --- |
+| `period` | Mes de la remuneración, guardado como su primer día (`payslips_period_first_day_check`). |
+| `status` | `PENDING_SIGNATURE` al cargarla el contador (no visible para el trabajador) y `PUBLISHED` al confirmar su publicación. |
+| `signed_at`, `published_at`, `published_by_id` | Fecha de firma, de publicación y quién publicó: obligatorias solo en `PUBLISHED` y vacías mientras está pendiente (`payslips_status_publication_check`). |
+| `worker_id` | Repite `documents.subject_user_id` para exigir **una liquidación por trabajador y período** (`UNIQUE(worker_id, period)`); el trigger `payslips_check_document` rechaza un documento que no sea `LIQUIDACION` o de otro trabajador. |
+
 ## Cómo ver el modelo de forma visual
 
 Hay cuatro opciones; las dos primeras están listas en este archivo:
@@ -139,6 +153,8 @@ erDiagram
   DOCUMENTS |o--o| DOCUMENT_VERSIONS : "versión vigente"
   USERS ||--o{ DOCUMENT_VERSIONS : "sube"
   USERS |o--o{ DOCUMENTS : "registra en la DT"
+  DOCUMENTS ||--o| PAYSLIPS : "archivo de la liquidación"
+  USERS ||--o{ PAYSLIPS : "recibe / carga / publica"
 
   STORES ||--o{ TIP_POOLS : "reparte"
   USERS ||--o{ TIP_POOLS : "calcula / confirma"
@@ -177,6 +193,11 @@ enum DocumentStatus {
   ACTIVE
   EXPIRED
   ARCHIVED
+}
+
+enum PayslipStatus {
+  PENDING_SIGNATURE
+  PUBLISHED
 }
 
 enum TipPoolStatus {
@@ -374,6 +395,25 @@ Table document_versions {
   }
 
   Note: 'INMUTABLE: cada corrección crea una versión nueva'
+}
+
+Table payslips {
+  id uuid [pk, default: `gen_random_uuid()`]
+  period date [not null, note: 'Mes de la remuneración (primer día, CHECK)']
+  status PayslipStatus [not null, default: 'PENDING_SIGNATURE']
+  signed_at date [note: 'Fecha de firma; obligatoria al publicar (CHECK)']
+  published_at timestamptz [note: 'Obligatoria al publicar (CHECK)']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+  document_id uuid [not null, unique, ref: - documents.id, note: 'Documento LIQUIDACION del gestor documental']
+  worker_id uuid [not null, ref: > users.id, note: 'Igual a documents.subject_user_id (trigger)']
+  created_by_id uuid [not null, ref: > users.id]
+  published_by_id uuid [ref: > users.id, note: 'Obligatorio al publicar (CHECK)']
+
+  indexes {
+    (worker_id, period) [unique]
+    (status, period)
+  }
 }
 
 Table tip_pools {
