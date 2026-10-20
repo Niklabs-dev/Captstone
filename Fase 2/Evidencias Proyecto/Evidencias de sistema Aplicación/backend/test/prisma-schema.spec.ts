@@ -151,6 +151,16 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     );
   });
 
+  it('hace inmutables las liquidaciones publicadas (SPRINT-2-T14)', () => {
+    const sql = readMigration('liquidaciones_publicadas_inmutables');
+    // Rechaza UPDATE/DELETE de publicadas por fila y TRUNCATE por sentencia.
+    expect(sql).toContain('BEFORE UPDATE OR DELETE ON "payslips"');
+    expect(sql).toContain('BEFORE TRUNCATE ON "payslips"');
+    // El archivo de una liquidación publicada no recibe versiones nuevas.
+    expect(sql).toContain('BEFORE INSERT ON "document_versions"');
+    expect(sql).toContain('ON "documents"');
+  });
+
   it('soporta el cumplimiento de la Ley N°21.719', () => {
     const sql = readMigrations();
     // Anonimización de titulares (derecho de cancelación).

@@ -116,6 +116,13 @@ período y el estado de publicación.
 | `signed_at`, `published_at`, `published_by_id` | Fecha de firma, de publicación y quién publicó: obligatorias solo en `PUBLISHED` y vacías mientras está pendiente (`payslips_status_publication_check`). |
 | `worker_id` | Repite `documents.subject_user_id` para exigir **una liquidación por trabajador y período** (`UNIQUE(worker_id, period)`); el trigger `payslips_check_document` rechaza un documento que no sea `LIQUIDACION` o de otro trabajador. |
 
+Publicada, la liquidación es **inmutable** (SPRINT-2-T14, migración
+`liquidaciones_publicadas_inmutables`): sus triggers rechazan modificarla,
+eliminarla antes de que venza la conservación de su documento, `TRUNCATE`, y
+agregar versiones o modificar el documento de su archivo. Mientras está
+pendiente, el trabajador, el período, el documento y quién la cargó tampoco
+cambian; el único cambio de estado posible es a `PUBLISHED`.
+
 ## Cómo ver el modelo de forma visual
 
 Hay cuatro opciones; las dos primeras están listas en este archivo:

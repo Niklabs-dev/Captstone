@@ -9,7 +9,7 @@ import { StorageModule } from '../storage/storage.module.js';
 import { PayrollController } from './payroll.controller.js';
 import { PayrollService } from './payroll.service.js';
 
-// Liquidaciones de sueldo (SPRINT-2-T13 carga).
+// Liquidaciones de sueldo (SPRINT-2-T13 carga, SPRINT-2-T14 publicación).
 @Module({
   imports: [
     StorageModule,
