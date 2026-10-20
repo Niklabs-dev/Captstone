@@ -36,7 +36,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(output).toContain('is valid');
   });
 
-  it('las migraciones crean las 18 tablas del modelo', () => {
+  it('las migraciones crean las 19 tablas del modelo', () => {
     const sql = readMigrations();
     const tablasEsperadas = [
       'stores',
@@ -47,6 +47,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'document_types',
       'documents',
       'document_versions',
+      'payslips',
       'tip_pools',
       'tip_pool_lines',
       'sales',
@@ -126,6 +127,27 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(sql).toContain('ALTER COLUMN "retain_until" SET NOT NULL');
     expect(sql.indexOf('UPDATE "documents"')).toBeLessThan(
       sql.indexOf('ALTER COLUMN "retain_until" SET NOT NULL'),
+    );
+  });
+
+  it('modela las liquidaciones con estado de publicación (SPRINT-2-T12)', () => {
+    const sql = readMigration('modelo_liquidaciones');
+    expect(sql).toContain(
+      "CREATE TYPE \"PayslipStatus\" AS ENUM ('PENDING_SIGNATURE', 'PUBLISHED')",
+    );
+    // Una sola liquidación por trabajador y período, y un documento por liquidación.
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "payslips_worker_id_period_key" ON "payslips"("worker_id", "period")',
+    );
+    expect(sql).toContain('CREATE UNIQUE INDEX "payslips_document_id_key"');
+    // Fecha de firma y de publicación, obligatorias solo al publicar.
+    expect(sql).toContain('"signed_at" DATE');
+    expect(sql).toContain('"published_at" TIMESTAMPTZ(6)');
+    expect(sql).toContain('"payslips_status_publication_check" CHECK');
+    expect(sql).toContain('"payslips_period_first_day_check" CHECK');
+    // El documento debe ser una LIQUIDACION del mismo trabajador.
+    expect(sql).toContain(
+      'BEFORE INSERT OR UPDATE OF "document_id", "worker_id" ON "payslips"',
     );
   });
 

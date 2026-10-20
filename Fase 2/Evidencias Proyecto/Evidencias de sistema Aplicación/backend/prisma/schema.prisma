@@ -99,7 +99,10 @@ model User {
   createdDocuments           Document[]           @relation("CreatedDocuments")
   dtRegisteredDocuments      Document[]           @relation("DtRegisteredDocuments")
   uploadedVersions           DocumentVersion[]    @relation("UploadedVersions")
-  calculatedTipPools         TipPool[]            @relation("CalculatedTipPools")
+  payslips                   Payslip[]            @relation("WorkerPayslips")
+  createdPayslips            Payslip[]            @relation("CreatedPayslips")
+  publishedPayslips          Payslip[]            @relation("PublishedPayslips")
+  calculatedTipPools        TipPool[]            @relation("CalculatedTipPools")
   confirmedTipPools          TipPool[]            @relation("ConfirmedTipPools")
   tipPoolLines               TipPoolLine[]        @relation("TipPoolLines")
   registeredSales            Sale[]               @relation("RegisteredSales")
@@ -232,6 +235,8 @@ model Document {
   currentVersion   DocumentVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
   currentVersionId String?          @unique @map("current_version_id") @db.Uuid
   versions         DocumentVersion[] @relation("DocumentVersions")
+  // Liquidación de sueldo asociada, si el documento es de tipo LIQUIDACION.
+  payslip          Payslip?
 
   @@index([storeId, status])
   @@index([subjectUserId])
@@ -266,6 +271,46 @@ model DocumentVersion {
 
   @@unique([documentId, versionNumber])
   @@map("document_versions")
+}
+
+enum PayslipStatus {
+  PENDING_SIGNATURE
+  PUBLISHED
+}
+
+/// Liquidación de sueldo mensual de un trabajador (SPRINT-2-T12, E2-H1). El
+/// archivo vive en el gestor documental: document_id apunta a un documento de
+/// tipo LIQUIDACION, que aporta el versionado, el hash SHA-256 y el plazo de
+/// conservación (5 años, art. 9 bis CT).
+/// - period: mes de la remuneración, guardado como su primer día (CHECK).
+/// - status: PENDING_SIGNATURE al cargarla el contador (no visible para el
+///   trabajador) y PUBLISHED cuando confirma su publicación. signed_at (fecha
+///   de firma), published_at y published_by_id se fijan al publicar y son
+///   obligatorios en ese estado (CHECK).
+/// - Una sola liquidación por trabajador y período (restricción única).
+/// - worker_id repite el subject_user_id del documento para esa restricción;
+///   el trigger payslips_check_document exige que coincidan.
+model Payslip {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  period      DateTime      @db.Date
+  status      PayslipStatus @default(PENDING_SIGNATURE)
+  signedAt    DateTime?     @map("signed_at") @db.Date
+  publishedAt DateTime?     @map("published_at") @db.Timestamptz(6)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  documentId    String   @unique @map("document_id") @db.Uuid
+  worker        User     @relation("WorkerPayslips", fields: [workerId], references: [id], onDelete: Restrict)
+  workerId      String   @map("worker_id") @db.Uuid
+  createdBy     User     @relation("CreatedPayslips", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById   String   @map("created_by_id") @db.Uuid
+  publishedBy   User?    @relation("PublishedPayslips", fields: [publishedById], references: [id], onDelete: Restrict)
+  publishedById String?  @map("published_by_id") @db.Uuid
+
+  @@unique([workerId, period])
+  @@index([status, period])
+  @@map("payslips")
 }
 
 // -------------------------------------------------------------
