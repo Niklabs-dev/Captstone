@@ -57,7 +57,7 @@ test('API real: tipos, registro persistente y conflicto al confirmar una revisi√
   const document = await upload();
   await page.goto('/admin/alertas-dt');
   const row = page.getByRole('listitem').filter({ hasText: title });
-  await expect(row).toContainText('ANEXO');
+  await expect(row).toContainText('Anexo');
   await row.getByRole('button', { name: 'Marcar como registrado' }).click();
   await upload(document.id);
   await page.getByRole('dialog').getByRole('checkbox').check();

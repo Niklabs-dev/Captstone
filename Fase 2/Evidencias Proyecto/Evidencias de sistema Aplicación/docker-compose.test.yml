@@ -1,0 +1,10 @@
+# Solo para una ejecución efímera de pruebas con datos sintéticos.
+# Mantiene los servicios y builds del compose principal. El bind mount permite
+# verificar MISSING retirando y restaurando el archivo de prueba desde Playwright.
+services:
+  backend:
+    # El proceso y Playwright comparten dueño de los archivos sintéticos; se
+    # conservan los permisos privados 0700/0600 del servicio de almacenamiento.
+    user: "${CI_UID:-1001}:${CI_GID:-1001}"
+    volumes:
+      - ./frontend/output/real-api/storage:/app/storage/documents

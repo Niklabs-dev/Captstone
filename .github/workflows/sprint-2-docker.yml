@@ -1,0 +1,115 @@
+name: Sprint 2 - Docker y API real
+
+on:
+  push:
+    branches:
+      - feat/sprint-2-t10-documentos-trabajador
+      - feat/sprint-2-t11-alertas-dt
+      - feat/sprint-2-t16-liquidaciones-contador
+      - feat/sprint-2-t17-mis-liquidaciones
+    paths:
+      - ".github/workflows/sprint-2-docker.yml"
+      - "Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sprint-2-docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: Docker Compose y navegador real
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+        working-directory: Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación
+    env:
+      COMPOSE_PROJECT_NAME: sprint2-ci
+      COMPOSE_FILE: docker-compose.yml:docker-compose.test.yml
+      DB_PASSWORD: ci-disposable-password
+      DATABASE_URL: postgresql://postgres:ci-disposable-password@127.0.0.1:5433/subway_gestion
+      ADMIN_PASSWORD: ci-admin-test-only-2026
+      TEST_REAL_ADMIN_PASSWORD: ci-admin-test-only-2026
+      TEST_REAL_DISPOSABLE: "true"
+      TEST_REAL_FRONTEND_URL: http://127.0.0.1:3000
+      TEST_REAL_BACKEND_URL: http://127.0.0.1:3001
+      TEST_REAL_STORAGE_PATH: ${{ github.workspace }}/Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/output/real-api/storage
+      PLAYWRIGHT_JUNIT_OUTPUT_FILE: output/ci/real-api.xml
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/backend/package-lock.json
+            Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/package-lock.json
+      - name: Instalar dependencias de pruebas
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix frontend
+          cd frontend
+          npx playwright install --with-deps chromium
+          echo "CI_UID=$(id -u)" >> "$GITHUB_ENV"
+          echo "CI_GID=$(id -g)" >> "$GITHUB_ENV"
+      - name: Comprobar calidad y regresiones del módulo
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          case "$BRANCH_NAME" in
+            feat/sprint-2-t10-*) module=documents ;;
+            feat/sprint-2-t11-*) module=dt-alerts ;;
+            feat/sprint-2-t16-*) module=payroll ;;
+            feat/sprint-2-t17-*) module=my-payslips ;;
+            *) echo 'Rama fuera del alcance de estas pruebas'; exit 1 ;;
+          esac
+          cd frontend
+          npm run lint
+          npm run format:check
+          npx tsc -p tsconfig.test.json
+          node --test ".test-build/$module.test.js" .test-build/backend-proxy.test.js .test-build/display-date.test.js
+      - name: Levantar sistema completo con migraciones y seed reales
+        run: |
+          mkdir -p frontend/output/ci frontend/output/real-api/storage
+          chmod 0777 frontend/output/real-api/storage
+          docker compose up --build -d 2>&1 | tee frontend/output/ci/compose-build.log
+          for attempt in {1..90}; do
+            if curl --fail --silent http://127.0.0.1:3001/ >/dev/null && curl --fail --silent http://127.0.0.1:3000/login >/dev/null; then
+              docker compose ps
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs --no-color
+          exit 1
+      - name: Preparar datos sintéticos y probar API desde el navegador
+        run: |
+          cd frontend
+          node scripts/prepare-real-api.mjs
+          npx playwright test --config playwright.real-api.config.ts --reporter=line,junit
+      - name: Guardar logs y estado de los contenedores
+        if: always()
+        run: |
+          mkdir -p frontend/output/ci
+          docker compose ps --all > frontend/output/ci/compose-status.txt
+          docker compose logs --no-color > frontend/output/ci/compose.log 2>&1
+      - name: Adjuntar evidencia de las pruebas
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sprint-2-docker-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/output/ci
+            Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/output/playwright/real-api
+      - name: Eliminar únicamente los recursos efímeros de este runner
+        if: always()
+        run: docker compose down --volumes --remove-orphans
