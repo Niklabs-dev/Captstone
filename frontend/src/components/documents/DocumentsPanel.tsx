@@ -1,15 +1,15 @@
 'use client';
-import { filterPanelClass } from '@/components/ui/styles';
 import {
+  filterPanelClass,
   panelTitleClass,
   tablePanelClass,
   tableHeaderClass,
+  labelClass,
+  inputClass,
 } from '@/components/ui/styles';
-import { labelClass } from '@/components/ui/styles';
 import { useState, type ReactElement } from 'react';
 import type { ManagedUser } from '@/lib/users';
 import { DocumentWorkspace } from './DocumentWorkspace';
-import { inputClass as documentInput } from '@/components/ui/styles';
 
 export function DocumentsPanel({
   workers,
@@ -52,7 +52,7 @@ export function DocumentsPanel({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Nombre, apellido o correo"
-              className={'mt-2 ' + documentInput}
+              className={'mt-2 ' + inputClass}
             />
           </label>
           <label className={labelClass}>
@@ -61,7 +61,7 @@ export function DocumentsPanel({
               aria-label="Local"
               value={store}
               onChange={(event) => setStore(event.target.value)}
-              className={'mt-2 ' + documentInput}
+              className={'mt-2 ' + inputClass}
             >
               <option value="">Todos los locales</option>
               {stores.map((item) => (
@@ -137,7 +137,6 @@ export function DocumentsPanel({
             workerName={selected.firstName + ' ' + selected.lastName}
             onBusy={(value) => {
               setBusy(value);
-              return undefined;
             }}
           />
         ) : (

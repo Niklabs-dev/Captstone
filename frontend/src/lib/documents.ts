@@ -1,6 +1,6 @@
 import { isObject, isUuid } from './users';
 
-// Contrato interno del frontend propuesto; no representa un Swagger de NestJS.
+// DTO de T05/T06 documentado en Swagger (/api/docs).
 export const DOCUMENT_TYPES = [
   'CONTRATO',
   'ANEXO',
@@ -20,7 +20,7 @@ export const DOCUMENT_MIMES = [
   'image/jpeg',
 ] as const;
 export type DocumentMime = (typeof DOCUMENT_MIMES)[number];
-// Límite de memoria provisional del cliente, no una regla del backend pendiente.
+// Límite de carga del despliegue por defecto y de memoria del cliente.
 export const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 export interface DocumentVersion {
   id: string;
@@ -59,8 +59,9 @@ export interface VersionHistory {
 export interface IntegrityResult {
   versionId: string;
   valid: boolean;
+  status: 'VALID' | 'ALTERED' | 'MISSING';
   expectedHash: string;
-  actualHash: string;
+  actualHash: string | null;
   checkedAt: string;
 }
 export interface UploadMetadata {
@@ -97,7 +98,7 @@ export function parseDocumentVersion(value: unknown): DocumentVersion | null {
     !Number.isSafeInteger(value.number) ||
     typeof value.number !== 'number' ||
     value.number < 1 ||
-    !isLabel(value.fileName) ||
+    !isLabel(value.fileName, 255) ||
     !isMime(value.mime) ||
     typeof value.size !== 'number' ||
     !Number.isSafeInteger(value.size) ||
@@ -130,7 +131,7 @@ export function parseDocument(
     !isDocumentType(value.type) ||
     !isLabel(value.title, 160) ||
     typeof value.deletionBlocked !== 'boolean' ||
-    (value.retainUntil !== null && !isDate(value.retainUntil)) ||
+    (value.retainUntil !== null && !isCalendarDate(value.retainUntil)) ||
     (value.deletionReason !== null && !isLabel(value.deletionReason, 500)) ||
     (value.deletionBlocked && !isLabel(value.deletionReason, 500))
   )
@@ -142,9 +143,11 @@ export function parseDocument(
     workerId,
     type: value.type,
     title: value.title,
-    retainUntil: value.retainUntil as string | null,
+    retainUntil:
+      typeof value.retainUntil === 'string' ? value.retainUntil : null,
     deletionBlocked: value.deletionBlocked,
-    deletionReason: value.deletionReason as string | null,
+    deletionReason:
+      typeof value.deletionReason === 'string' ? value.deletionReason : null,
     latestVersion: version,
   };
 }
@@ -225,16 +228,23 @@ export function parseIntegrity(
     value.versionId !== version.id ||
     typeof value.valid !== 'boolean' ||
     value.expectedHash !== version.sha256 ||
-    !isHash(value.actualHash) ||
     !isDate(value.checkedAt) ||
-    value.valid !== (value.expectedHash === value.actualHash)
+    (value.status !== 'VALID' &&
+      value.status !== 'ALTERED' &&
+      value.status !== 'MISSING') ||
+    (value.status === 'MISSING'
+      ? value.valid || value.actualHash !== null
+      : !isHash(value.actualHash) ||
+        value.valid !== (value.expectedHash === value.actualHash) ||
+        value.valid !== (value.status === 'VALID'))
   )
     return null;
   return {
     versionId: version.id,
     valid: value.valid,
+    status: value.status,
     expectedHash: version.sha256,
-    actualHash: value.actualHash,
+    actualHash: typeof value.actualHash === 'string' ? value.actualHash : null,
     checkedAt: value.checkedAt,
   };
 }
@@ -285,5 +295,13 @@ export function documentDate(value: string): string {
   return new Intl.DateTimeFormat('es-CL', {
     timeZone: 'America/Santiago',
     dateStyle: 'medium',
-  }).format(new Date(value));
+  }).format(new Date(isCalendarDate(value) ? value + 'T12:00:00Z' : value));
+}
+function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value))
+    return false;
+  const date = new Date(value + 'T12:00:00Z');
+  return (
+    Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value
+  );
 }
