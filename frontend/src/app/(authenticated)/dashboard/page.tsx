@@ -51,6 +51,15 @@ export default async function DashboardPage({
             </Link>
           </div>
         )}
+        {session.data.role === 'ADMINISTRADOR' && (
+          <Link
+            href="/admin/alertas-dt"
+            prefetch={false}
+            className={`${buttonClass} mt-4`}
+          >
+            Abrir alertas DT
+          </Link>
+        )}
         {(session.data.role === 'ADMINISTRADOR' ||
           session.data.role === 'CONTADOR') && (
           <Link
