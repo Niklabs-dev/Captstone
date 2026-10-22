@@ -143,17 +143,19 @@ recurso. El archivo está preparado para eso:
 
 | Entorno | Rama | Datos |
 | --- | --- | --- |
-| Pruebas (Sprint Review con el cliente) | `test` | Base y volumen de documentos propios, solo datos sintéticos; **nunca datos reales** |
+| Pruebas (Sprint Review con el cliente) | `test` (Coolify despliega `deploy-test`, generada desde `test`) | Base y volumen de documentos propios, solo datos sintéticos; **nunca datos reales** |
 | Producción | `main` | Datos reales de Moi-food |
 
 ### Configurar el recurso de pruebas
 
 1. En Coolify: **New Resource → Docker Compose** desde el repositorio de GitHub,
-   rama `test`, *Base Directory* `/app` y *Docker Compose Location*
-   `/docker-compose.yml`. `app` es un enlace simbólico en la raíz del
-   repositorio hacia esta carpeta: Coolify no encuentra el compose si el
-   *Base Directory* tiene espacios o tildes, y así las carpetas de evidencias
-   se mantienen sin cambios.
+   rama **`deploy-test`**, *Base Directory* `/` y *Docker Compose Location*
+   `/docker-compose.yml`. Coolify no carga el compose desde esta carpeta
+   porque la ruta tiene espacios y tildes; por eso el workflow
+   `.github/workflows/deploy-test-branch.yml` publica, en cada push a `test`,
+   la rama `deploy-test` con solo el contenido de esta carpeta en la raíz
+   (`git subtree split`). Las carpetas de evidencias no cambian y
+   `deploy-test` nunca se edita a mano.
 2. En **Domains**, asignar el dominio de pruebas **solo al servicio `frontend`**,
    con el puerto interno: `https://<dominio-de-pruebas>:3000`. El resto de los
    servicios queda sin dominio.
@@ -164,7 +166,8 @@ recurso. El archivo está preparado para eso:
    webhook) para que cada push a `test` despliegue el incremento.
 
 Para llevar cambios al entorno de pruebas se integra `main` en `test`
-(`git checkout test && git merge --ff-only main && git push`).
+(`git checkout test && git merge --ff-only main && git push`); el workflow
+actualiza `deploy-test` y Coolify despliega desde ella.
 
 `migrate` y `seed` terminan tras aplicar migraciones y datos base. Si Coolify
 muestra el recurso como *degraded* por esos contenedores detenidos, es
