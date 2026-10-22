@@ -16,4 +16,4 @@ Las tarjetas siguen el mockup de alertas para priorizar documento, plazo y confi
 
 La prueba contra backend real verifica listado, tipos, confirmación persistente y conflicto por revisión desactualizada. La evidencia ejecutada se registra al finalizar. Docker Desktop no puede instalarse en este equipo hasta actualizar Windows 10 de la compilación 19044 a 19045 o superior.
 
-Evidencia 22-10-2026: lint, format:check y build aprobados; 11 pruebas del módulo y 4 del proxy; 12 escenarios de navegador aislados y 2 contra NestJS/PostgreSQL 16 reales. Migraciones y seed aplicados desde cero. Pendiente exclusivamente la ejecución mediante Docker tras actualizar Windows. No se marca Hecho.
+Evidencia 22-10-2026: lint, format:check y build aprobados; 11 pruebas del módulo y 5 del proxy; 12 escenarios de navegador aislados y 2 contra NestJS/PostgreSQL 16 reales. Migraciones y seed aplicados desde cero. Pendiente exclusivamente la ejecución mediante Docker tras actualizar Windows. No se marca Hecho.
