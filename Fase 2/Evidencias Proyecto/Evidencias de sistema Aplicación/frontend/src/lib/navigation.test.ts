@@ -39,6 +39,7 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
     { href: '/admin/auditoria', label: 'Auditoría' },
     { href: '/admin/documentos', label: 'Documentos' },
     { href: '/admin/alertas-dt', label: 'Alertas DT' },
+    { href: '/liquidaciones', label: 'Liquidaciones' },
   ]);
 });
 
@@ -47,7 +48,7 @@ test('Cada rol recibe únicamente enlaces permitidos y el trabajador conserva su
     for (const item of getNavigationItems(role))
       assert.equal(getPageRedirect(role, item.href), null);
     assert.equal(getNavigationItems(role)[0].href, getHomePath(role));
-    if (role !== 'ADMINISTRADOR')
+    if (role !== 'ADMINISTRADOR' && role !== 'CONTADOR')
       assert.equal(getNavigationItems(role).length, 1);
   }
   assert.deepEqual(getNavigationItems(null), [
@@ -161,5 +162,20 @@ test('El módulo de SPRINT-2-T11 usa la navegación común y respeta los roles',
       allowed,
     );
     assert.equal(getPageRedirect(role, '/admin/alertas-dt') === null, allowed);
+  }
+});
+
+test('El módulo de SPRINT-2-T16 usa la navegación común y respeta los roles', () => {
+  assert.deepEqual(getNavigationView('/liquidaciones'), {
+    href: '/liquidaciones',
+    title: 'Gestión de liquidaciones',
+  });
+  for (const role of ROLES) {
+    const allowed = role === 'ADMINISTRADOR' || role === 'CONTADOR';
+    assert.equal(
+      getNavigationItems(role).some((item) => item.href === '/liquidaciones'),
+      allowed,
+    );
+    assert.equal(getPageRedirect(role, '/liquidaciones') === null, allowed);
   }
 });

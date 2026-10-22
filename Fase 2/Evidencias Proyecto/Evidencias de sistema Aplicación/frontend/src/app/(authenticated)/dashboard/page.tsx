@@ -60,6 +60,16 @@ export default async function DashboardPage({
             Abrir alertas DT
           </Link>
         )}
+        {(session.data.role === 'ADMINISTRADOR' ||
+          session.data.role === 'CONTADOR') && (
+          <Link
+            href="/liquidaciones"
+            prefetch={false}
+            className={`${buttonClass} mt-4`}
+          >
+            Abrir liquidaciones
+          </Link>
+        )}
       </section>
     </>
   );

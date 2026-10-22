@@ -236,3 +236,7 @@ Carga, versiones y descarga conectadas a T05/T06 mediante el BFF. Contrato en Sw
 ## Alertas de registro DT (SPRINT-2-T11)
 
 Panel y pruebas: [docs/SPRINT-2-T11.md](docs/SPRINT-2-T11.md). Conecta con la API de SPRINT-2-T08 documentada en Swagger (`/api/docs`).
+
+## Gestión de liquidaciones (SPRINT-2-T16)
+
+Panel, permisos y pruebas: [docs/SPRINT-2-T16.md](docs/SPRINT-2-T16.md). API de T13/T14 conectada mediante BFF; contrato en Swagger (/api/docs).
