@@ -5,7 +5,8 @@ import type { DtAlert } from '../../src/lib/dt-alerts';
 const overdue: DtAlert = {
   id: '10000000-0000-4000-8000-000000000211',
   documentId: '20000000-0000-4000-8000-000000000211',
-  contractTitle: 'Contrato de prueba Camila',
+  documentType: 'CONTRATO',
+  contractTitle: 'Documento de prueba Camila',
   worker: { id: '30000000-0000-4000-8000-000000000211', name: 'Camila Prueba' },
   store: {
     id: '40000000-0000-4000-8000-000000000211',
@@ -21,7 +22,7 @@ const upcoming: DtAlert = {
   ...overdue,
   id: '11000000-0000-4000-8000-000000000211',
   documentId: '21000000-0000-4000-8000-000000000211',
-  contractTitle: 'Contrato de prueba Diego',
+  contractTitle: 'Documento de prueba Diego',
   worker: { ...overdue.worker, name: 'Diego Prueba' },
   store: {
     id: '41000000-0000-4000-8000-000000000211',
@@ -110,7 +111,7 @@ test('Prioridad, días, filtros por local/trabajador/estado y pantalla adaptable
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/admin/alertas-dt');
-  const list = page.getByRole('list', { name: 'Alertas de contratos' });
+  const list = page.getByRole('list', { name: 'Alertas de documentos' });
   await expect(list.getByRole('heading').first()).toHaveText('Camila Prueba');
   await expect(
     page.getByText('Vencido hace 1 día', { exact: true }),
@@ -127,9 +128,9 @@ test('Prioridad, días, filtros por local/trabajador/estado y pantalla adaptable
     page.getByRole('heading', { name: 'Sin resultados para estos filtros' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Limpiar filtros' }).click();
-  await page.getByLabel('Buscar trabajador o contrato').fill('cAmIlA');
+  await page.getByLabel('Buscar trabajador o documento').fill('cAmIlA');
   await expect(list.getByRole('listitem')).toHaveCount(1);
-  await page.getByLabel('Buscar trabajador o contrato').fill('');
+  await page.getByLabel('Buscar trabajador o documento').fill('');
   await expect(list.getByRole('listitem')).toHaveCount(2);
   expect(
     await page.evaluate(
@@ -182,13 +183,13 @@ test('Confirmación explícita, cancelación, foco y registro persistido sin dob
   expect(state.posts).toBe(1);
   await expect(
     page
-      .getByRole('list', { name: 'Alertas de contratos' })
+      .getByRole('list', { name: 'Alertas de documentos' })
       .getByRole('listitem'),
   ).toHaveCount(1);
   await page.getByRole('button', { name: 'Actualizar alertas' }).click();
   await expect(
     page
-      .getByRole('list', { name: 'Alertas de contratos' })
+      .getByRole('list', { name: 'Alertas de documentos' })
       .getByRole('heading'),
   ).toHaveText('Diego Prueba');
 });
@@ -205,10 +206,10 @@ test('Conflicto y respuesta ajena no eliminan alertas ni anuncian éxito', async
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('checkbox').check();
   await dialog.getByRole('button', { name: 'Confirmar registro' }).click();
-  await expect(dialog.getByRole('alert')).toContainText('El contrato cambió');
+  await expect(dialog.getByRole('alert')).toContainText('El documento cambió');
   await expect(
     page
-      .getByRole('list', { name: 'Alertas de contratos' })
+      .getByRole('list', { name: 'Alertas de documentos' })
       .getByRole('listitem'),
   ).toHaveCount(2);
   state.postError = 0;
@@ -224,7 +225,7 @@ test('Conflicto y respuesta ajena no eliminan alertas ni anuncian éxito', async
   ).toBeDisabled();
   await expect(page.getByText(/Solo consulta:/)).toBeVisible();
 });
-test('Errores recuperables, contrato inválido y vacío no equivalen a cero alertas', async ({
+test('Errores recuperables, documento inválido y vacío no equivalen a cero alertas', async ({
   page,
 }) => {
   const state = await simulate(page);
@@ -244,17 +245,17 @@ test('Errores recuperables, contrato inválido y vacío no equivalen a cero aler
   state.items = [];
   await page.getByRole('button', { name: 'Reintentar' }).click();
   await expect(
-    page.getByRole('heading', { name: 'Sin contratos pendientes de registro' }),
+    page.getByRole('heading', { name: 'Sin documentos pendientes de registro' }),
   ).toBeVisible();
   await expect(page.getByText('0 pendientes en total')).toBeVisible();
 });
-test('Sin simulación DT: sesión activa, roles, origen, métodos y servicio pendiente', async ({
+test('BFF conectado: sesión activa, roles, origen, métodos y listado sin interceptación', async ({
   page,
   context,
   baseURL,
 }) => {
   const list = await context.request.get('/api/dt-alerts');
-  expect(list.status()).toBe(503);
+  expect(list.status()).toBe(200);
   expect(list.headers()['cache-control']).toContain('no-store');
   expect(
     (
@@ -263,7 +264,7 @@ test('Sin simulación DT: sesión activa, roles, origen, métodos y servicio pen
         data: {},
       })
     ).status(),
-  ).toBe(503);
+  ).toBe(404);
   expect(
     (
       await context.request.post('/api/dt-alerts/x/registration', {
@@ -275,9 +276,7 @@ test('Sin simulación DT: sesión activa, roles, origen, métodos y servicio pen
   expect((await context.request.delete('/api/dt-alerts/x')).status()).toBe(405);
   await page.goto('/dashboard');
   await page.getByRole('link', { name: 'Abrir alertas DT' }).click();
-  await expect(page.locator('main').getByRole('alert')).toContainText(
-    'servicio de alertas DT aún no está disponible',
-  );
+  await expect(page.getByRole('heading', { name: 'Sin documentos pendientes de registro' })).toBeVisible();
   for (const [token, destination] of [
     ['test-dt-worker', '/portal'],
     ['test-dt-supervisor', '/dashboard'],

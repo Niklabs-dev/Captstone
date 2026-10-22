@@ -44,7 +44,7 @@ usan con las utilidades de Tailwind (`bg-tint`, `text-ink2`, `border-line`…).
 | `muted`            | `#78645d`             | Metadatos, placeholders, IDs y textos de menor jerarquía                      |
 | `crit` / `crit-bg` | `#b4382b` / `#fbebe8` | Errores, estado «Desactivado» y acciones destructivas                         |
 | `ok` / `ok-bg`     | `#237a55` / `#e9f6f0` | Estado «Activo» y confirmaciones                                              |
-| `warn` / `warn-bg` | `#d98a1f` / `#fcf2e2` | Advertencias y plazos próximos a vencer                                       |
+| `warn` / `warn-bg` | `#8a5511` / `#fcf2e2` | Advertencias y plazos próximos a vencer                                       |
 | `info` / `info-bg` | `#35669f` / `#ecf2fa` | Información neutra (por ejemplo, el rol Contador)                             |
 
 Reglas de color:
@@ -215,3 +215,7 @@ Desvíos existentes que deben corregirse cuando se toque el archivo:
 - [ ] Se probaron los estados de carga, vacío y error.
 - [ ] Si se cambió una regla de este documento, `DESIGN.md` se actualizó en el
       mismo PR.
+
+## Listados de alertas y consultas personales
+
+El mockup de alertas DT y Mis liquidaciones usa tarjetas para priorizar el plazo y la acción de cada documento. Estas vistas pueden usar una lista semántica `<ul>` dentro de una sección con título accesible, `tablePanelClass`, separadores `border-line`, controles compartidos y un conteo visible. No reemplaza el patrón de tabla de las vistas administrativas, como la gestión de liquidaciones. Estados con `badgeClass` y texto explícito, además del color. El token warn se oscurece para conservar contraste AA sobre warn-bg.

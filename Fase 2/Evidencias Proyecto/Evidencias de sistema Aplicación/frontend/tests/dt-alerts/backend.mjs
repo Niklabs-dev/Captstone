@@ -78,6 +78,10 @@ createServer(async (request, response) => {
     response.end(JSON.stringify([admin]));
     return;
   }
+  if (url.pathname === '/dt-alerts' && request.method === 'GET') {
+    response.end(JSON.stringify({ items: [], calculatedAt: new Date().toISOString() }));
+    return;
+  }
   response.writeHead(404);
   response.end('{}');
 }).listen(3146, '127.0.0.1', () =>

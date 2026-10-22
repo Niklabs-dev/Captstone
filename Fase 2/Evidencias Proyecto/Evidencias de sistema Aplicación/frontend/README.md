@@ -231,4 +231,4 @@ La sesiÃ³n de usuarios se limpia mediante /admin/usuarios/session-expired cuando
 
 ## Alertas de registro DT (SPRINT-2-T11)
 
-Panel y pruebas: [docs/SPRINT-2-T11.md](docs/SPRINT-2-T11.md). La integración con la API de SPRINT-2-T08 está pendiente.
+Panel y pruebas: [docs/SPRINT-2-T11.md](docs/SPRINT-2-T11.md). Conecta con la API de SPRINT-2-T08 documentada en Swagger (`/api/docs`).

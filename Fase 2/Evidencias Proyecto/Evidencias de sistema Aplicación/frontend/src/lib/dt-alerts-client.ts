@@ -34,7 +34,7 @@ async function request(
       const messages: Record<number, string> = {
         401: 'Tu sesión venció. Vuelve a iniciar sesión.',
         403: 'No tienes permiso para gestionar estas alertas.',
-        409: 'El contrato cambió o ya fue registrado. Actualiza el panel antes de continuar.',
+        409: 'El documento cambió o ya fue registrado. Actualiza el panel antes de continuar.',
         503: 'El servicio de alertas DT aún no está disponible. Intenta más tarde.',
       };
       throw new DtAlertError(
