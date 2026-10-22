@@ -1,10 +1,12 @@
 // =============================================================
 // Seed de datos base (SPRINT-1-T05): roles del sistema, usuario
-// administrador inicial y tipos de documento laboral.
+// administrador inicial, tipos de documento laboral y los tres locales de
+// Moi-food (SPRINT-2-T26).
 //
 // Ejecución: `npm run prisma:seed` (o `npx prisma db seed`).
 // El script es idempotente: los roles y tipos de documento se
-// sincronizan por `code` (upsert) y el administrador solo se crea si
+// sincronizan por `code` (upsert), los locales por su UUID fijo y el
+// administrador solo se crea si
 // el correo no existe, sin sobrescribir la contraseña de un usuario
 // ya registrado.
 // =============================================================
@@ -105,6 +107,31 @@ export const DOCUMENT_TYPES = [
   },
 ] as const;
 
+// Locales de Moi-food (SPRINT-2-T26). Los UUID son fijos para que el seed
+// sea idempotente (Store no tiene otra clave única) y para que coincidan con
+// los catálogos USER_MANAGEMENT_STORES y AUDIT_STORES de docker-compose.yml.
+// Las direcciones son provisionales hasta confirmar las reales.
+export const BASE_STORES = [
+  {
+    id: '1010021e-9bab-42d5-851c-417e9e2503bf',
+    name: 'Santa María',
+    city: 'Melipilla',
+    address: 'Av. Santa María 1250',
+  },
+  {
+    id: '73b590e0-11b2-4781-ba7b-4f7f8c2c6e35',
+    name: 'Ugalde',
+    city: 'Melipilla',
+    address: 'Ugalde 680',
+  },
+  {
+    id: '9ba7ac40-9463-47ec-b0b1-e53c79a185f9',
+    name: 'Calera',
+    city: 'Quillota',
+    address: 'Av. Marathon 1450',
+  },
+] as const;
+
 export interface SeedOptions {
   adminEmail: string;
   adminPassword: string;
@@ -115,6 +142,7 @@ export interface SeedOptions {
 export interface SeedResult {
   roleIds: Record<string, string>;
   documentTypeIds: Record<string, string>;
+  storeIds: string[];
   adminUserId: string;
   adminCreated: boolean;
 }
@@ -158,6 +186,21 @@ export async function seedDatabase(
     documentTypeIds[guardado.code] = guardado.id;
   }
 
+  const storeIds: string[] = [];
+  for (const local of BASE_STORES) {
+    const guardado = await db.store.upsert({
+      where: { id: local.id },
+      update: {
+        name: local.name,
+        city: local.city,
+        address: local.address,
+        isActive: true,
+      },
+      create: { ...local },
+    });
+    storeIds.push(guardado.id);
+  }
+
   const existente = await db.user.findUnique({
     where: { email: options.adminEmail },
   });
@@ -165,6 +208,7 @@ export async function seedDatabase(
     return {
       roleIds,
       documentTypeIds,
+      storeIds,
       adminUserId: existente.id,
       adminCreated: false,
     };
@@ -183,6 +227,7 @@ export async function seedDatabase(
   return {
     roleIds,
     documentTypeIds,
+    storeIds,
     adminUserId: admin.id,
     adminCreated: true,
   };
@@ -215,6 +260,9 @@ async function main(): Promise<void> {
       )}) y ${DOCUMENT_TYPES.length} tipos de documento (${DOCUMENT_TYPES.map(
         (t) => t.code,
       ).join(', ')}).`,
+    );
+    console.log(
+      `Locales sincronizados: ${BASE_STORES.map((s) => s.name).join(', ')}.`,
     );
     console.log(
       result.adminCreated
