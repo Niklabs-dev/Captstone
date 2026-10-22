@@ -1,6 +1,6 @@
 import type { Role } from './auth';
 
-// Contrato interno del frontend, pendiente de confirmar con Swagger de T15.
+// Contrato de T15 documentado en Swagger (/api/docs).
 export const MAX_PAYSLIP_BYTES = 25 * 1024 * 1024;
 export type OwnPayslip = {
   id: string;
@@ -13,18 +13,20 @@ export type OwnPayslip = {
   size: number;
   sha256: string;
   publishedAt: string;
+  signedAt: string;
 };
 export type PayslipIntegrity = {
   payslipId: string;
   versionId: string;
   workerId: string;
   valid: boolean;
+  status: 'VALID' | 'ALTERED' | 'MISSING';
   expectedHash: string;
-  actualHash: string;
+  actualHash: string | null;
   checkedAt: string;
 };
 export function canReadOwnPayslips(role: Role): boolean {
-  return role === 'TRABAJADOR';
+  return role === 'TRABAJADOR' || role === 'SUPERVISOR';
 }
 export function payslipUuid(value: unknown): value is string {
   return (
@@ -68,8 +70,8 @@ export function parseOwnPayslip(
     typeof value.period !== 'string' ||
     !/^(19|20|21)\d{2}-(0[1-9]|1[0-2])$/.test(value.period) ||
     typeof value.fileName !== 'string' ||
-    value.fileName.length > 200 ||
-    !/\.pdf$/i.test(value.fileName) ||
+    !value.fileName.trim() ||
+    Array.from(value.fileName).length > 255 ||
     /[\u0000-\u001f\u007f\/\\]/.test(value.fileName) ||
     value.mime !== 'application/pdf' ||
     typeof value.size !== 'number' ||
@@ -77,7 +79,8 @@ export function parseOwnPayslip(
     value.size <= 0 ||
     value.size > MAX_PAYSLIP_BYTES ||
     !hash(value.sha256) ||
-    !timestamp(value.publishedAt)
+    !timestamp(value.publishedAt) ||
+    !calendarDate(value.signedAt)
   )
     return null;
   return {
@@ -91,20 +94,35 @@ export function parseOwnPayslip(
     size: value.size,
     sha256: value.sha256,
     publishedAt: value.publishedAt,
+    signedAt: value.signedAt,
   };
 }
-export function parseOwnPayslips(
+export type OwnPayslipCollection = {
+  items: OwnPayslip[];
+  invalidCount?: number;
+};
+export function parseOwnPayslipCollection(
   value: unknown,
   workerId: string,
-): OwnPayslip[] | null {
+): OwnPayslipCollection | null {
   if (!object(value) || !Array.isArray(value.items) || !payslipUuid(workerId))
     return null;
   const items: OwnPayslip[] = [];
+  let invalidCount = 0;
   for (const candidate of value.items) {
-    const item = parseOwnPayslip(candidate, workerId);
-    // Una respuesta mezclada se rechaza completa; no se muestra ni siquiera parcialmente.
+    // Propietario y estado son límites de seguridad: una mezcla se rechaza completa.
     if (
-      !item ||
+      !object(candidate) ||
+      candidate.workerId !== workerId ||
+      candidate.status !== 'PUBLISHED'
+    )
+      return null;
+    const item = parseOwnPayslip(candidate, workerId);
+    if (!item) {
+      invalidCount++;
+      continue;
+    }
+    if (
       items.some(
         (previous) =>
           previous.id === item.id ||
@@ -115,7 +133,16 @@ export function parseOwnPayslips(
       return null;
     items.push(item);
   }
-  return items.sort((a, b) => b.period.localeCompare(a.period));
+  return {
+    items: items.sort((a, b) => b.period.localeCompare(a.period)),
+    ...(invalidCount ? { invalidCount } : {}),
+  };
+}
+export function parseOwnPayslips(
+  value: unknown,
+  workerId: string,
+): OwnPayslip[] | null {
+  return parseOwnPayslipCollection(value, workerId)?.items ?? null;
 }
 export function parsePayslipIntegrity(
   value: unknown,
@@ -127,9 +154,15 @@ export function parsePayslipIntegrity(
     value.versionId !== payslip.versionId ||
     value.workerId !== payslip.workerId ||
     value.expectedHash !== payslip.sha256 ||
-    !hash(value.actualHash) ||
     typeof value.valid !== 'boolean' ||
-    value.valid !== (value.expectedHash === value.actualHash) ||
+    (value.status !== 'VALID' &&
+      value.status !== 'ALTERED' &&
+      value.status !== 'MISSING') ||
+    (value.status === 'MISSING'
+      ? value.actualHash !== null || value.valid
+      : !hash(value.actualHash) ||
+        value.valid !== (value.expectedHash === value.actualHash) ||
+        value.valid !== (value.status === 'VALID')) ||
     !timestamp(value.checkedAt)
   )
     return null;
@@ -138,10 +171,19 @@ export function parsePayslipIntegrity(
     versionId: payslip.versionId,
     workerId: payslip.workerId,
     valid: value.valid,
+    status: value.status,
     expectedHash: payslip.sha256,
-    actualHash: value.actualHash,
+    actualHash: typeof value.actualHash === 'string' ? value.actualHash : null,
     checkedAt: value.checkedAt,
   };
+}
+function calendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value))
+    return false;
+  const date = new Date(value + 'T12:00:00Z');
+  return (
+    Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value
+  );
 }
 export async function payslipHash(bytes: ArrayBuffer): Promise<string> {
   return Array.from(

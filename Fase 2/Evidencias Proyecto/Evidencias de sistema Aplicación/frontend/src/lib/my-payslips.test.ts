@@ -4,6 +4,7 @@ import {
   canReadOwnPayslips,
   parseOwnPayslip,
   parseOwnPayslips,
+  parseOwnPayslipCollection,
   parsePayslipIntegrity,
   payslipHash,
   payslipDownloadName,
@@ -30,22 +31,66 @@ const published: OwnPayslip = {
   sha256: 'a'.repeat(64),
   status: 'PUBLISHED',
   publishedAt: '2026-10-15T12:00:00Z',
+  signedAt: '2026-10-14',
 };
 const integrity = (item: OwnPayslip) => ({
   payslipId: item.id,
   versionId: item.versionId,
   workerId: item.workerId,
   valid: true,
+  status: 'VALID',
   expectedHash: item.sha256,
   actualHash: item.sha256,
   checkedAt: '2026-10-15T13:00:00Z',
 });
 const errorStatus = (status: number) => (error: unknown) =>
   error instanceof PayslipError && error.status === status;
-test('Solo el trabajador accede a sus liquidaciones personales', () => {
+test('Trabajador y supervisor acceden a sus liquidaciones personales', () => {
   assert.equal(canReadOwnPayslips('TRABAJADOR'), true);
-  for (const role of ['ADMINISTRADOR', 'SUPERVISOR', 'CONTADOR'] as const)
+  assert.equal(canReadOwnPayslips('SUPERVISOR'), true);
+  for (const role of ['ADMINISTRADOR', 'CONTADOR'] as const)
     assert.equal(canReadOwnPayslips(role), false);
+});
+
+test('MISSING acepta hash nulo, explica la ausencia y no solicita el binario', async () => {
+  const missing = {
+    ...integrity(published),
+    status: 'MISSING',
+    valid: false,
+    actualHash: null,
+  };
+  assert.equal(parsePayslipIntegrity(missing, published)?.status, 'MISSING');
+  assert.equal(
+    parsePayslipIntegrity({ ...missing, valid: true }, published),
+    null,
+  );
+  let calls = 0;
+  await assert.rejects(
+    downloadOwnPayslip(published, undefined, async () => {
+      calls++;
+      return Response.json(missing);
+    }),
+    (error: unknown) =>
+      error instanceof PayslipError &&
+      error.status === 404 &&
+      error.message.includes('informa al administrador'),
+  );
+  assert.equal(calls, 1);
+});
+
+test('Nombres de 255 caracteres sin extensión y registros inválidos no ocultan los válidos', () => {
+  const fileName = 'á'.repeat(255);
+  assert.ok(parseOwnPayslip({ ...published, fileName }, workerId));
+  assert.equal(
+    parseOwnPayslip({ ...published, fileName: fileName + 'x' }, workerId),
+    null,
+  );
+  const result = parseOwnPayslipCollection(
+    { items: [published, { ...published, id: 'incorrecto' }] },
+    workerId,
+  );
+  assert.deepEqual(result?.items, [published]);
+  assert.equal(result?.invalidCount, 1);
 });
 test('Proyecta campos seguros y rechaza propietario distinto o estado pendiente', () => {
   assert.deepEqual(
@@ -75,7 +120,6 @@ test('Valida metadatos, fechas, UUID, hash, PDF y tamaño limitado', () => {
     { size: MAX_PAYSLIP_BYTES + 1 },
     { mime: 'text/html' },
     { fileName: '../private.pdf' },
-    { fileName: 'file.exe' },
   ])
     assert.equal(parseOwnPayslip({ ...published, ...patch }, workerId), null);
 });
@@ -126,7 +170,12 @@ test('Integridad vinculada al archivo, versión, propietario y hash esperados', 
     );
   assert.ok(
     parsePayslipIntegrity(
-      { ...integrity(published), actualHash: 'b'.repeat(64), valid: false },
+      {
+        ...integrity(published),
+        actualHash: 'b'.repeat(64),
+        valid: false,
+        status: 'ALTERED',
+      },
       published,
     ),
   );
@@ -227,6 +276,7 @@ test('Integridad inválida o incoherente impide pedir el binario', async () => {
       return Response.json({
         ...integrity(published),
         valid: false,
+        status: 'ALTERED',
         actualHash: 'b'.repeat(64),
       });
     }),
