@@ -19,6 +19,8 @@ import {
   loadDocuments,
   loadDocumentVersions,
   uploadDocument,
+  documentResponseName,
+  DocumentServiceError,
 } from './documents-client';
 
 const workerId = '10000000-0000-4000-8000-000000000210';
@@ -339,7 +341,7 @@ test('La descarga verifica el hash del servicio y vuelve a calcular los bytes re
   };
   assert.deepEqual(
     new Uint8Array(
-      await (await downloadDocument(actual, fetcher)).arrayBuffer(),
+      await (await downloadDocument(actual, fetcher)).blob.arrayBuffer(),
     ),
     pdf,
   );
@@ -384,5 +386,49 @@ test('Bloquea archivo alterado, discrepancia del servicio, tipo incorrecto y tam
         jsonResponse({ ...integrity(), actualHash: 'b'.repeat(64) }),
       ),
     /no pudo verificarse/,
+  );
+});
+
+test('Nombre de descarga usa Content-Disposition UTF-8 con respaldo seguro', () => {
+  assert.equal(
+    documentResponseName(
+      'attachment; filename="ANEXO_Anexo-jornada-Ana_v1.pdf"',
+      'a1.pdf',
+    ),
+    'ANEXO_Anexo-jornada-Ana_v1.pdf',
+  );
+  assert.equal(
+    documentResponseName(
+      "attachment; filename=anexo.pdf; filename*=UTF-8''ANEXO_Liquidaci%C3%B3n_v1.pdf",
+      'a1.pdf',
+    ),
+    'ANEXO_Liquidación_v1.pdf',
+  );
+  assert.equal(
+    documentResponseName(
+      "attachment; filename=seguro.pdf; filename*=UTF-8''%ZZ",
+      'a1.pdf',
+    ),
+    'seguro.pdf',
+  );
+  assert.equal(documentResponseName(null, 'a1.pdf'), 'a1.pdf');
+  assert.ok(
+    !documentResponseName(
+      'attachment; filename="../archivo.pdf"',
+      'a1.pdf',
+    ).includes('/'),
+  );
+  assert.equal(documentDate('2031-10-15'), '15-10-2031');
+});
+test('Archivo repetido no pide actualizar y reintentar el mismo contenido', async () => {
+  const form = new FormData();
+  await assert.rejects(
+    uploadDocument(form, workerId, hash, null, async () =>
+      Response.json({ code: 'DUPLICATE_FILE' }, { status: 409 }),
+    ),
+    (error) =>
+      error instanceof DocumentServiceError &&
+      /Este archivo ya está registrado/.test(error.message) &&
+      !error.message.includes('Actualiza'),
   );
 });

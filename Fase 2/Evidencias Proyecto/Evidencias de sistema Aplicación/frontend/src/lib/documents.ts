@@ -1,3 +1,4 @@
+import { formatCalendarDate, formatChileDate } from './display-date';
 import { isObject, isUuid } from './users';
 
 // DTO de T05/T06 documentado en Swagger (/api/docs).
@@ -292,10 +293,9 @@ export function documentDownloadName(value: string): string {
   );
 }
 export function documentDate(value: string): string {
-  return new Intl.DateTimeFormat('es-CL', {
-    timeZone: 'America/Santiago',
-    dateStyle: 'medium',
-  }).format(new Date(isCalendarDate(value) ? value + 'T12:00:00Z' : value));
+  return isCalendarDate(value)
+    ? formatCalendarDate(value)
+    : formatChileDate(value);
 }
 function isCalendarDate(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value))

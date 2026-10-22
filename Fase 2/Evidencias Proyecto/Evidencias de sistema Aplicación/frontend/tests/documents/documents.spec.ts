@@ -147,7 +147,7 @@ async function simulate(page: Page): Promise<Simulation> {
         : requested.number === 1
           ? oldPdf
           : pdf;
-      await route.fulfill({ contentType: 'application/pdf', body: bytes });
+      await route.fulfill({ contentType: 'application/pdf', body: bytes, headers: { 'Content-Disposition': "attachment; filename=ANEXO_Anexo_v1.pdf; filename*=UTF-8''ANEXO_Anexo-jornada-Ana_v1.pdf" } });
       return;
     }
     const selectedWorker = url.searchParams.get('workerId');
@@ -209,7 +209,7 @@ test('Carpeta, filtros, historial, bloqueo de conservación y descarga con hash 
     .first()
     .click();
   const download = await downloaded;
-  expect(download.suggestedFilename()).toBe('contrato.pdf');
+  expect(download.suggestedFilename()).toBe('ANEXO_Anexo-jornada-Ana_v1.pdf');
   const stream = await download.createReadStream();
   expect(stream).not.toBeNull();
   const chunks: Buffer[] = [];

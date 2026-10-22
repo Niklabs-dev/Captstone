@@ -1,5 +1,6 @@
 import {
   documentHash,
+  documentDownloadName,
   parseDocument,
   parseDocumentCollection,
   parseIntegrity,
@@ -35,10 +36,19 @@ async function request(
       signal: init.signal ?? AbortSignal.timeout(15000),
     });
     if (!response.ok) {
+      const error: unknown = await response.json().catch(() => null);
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? error.code
+          : null;
+      const conflict =
+        code === 'DUPLICATE_FILE' || (path === '' && init.method === 'POST')
+          ? 'Este archivo ya está registrado. Selecciona un archivo diferente para crear una nueva versión.'
+          : 'El documento cambió. Actualiza la carpeta antes de continuar.';
       const messages: Record<number, string> = {
         401: 'Tu sesión venció. Vuelve a iniciar sesión.',
         403: 'No tienes permiso para consultar esta carpeta.',
-        409: 'El documento cambió. Actualiza la carpeta antes de repetir la carga.',
+        409: conflict,
         413: 'El archivo supera el tamaño permitido.',
         422: 'El archivo no cumple los requisitos. Revisa su tipo y tamaño.',
         503: 'El servicio documental aún no está disponible. Intenta más tarde.',
@@ -143,7 +153,7 @@ export async function uploadDocument(
 export async function downloadDocument(
   version: DocumentVersion,
   fetcher: Fetcher = fetch,
-): Promise<Blob> {
+): Promise<{ blob: Blob; fileName: string }> {
   const integrity = await checkDocumentIntegrity(version, fetcher);
   if (!integrity.valid)
     throw new DocumentServiceError(
@@ -189,5 +199,32 @@ export async function downloadDocument(
       'La integridad no coincide: el archivo recibido pudo ser alterado. Se bloqueó la descarga.',
       409,
     );
-  return blob;
+  return {
+    blob,
+    fileName: documentResponseName(
+      response.headers.get('Content-Disposition'),
+      version.fileName,
+    ),
+  };
+}
+
+// Prefiere filename* (UTF-8) y usa filename o el original si la cabecera no es válida.
+export function documentResponseName(
+  disposition: string | null,
+  fallback: string,
+): string {
+  const extended = disposition?.match(
+    /(?:^|;)\s*filename\*=UTF-8''([^;]+)/i,
+  )?.[1];
+  if (extended) {
+    try {
+      return documentDownloadName(decodeURIComponent(extended.trim()));
+    } catch {
+      /* Continúa con filename. */
+    }
+  }
+  const plain = disposition?.match(
+    /(?:^|;)\s*filename=(?:"([^"\r\n]*)"|([^;\r\n]*))/i,
+  );
+  return documentDownloadName(plain?.[1] || plain?.[2]?.trim() || fallback);
 }
