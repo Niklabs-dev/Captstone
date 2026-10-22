@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import {
   documentDownloadName,
   documentHash,
+  documentDate,
+  parseDocumentVersion,
   MAX_DOCUMENT_BYTES,
   parseDocumentCollection,
   parseIntegrity,
@@ -39,7 +41,7 @@ const document: WorkerDocument = {
   workerId,
   type: 'CONTRATO',
   title: 'Contrato laboral',
-  retainUntil: '2031-10-14T12:00:00Z',
+  retainUntil: '2031-10-14',
   deletionBlocked: true,
   deletionReason: 'Plazo de conservación vigente.',
   latestVersion: version,
@@ -52,12 +54,38 @@ const policy = {
 const integrity = (valid = true) => ({
   versionId,
   valid,
+  status: valid ? 'VALID' : 'ALTERED',
   expectedHash: hash,
   actualHash: valid ? hash : 'b'.repeat(64),
   checkedAt: '2026-10-14T13:00:00Z',
 });
 const jsonResponse = (data: unknown, status = 200): Response =>
   Response.json(data, { status });
+
+test('Alinea fecha de conservación y nombre largo con el DTO real', () => {
+  assert.ok(documentDate('2031-10-14').includes('14'));
+  assert.ok(
+    parseDocumentVersion({ ...version, fileName: 'á'.repeat(251) + '.pdf' }),
+  );
+  assert.equal(
+    parseDocumentVersion({ ...version, fileName: 'x'.repeat(256) }),
+    null,
+  );
+});
+
+test('Un archivo ausente muestra el mensaje público y bloquea la descarga', async () => {
+  const missing = {
+    ...integrity(),
+    status: 'MISSING',
+    actualHash: null,
+    valid: false,
+  };
+  assert.equal(parseIntegrity(missing, version)?.status, 'MISSING');
+  await assert.rejects(
+    downloadDocument(version, async () => Response.json(missing)),
+    /El archivo no está disponible/,
+  );
+});
 
 test('El contrato proyecta solo metadatos de la carpeta seleccionada y rechaza mezclas de trabajadores', () => {
   const parsed = parseDocumentCollection(
@@ -252,7 +280,7 @@ test('No refleja errores del servidor ni acepta respuestas malformadas y conserv
 test('Carga multipart sin imponer Content-Type y confirma hash, trabajador y nueva versión', async () => {
   const form = new FormData();
   form.set('title', document.title);
-  form.set('type', document.type);
+  form.set('documentTypeCode', document.type);
   form.set('workerId', workerId);
   form.set(
     'file',

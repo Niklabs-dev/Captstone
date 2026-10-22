@@ -1,5 +1,10 @@
 'use client';
-import { labelClass } from '@/components/ui/styles';
+import {
+  labelClass,
+  buttonClass,
+  inputClass,
+  primaryButtonClass,
+} from '@/components/ui/styles';
 import {
   useEffect,
   useRef,
@@ -16,11 +21,6 @@ import {
   type WorkerDocument,
 } from '@/lib/documents';
 import { uploadDocument } from '@/lib/documents-client';
-import {
-  buttonClass as documentButton,
-  inputClass as documentInput,
-  primaryButtonClass as documentPrimary,
-} from '@/components/ui/styles';
 
 export function DocumentUpload({
   workerId,
@@ -35,9 +35,9 @@ export function DocumentUpload({
   workerName: string;
   previous: WorkerDocument | null;
   policy: UploadPolicy;
-  onClose: () => undefined;
-  onUploaded: (document: WorkerDocument) => undefined;
-  onBusy: (busy: boolean) => undefined;
+  onClose: () => void;
+  onUploaded: (document: WorkerDocument) => void;
+  onBusy: (busy: boolean) => void;
 }): ReactElement {
   const dialog = useRef<HTMLDialogElement>(null);
   const form = useRef<HTMLFormElement>(null);
@@ -52,7 +52,7 @@ export function DocumentUpload({
       if (focus instanceof HTMLElement) focus.focus();
     };
   }, []);
-  async function submit(event: FormEvent<HTMLFormElement>): Promise<undefined> {
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (busy) return;
     const data = new FormData(event.currentTarget);
@@ -75,7 +75,7 @@ export function DocumentUpload({
       const payload = new FormData();
       payload.set('workerId', workerId);
       payload.set('title', title.trim());
-      payload.set('type', type);
+      payload.set('documentTypeCode', type);
       payload.set('file', file);
       if (previous) payload.set('documentId', previous.id);
       const hash = await documentHash(await file.arrayBuffer());
@@ -92,7 +92,6 @@ export function DocumentUpload({
       setBusy(false);
       onBusy(false);
     }
-    return undefined;
   }
   return (
     <dialog
@@ -118,7 +117,7 @@ export function DocumentUpload({
           aria-label="Cerrar ventana"
           disabled={busy}
           onClick={onClose}
-          className={documentButton}
+          className={buttonClass}
         >
           ×
         </button>
@@ -138,7 +137,7 @@ export function DocumentUpload({
                 name="title"
                 maxLength={160}
                 required
-                className={'mt-2 ' + documentInput}
+                className={'mt-2 ' + inputClass}
                 disabled={busy}
                 placeholder="Ej. Contrato de trabajo"
               />
@@ -151,7 +150,7 @@ export function DocumentUpload({
                 defaultValue=""
                 required
                 disabled={busy}
-                className={'mt-2 ' + documentInput}
+                className={'mt-2 ' + inputClass}
               >
                 <option value="" disabled>
                   Selecciona un tipo
@@ -174,7 +173,7 @@ export function DocumentUpload({
             disabled={busy}
             accept={policy.allowedMimes.join(',')}
             aria-describedby="document-file-help"
-            className={`${documentInput} mt-2 file:mr-3 file:rounded-lg file:border-0 file:bg-tint2 file:px-3 file:py-2 file:font-semibold file:text-salmon-ink`}
+            className={`${inputClass} mt-2 file:mr-3 file:rounded-lg file:border-0 file:bg-tint2 file:px-3 file:py-2 file:font-semibold file:text-salmon-ink`}
           />
         </label>
         <p id="document-file-help" className="text-xs leading-5 text-ink2">
@@ -201,11 +200,11 @@ export function DocumentUpload({
             type="button"
             disabled={busy}
             onClick={onClose}
-            className={documentButton}
+            className={buttonClass}
           >
             Cancelar
           </button>
-          <button type="submit" disabled={busy} className={documentPrimary}>
+          <button type="submit" disabled={busy} className={primaryButtonClass}>
             {busy
               ? 'Cargando archivo…'
               : previous

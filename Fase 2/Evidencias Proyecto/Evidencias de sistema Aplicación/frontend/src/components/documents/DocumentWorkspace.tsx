@@ -4,13 +4,14 @@ import {
   tablePanelClass,
   tableHeaderClass,
   badgeClass,
-} from '@/components/ui/styles';
-import {
   labelClass,
   tableClass,
   tableHeadClass,
   tableHeadingClass,
   tableCellClass,
+  buttonClass,
+  inputClass,
+  primaryButtonClass,
 } from '@/components/ui/styles';
 import { useEffect, useState, type ReactElement } from 'react';
 import {
@@ -30,11 +31,6 @@ import {
   loadDocumentVersions,
 } from '@/lib/documents-client';
 import { DocumentUpload } from './DocumentUpload';
-import {
-  buttonClass as documentButton,
-  inputClass as documentInput,
-  primaryButtonClass as documentPrimary,
-} from '@/components/ui/styles';
 
 type FolderState =
   | { status: 'loading' }
@@ -47,7 +43,7 @@ export function DocumentWorkspace({
 }: {
   workerId: string;
   workerName: string;
-  onBusy: (busy: boolean) => undefined;
+  onBusy: (busy: boolean) => void;
 }): ReactElement {
   const [folder, setFolder] = useState<FolderState>({ status: 'loading' });
   const [retry, setRetry] = useState(0);
@@ -104,7 +100,7 @@ export function DocumentWorkspace({
   async function handleVersion(
     version: DocumentVersion,
     download: boolean,
-  ): Promise<undefined> {
+  ): Promise<void> {
     if (operation) return;
     setOperation(version.id);
     setNotice('');
@@ -145,16 +141,14 @@ export function DocumentWorkspace({
       setOperation('');
       onBusy(false);
     }
-    return undefined;
   }
-  function selectDocument(document: WorkerDocument): undefined {
+  function selectDocument(document: WorkerDocument): void {
     setSelected({ ...document });
     setHistory(null);
     setHistoryError('');
     setHistoryBusy(true);
-    return undefined;
   }
-  function uploaded(document: WorkerDocument): undefined {
+  function uploaded(document: WorkerDocument): void {
     setFolder((current) =>
       current.status === 'ready'
         ? {
@@ -174,7 +168,6 @@ export function DocumentWorkspace({
       'Documento recibido. Puedes consultar su historial de versiones.',
     );
     if (selected?.id === document.id) selectDocument(document);
-    return undefined;
   }
   const documents =
     folder.status === 'ready'
@@ -186,7 +179,7 @@ export function DocumentWorkspace({
         <button
           type="button"
           disabled={Boolean(operation)}
-          className={documentButton}
+          className={buttonClass}
           onClick={() => handleVersion(version, false)}
         >
           {operation === version.id ? 'Procesando…' : 'Verificar integridad'}
@@ -194,7 +187,7 @@ export function DocumentWorkspace({
         <button
           type="button"
           disabled={Boolean(operation)}
-          className={documentButton}
+          className={buttonClass}
           onClick={() => handleVersion(version, true)}
         >
           Descargar
@@ -218,7 +211,7 @@ export function DocumentWorkspace({
         </div>
         <button
           type="button"
-          className={documentPrimary}
+          className={primaryButtonClass}
           disabled={
             folder.status !== 'ready' ||
             !folder.data.policy.canUpload ||
@@ -244,7 +237,7 @@ export function DocumentWorkspace({
             <p className="mt-2 text-sm leading-6 text-ink2">{folder.message}</p>
             <button
               type="button"
-              className={'mt-4 ' + documentButton}
+              className={'mt-4 ' + buttonClass}
               onClick={() => {
                 setFolder({ status: 'loading' });
                 setRetry((value) => value + 1);
@@ -261,7 +254,7 @@ export function DocumentWorkspace({
                 Tipo de documento
                 <select
                   aria-label="Tipo de documento"
-                  className={'mt-2 min-w-44 ' + documentInput}
+                  className={'mt-2 min-w-44 ' + inputClass}
                   value={filter}
                   onChange={(event) => setFilter(event.target.value)}
                 >
@@ -387,14 +380,14 @@ export function DocumentWorkspace({
                         <td className={tableCellClass}>
                           <div className="flex flex-wrap gap-2">
                             <button
-                              className={documentButton}
+                              className={buttonClass}
                               disabled={Boolean(operation)}
                               onClick={() => selectDocument(document)}
                             >
                               Ver historial
                             </button>
                             <button
-                              className={documentButton}
+                              className={buttonClass}
                               disabled={
                                 !folder.data.policy.canUpload ||
                                 Boolean(operation)
@@ -436,7 +429,7 @@ export function DocumentWorkspace({
               </p>
             </div>
             <button
-              className={documentButton}
+              className={buttonClass}
               disabled={Boolean(operation)}
               onClick={() => {
                 setSelected(null);
@@ -466,7 +459,7 @@ export function DocumentWorkspace({
             <p role="alert" className="mt-4 text-sm text-ink">
               {historyError}
               <button
-                className={'ml-3 ' + documentButton}
+                className={'ml-3 ' + buttonClass}
                 onClick={() => selectDocument({ ...selected })}
               >
                 Reintentar historial
@@ -511,7 +504,6 @@ export function DocumentWorkspace({
           onUploaded={uploaded}
           onClose={() => {
             setUpload(null);
-            return undefined;
           }}
         />
       )}

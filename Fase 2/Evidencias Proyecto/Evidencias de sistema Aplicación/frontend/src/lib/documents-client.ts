@@ -108,7 +108,14 @@ export async function checkDocumentIntegrity(
     {},
     fetcher,
   );
-  return parseIntegrity(await json(response), version) ?? invalidContract();
+  const result =
+    parseIntegrity(await json(response), version) ?? invalidContract();
+  if (result.status === 'MISSING')
+    throw new DocumentServiceError(
+      'El archivo no está disponible; informa al administrador.',
+      404,
+    );
+  return result;
 }
 export async function uploadDocument(
   form: FormData,
@@ -122,7 +129,7 @@ export async function uploadDocument(
   if (
     !document ||
     document.latestVersion.sha256 !== expectedHash ||
-    document.type !== form.get('type') ||
+    document.type !== form.get('documentTypeCode') ||
     document.title !== form.get('title') ||
     (previous &&
       (document.id !== previous.id ||

@@ -35,7 +35,7 @@ const record: WorkerDocument = {
   workerId,
   title: 'Contrato de prueba',
   type: 'CONTRATO',
-  retainUntil: '2031-10-14T12:00:00Z',
+  retainUntil: '2031-10-14',
   deletionBlocked: true,
   deletionReason:
     'No se puede eliminar mientras siga vigente el plazo de conservación informado por el servidor.',
@@ -107,7 +107,7 @@ async function simulate(page: Page): Promise<Simulation> {
         id: previous?.id ?? '21000000-0000-4000-8000-000000000210',
         workerId: String(data.get('workerId')),
         title: String(data.get('title')),
-        type: String(data.get('type')) as WorkerDocument['type'],
+        type: String(data.get('documentTypeCode')) as WorkerDocument['type'],
         latestVersion: fresh,
       };
       state.uploads++;
@@ -132,6 +132,7 @@ async function simulate(page: Page): Promise<Simulation> {
         json: {
           versionId: requested.id,
           valid: !state.mismatch,
+          status: state.mismatch ? 'ALTERED' : 'VALID',
           expectedHash: requested.sha256,
           actualHash: state.mismatch ? 'b'.repeat(64) : requested.sha256,
           checkedAt: '2026-10-14T13:00:00Z',
@@ -364,13 +365,13 @@ test('Carga, vacío, error, contrato inválido y cambio rápido de trabajador no
     page.getByText('Contrato de prueba', { exact: true }),
   ).toBeVisible();
 });
-test('Sin simulación documental: RBAC real del frontend, CSRF, 503 honesto y cuenta inactiva', async ({
+test('BFF conectado: RBAC, CSRF, listado real del adaptador y cuenta inactiva', async ({
   page,
   context,
   baseURL,
 }) => {
   const api = baseURL + '/api/documents';
-  expect((await context.request.get(api)).status()).toBe(503);
+  expect((await context.request.get(api + '?workerId=' + workerId)).status()).toBe(200);
   expect(
     (
       await context.request.post(api, {
@@ -386,13 +387,11 @@ test('Sin simulación documental: RBAC real del frontend, CSRF, 503 honesto y cu
         data: {},
       })
     ).status(),
-  ).toBe(503);
+  ).toBe(400);
   expect((await context.request.delete(api)).status()).toBe(405);
   await page.goto('/admin/documentos');
   await page.getByRole('button', { name: /Camila Prueba/ }).click();
-  await expect(page.locator('main').getByRole('alert')).toContainText(
-    'servicio documental aún no está disponible',
-  );
+  await expect(page.getByRole('heading', { name: 'Esta carpeta aún no tiene documentos' })).toBeVisible();
   for (const role of ['worker', 'supervisor', 'accountant']) {
     await context.clearCookies();
     await context.addCookies([

@@ -139,6 +139,10 @@ const server = createServer(async (request, response) => {
     response.end(JSON.stringify(filtered));
     return;
   }
+  if (url.pathname === '/documents' && request.method === 'GET') {
+    response.end(JSON.stringify({ items: [], policy: { maxBytes: 26214400, allowedMimes: ['application/pdf','image/png','image/jpeg'], canUpload: true } }));
+    return;
+  }
   response.writeHead(404);
   response.end('{}');
 });
