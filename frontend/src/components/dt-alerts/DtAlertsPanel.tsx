@@ -1,9 +1,13 @@
 'use client';
-import { filterPanelClass } from '@/components/ui/styles';
 import {
+  filterPanelClass,
   labelClass,
   panelTitleClass,
+  badgeClass,
   tablePanelClass,
+  buttonClass,
+  inputClass,
+  primaryButtonClass,
 } from '@/components/ui/styles';
 import { useEffect, useState, type ReactElement } from 'react';
 import {
@@ -15,11 +19,6 @@ import {
 } from '@/lib/dt-alerts';
 import { loadDtAlerts } from '@/lib/dt-alerts-client';
 import { RegistrationDialog } from './RegistrationDialog';
-import {
-  buttonClass as alertButton,
-  inputClass as alertInput,
-  primaryButtonClass as alertPrimary,
-} from '@/components/ui/styles';
 
 type State =
   | { status: 'loading' }
@@ -52,13 +51,12 @@ export function DtAlertsPanel(): ReactElement {
     );
     return () => controller.abort();
   }, [retry]);
-  function reload(): undefined {
+  function reload(): void {
     setState({ status: 'loading' });
     setNotice('');
     setRetry((current) => current + 1);
-    return undefined;
   }
-  function registered(alert: DtAlert): undefined {
+  function registered(alert: DtAlert): void {
     setSelected(null);
     setState((current) =>
       current.status === 'ready'
@@ -74,9 +72,8 @@ export function DtAlertsPanel(): ReactElement {
     setNotice(
       'Registro confirmado para ' +
         alert.worker.name +
-        '. El contrato se retiró de las alertas pendientes.',
+        '. El documento se retiró de las alertas pendientes.',
     );
-    return undefined;
   }
   if (state.status === 'loading')
     return (
@@ -103,7 +100,7 @@ export function DtAlertsPanel(): ReactElement {
         <button
           type="button"
           onClick={reload}
-          className={'mt-4 ' + alertButton}
+          className={'mt-4 ' + buttonClass}
         >
           Reintentar
         </button>
@@ -120,7 +117,7 @@ export function DtAlertsPanel(): ReactElement {
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
         <div>
           <h2 id="alerts-title" className={panelTitleClass}>
-            Contratos pendientes de registro
+            Documentos pendientes de registro
           </h2>
           <p className="mt-2 text-sm text-ink2">
             Plazos informados por el servicio · Consulta del{' '}
@@ -131,7 +128,7 @@ export function DtAlertsPanel(): ReactElement {
             }).format(new Date(calculatedAt))}
           </p>
         </div>
-        <button type="button" onClick={reload} className={alertButton}>
+        <button type="button" onClick={reload} className={buttonClass}>
           Actualizar alertas
         </button>
       </div>
@@ -156,13 +153,13 @@ export function DtAlertsPanel(): ReactElement {
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_220px_220px]">
           <label className={labelClass}>
-            Buscar trabajador o contrato
+            Buscar trabajador o documento
             <input
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Nombre del trabajador o contrato"
-              className={`${alertInput} mt-2`}
+              placeholder="Nombre del trabajador o documento"
+              className={`${inputClass} mt-2`}
             />
           </label>
           <label className={labelClass}>
@@ -171,7 +168,7 @@ export function DtAlertsPanel(): ReactElement {
               aria-label="Local"
               value={store}
               onChange={(event) => setStore(event.target.value)}
-              className={`${alertInput} mt-2`}
+              className={`${inputClass} mt-2`}
             >
               <option value="">Todos los locales</option>
               {stores.map((item) => (
@@ -187,7 +184,7 @@ export function DtAlertsPanel(): ReactElement {
               aria-label="Estado"
               value={status}
               onChange={(event) => setStatus(event.target.value)}
-              className={`${alertInput} mt-2`}
+              className={`${inputClass} mt-2`}
             >
               <option value="">Todos los pendientes</option>
               <option value="OVERDUE">Vencidos</option>
@@ -209,12 +206,12 @@ export function DtAlertsPanel(): ReactElement {
           <h3 className={panelTitleClass}>
             {items.length
               ? 'Sin resultados para estos filtros'
-              : 'Sin contratos pendientes de registro'}
+              : 'Sin documentos pendientes de registro'}
           </h3>
           <p className="mt-2 text-sm text-ink2">
             {items.length
               ? 'Prueba con otro nombre, local o estado.'
-              : 'El servicio no informó contratos próximos a vencer o vencidos sin registro.'}
+              : 'El servicio no informó documentos próximos a vencer o vencidos sin registro.'}
           </p>
           {items.length > 0 && (
             <button
@@ -224,34 +221,36 @@ export function DtAlertsPanel(): ReactElement {
                 setStore('');
                 setStatus('');
               }}
-              className={'mt-4 ' + alertButton}
+              className={'mt-4 ' + buttonClass}
             >
               Limpiar filtros
             </button>
           )}
         </div>
       ) : (
-        <ul className={tablePanelClass} aria-label="Alertas de contratos">
+        <ul className={tablePanelClass} aria-label="Alertas de documentos">
           {visible.map((alert) => (
             <li
               key={alert.id}
               className={
                 'border-b border-line p-5 last:border-b-0 sm:p-6 ' +
                 (alert.status === 'OVERDUE'
-                  ? 'border-l-4 border-l-salmon-ink'
-                  : 'border-l-4 border-l-line2')
+                  ? 'border-l-4 border-l-crit'
+                  : 'border-l-4 border-l-warn')
               }
             >
               <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
                 <div className="w-full min-w-0 flex-1 sm:w-auto">
-                  <p className="text-xs font-bold uppercase tracking-wide text-salmon-ink">
+                  <p
+                    className={`${badgeClass} ${alert.status === 'OVERDUE' ? 'bg-crit-bg text-crit' : 'bg-warn-bg text-warn'}`}
+                  >
                     {dtRemainingLabel(alert.daysRemaining)}
                   </p>
                   <h3 className="mt-2 break-words font-bold">
                     {alert.worker.name}
                   </h3>
                   <p className="mt-2 break-words text-sm text-ink2">
-                    {alert.contractTitle}
+                    {alert.documentType} · {alert.contractTitle}
                   </p>
                   <p className="mt-3 text-sm text-ink2">
                     {alert.store.name} · Fecha límite:{' '}
@@ -267,7 +266,7 @@ export function DtAlertsPanel(): ReactElement {
                     setNotice('');
                     setSelected(alert);
                   }}
-                  className={alertPrimary}
+                  className={primaryButtonClass}
                 >
                   Marcar como registrado
                 </button>
@@ -275,7 +274,7 @@ export function DtAlertsPanel(): ReactElement {
               {!alert.canRegister && (
                 <p className="mt-3 text-xs text-ink2">
                   Solo consulta: no tienes habilitada la confirmación de
-                  registro para este contrato.
+                  registro para este documento.
                 </p>
               )}
             </li>
@@ -291,7 +290,6 @@ export function DtAlertsPanel(): ReactElement {
           alert={selected}
           onClose={() => {
             setSelected(null);
-            return undefined;
           }}
           onRegistered={registered}
         />

@@ -18,7 +18,8 @@ import {
 const alert: DtAlert = {
   id: '10000000-0000-4000-8000-000000000211',
   documentId: '20000000-0000-4000-8000-000000000211',
-  contractTitle: 'Contrato de prueba',
+  documentType: 'CONTRATO',
+  contractTitle: 'Documento de prueba',
   worker: { id: '30000000-0000-4000-8000-000000000211', name: 'Camila Prueba' },
   store: {
     id: '40000000-0000-4000-8000-000000000211',
@@ -31,6 +32,14 @@ const alert: DtAlert = {
   canRegister: true,
 };
 const calculatedAt = '2026-10-14T15:00:00Z';
+test('Conserva el tipo de documento de Swagger y rechaza alertas sin tipo', () => {
+  for (const documentType of ['CONTRATO', 'ANEXO', 'FINIQUITO'])
+    assert.equal(
+      parseDtAlert({ ...alert, documentType })?.documentType,
+      documentType,
+    );
+  assert.equal(parseDtAlert({ ...alert, documentType: undefined }), null);
+});
 const confirmation = {
   alertId: alert.id,
   documentId: alert.documentId,
@@ -89,7 +98,7 @@ test('Rechaza listas malformadas, identificadores repetidos y fechas sin zona', 
     calculatedAt,
   });
 });
-test('Vincula la confirmación al contrato y alerta exactos', () => {
+test('Vincula la confirmación al documento y alerta exactos', () => {
   assert.deepEqual(
     parseDtRegistration({ ...confirmation, secret: 'ignored' }, alert),
     confirmation,
@@ -105,7 +114,7 @@ test('Vincula la confirmación al contrato y alerta exactos', () => {
       null,
     );
 });
-test('Filtra por trabajador, contrato, local y estado, priorizando vencidos sin mutar la lista', () => {
+test('Filtra por trabajador, documento, local y estado, priorizando vencidos sin mutar la lista', () => {
   const upcoming: DtAlert = {
     ...alert,
     id: '11000000-0000-4000-8000-000000000211',
@@ -121,7 +130,7 @@ test('Filtra por trabajador, contrato, local y estado, priorizando vencidos sin 
     filterDtAlerts(items, ' CAMILA ', alert.store.id, 'OVERDUE'),
     [alert],
   );
-  assert.deepEqual(filterDtAlerts(items, 'Contrato', '', 'UPCOMING'), [
+  assert.deepEqual(filterDtAlerts(items, 'Documento', '', 'UPCOMING'), [
     upcoming,
   ]);
   assert.deepEqual(filterDtAlerts(items, '', 'other', ''), []);
@@ -149,7 +158,7 @@ test('Consulta solo al BFF mismo origen con cookies, sin exponer token', async (
     calculatedAt,
   });
 });
-test('Envía revisión del contrato y no confirma respuestas de otra alerta', async () => {
+test('Envía revisión del documento y no confirma respuestas de otra alerta', async () => {
   const fetcher: typeof fetch = async (url, init) => {
     assert.equal(url, '/api/dt-alerts/' + alert.id + '/registration');
     assert.equal(init?.method, 'POST');

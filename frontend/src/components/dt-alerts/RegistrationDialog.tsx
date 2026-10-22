@@ -1,4 +1,5 @@
 'use client';
+import { buttonClass, primaryButtonClass } from '@/components/ui/styles';
 import {
   useEffect,
   useRef,
@@ -8,10 +9,6 @@ import {
 } from 'react';
 import { dtDate, type DtAlert } from '@/lib/dt-alerts';
 import { registerDtAlert } from '@/lib/dt-alerts-client';
-import {
-  buttonClass as alertButton,
-  primaryButtonClass as alertPrimary,
-} from '@/components/ui/styles';
 
 export function RegistrationDialog({
   alert,
@@ -19,8 +16,8 @@ export function RegistrationDialog({
   onRegistered,
 }: {
   alert: DtAlert;
-  onClose: () => undefined;
-  onRegistered: (alert: DtAlert) => undefined;
+  onClose: () => void;
+  onRegistered: (alert: DtAlert) => void;
 }): ReactElement {
   const dialog = useRef<HTMLDialogElement>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -35,7 +32,7 @@ export function RegistrationDialog({
       if (focus instanceof HTMLElement) focus.focus();
     };
   }, []);
-  async function submit(event: FormEvent<HTMLFormElement>): Promise<undefined> {
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!confirmed || busy) return;
     setBusy(true);
@@ -52,7 +49,6 @@ export function RegistrationDialog({
     } finally {
       setBusy(false);
     }
-    return undefined;
   }
   return (
     <dialog
@@ -74,7 +70,7 @@ export function RegistrationDialog({
             aria-label="Cerrar ventana"
             disabled={busy}
             onClick={onClose}
-            className={`${alertButton} float-right ml-3`}
+            className={`${buttonClass} float-right ml-3`}
           >
             ×
           </button>
@@ -86,7 +82,7 @@ export function RegistrationDialog({
             className="mt-2 text-sm leading-6 text-ink2"
           >
             Confirma esta acción únicamente después de completar el registro del
-            contrato en la Dirección del Trabajo.
+            documento en la Dirección del Trabajo.
           </p>
         </div>
         <dl className="space-y-2 rounded-lg border border-line bg-tint p-4 text-sm">
@@ -95,7 +91,7 @@ export function RegistrationDialog({
             <dd className="break-words font-semibold">{alert.worker.name}</dd>
           </div>
           <div>
-            <dt className="text-xs text-ink2">Contrato</dt>
+            <dt className="text-xs text-ink2">Documento</dt>
             <dd className="break-words">{alert.contractTitle}</dd>
           </div>
           <div>
@@ -115,11 +111,11 @@ export function RegistrationDialog({
             onChange={(event) => setConfirmed(event.target.checked)}
             className="mt-2 h-5 w-5 shrink-0 accent-salmon-ink"
           />
-          Confirmo que este contrato ya fue registrado en la DT.
+          Confirmo que este documento ya fue registrado en la DT.
         </label>
         <p className="text-xs leading-5 text-ink2">
-          Esta acción guarda la confirmación en el sistema; no envía el contrato
-          a la DT.
+          Esta acción guarda la confirmación en el sistema; no envía el
+          documento a la DT.
         </p>
         {error && (
           <p
@@ -135,14 +131,14 @@ export function RegistrationDialog({
 
             disabled={busy}
             onClick={onClose}
-            className={alertButton}
+            className={buttonClass}
           >
             Cancelar
           </button>
           <button
             type="submit"
             disabled={busy || !confirmed}
-            className={alertPrimary}
+            className={primaryButtonClass}
           >
             {busy ? 'Guardando…' : 'Confirmar registro'}
           </button>

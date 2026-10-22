@@ -1,7 +1,8 @@
-// Contrato interno propuesto del frontend; pendiente de confirmar con Swagger de T08.
+// DTO de T08, documentado en Swagger (/api/docs).
 export type DtAlert = {
   id: string;
   documentId: string;
+  documentType: string;
   contractTitle: string;
   worker: { id: string; name: string };
   store: { id: string; name: string };
@@ -59,6 +60,7 @@ export function parseDtAlert(value: unknown): DtAlert | null {
     !object(value) ||
     !uuid(value.id) ||
     !uuid(value.documentId) ||
+    !text(value.documentType, 40) ||
     !text(value.contractTitle) ||
     !object(value.worker) ||
     !uuid(value.worker.id) ||
@@ -79,6 +81,7 @@ export function parseDtAlert(value: unknown): DtAlert | null {
   return {
     id: value.id,
     documentId: value.documentId,
+    documentType: value.documentType,
     contractTitle: value.contractTitle,
     worker: { id: value.worker.id, name: value.worker.name },
     store: { id: value.store.id, name: value.store.name },
