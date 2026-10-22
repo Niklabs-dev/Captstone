@@ -1,3 +1,4 @@
+import { formatCalendarDate } from '../../src/lib/display-date';
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { payrollBusinessDate } from '../../src/lib/payroll';
@@ -47,15 +48,13 @@ test('API real: PDF con tildes, firma explícita, publicación persistente y adm
     .getByLabel('Trabajador', { exact: true })
     .selectOption(fixtures.worker.id);
   await dialog.getByLabel('Período', { exact: true }).fill(period);
-  await dialog
-    .getByLabel('Archivo PDF', { exact: true })
-    .setInputFiles({
-      name: 'liquidación septiembre.pdf',
-      mimeType: 'application/pdf',
-      buffer: Buffer.from(
-        `%PDF-1.7\nLiquidación real ${info.project.name} ${Date.now()}\n%%EOF`,
-      ),
-    });
+  await dialog.getByLabel('Archivo PDF', { exact: true }).setInputFiles({
+    name: 'liquidación septiembre.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(
+      `%PDF-1.7\nLiquidación real ${info.project.name} ${Date.now()}\n%%EOF`,
+    ),
+  });
   const createdResponse = page.waitForResponse(
     (response) =>
       response.url().endsWith('/api/payroll') &&
@@ -91,7 +90,7 @@ test('API real: PDF con tildes, firma explícita, publicación persistente y adm
   await dialog.getByRole('button', { name: 'Publicar liquidación' }).click();
   await expect(dialog).toHaveCount(0);
   await page.reload();
-  await expect(row).toContainText(signedAt);
+  await expect(row).toContainText(formatCalendarDate(signedAt));
   await expect(row).toContainText('Publicada');
   await expect(
     row.getByRole('button', { name: 'Publicar', exact: true }),
