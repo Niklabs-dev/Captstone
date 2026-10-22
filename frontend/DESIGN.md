@@ -215,3 +215,7 @@ Desvíos existentes que deben corregirse cuando se toque el archivo:
 - [ ] Se probaron los estados de carga, vacío y error.
 - [ ] Si se cambió una regla de este documento, `DESIGN.md` se actualizó en el
       mismo PR.
+
+## Consulta personal de liquidaciones
+
+El mockup del portal utiliza tarjetas semánticas `<ul>` para agrupar cada PDF con su período, firma, integridad y descarga. Se permite este patrón en consultas personales de solo lectura: sección con título accesible, `tablePanelClass`, separadores `border-line`, conteo y controles compartidos. Las vistas administrativas mantienen el patrón de tabla.

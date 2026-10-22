@@ -66,6 +66,10 @@ createServer(async (request, response) => {
     );
     return;
   }
+  if (url.pathname === '/payroll/mine' && request.method === 'GET') {
+    response.end(JSON.stringify({ items: [] }));
+    return;
+  }
   response.writeHead(404);
   response.end('{}');
 }).listen(3148, '127.0.0.1', () =>

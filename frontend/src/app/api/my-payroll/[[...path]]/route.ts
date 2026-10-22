@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { getSession, clearSessionCookies } from '@/lib/session';
 import { canReadOwnPayslips, payslipUuid } from '@/lib/my-payslips';
+import { ACCESS_COOKIE } from '@/lib/auth';
+import { proxyBackend, proxyError } from '@/lib/backend-proxy';
 
-// Integración pendiente con T15. No se devuelven liquidaciones simuladas en producción.
+// El propietario se obtiene exclusivamente del JWT; T15 verifica propiedad en cada operación.
 export async function GET(
   request: Request,
   context: { params: Promise<{ path?: string[] }> },
-): Promise<NextResponse> {
+): Promise<Response> {
   const headers = { 'Cache-Control': 'private, no-store' };
   const session = await getSession();
   if (!session.ok) {
@@ -40,9 +43,20 @@ export async function GET(
       { message: 'Ruta no encontrada.' },
       { status: 404, headers },
     );
-  // La API final debe obtener el trabajador del JWT y verificar propiedad/estado también al descargar.
-  return NextResponse.json(
-    { message: 'El servicio de liquidaciones aún no está disponible.' },
-    { status: 503, headers },
+  const token = (await cookies()).get(ACCESS_COOKIE)?.value;
+  if (!token) return proxyError(401);
+  const response = await proxyBackend(
+    '/payroll/mine' + (path.length ? `/${path[0]}/${path[1]}` : ''),
+    token,
+    {},
+    path[1] === 'download',
   );
+  return response.status === 401
+    ? clearSessionCookies(
+        new NextResponse(response.body, {
+          status: response.status,
+          headers: response.headers,
+        }),
+      )
+    : response;
 }

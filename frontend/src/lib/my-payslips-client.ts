@@ -1,8 +1,9 @@
 import {
-  parseOwnPayslips,
+  parseOwnPayslipCollection,
   parsePayslipIntegrity,
   payslipHash,
   type OwnPayslip,
+  type OwnPayslipCollection,
 } from './my-payslips';
 
 export class PayslipError extends Error {
@@ -66,10 +67,17 @@ export async function loadOwnPayslips(
   signal?: AbortSignal,
   fetcher: typeof fetch = fetch,
 ): Promise<OwnPayslip[]> {
+  return (await loadOwnPayslipCollection(workerId, signal, fetcher)).items;
+}
+export async function loadOwnPayslipCollection(
+  workerId: string,
+  signal?: AbortSignal,
+  fetcher: typeof fetch = fetch,
+): Promise<OwnPayslipCollection> {
   // workerId se usa solo para validar la respuesta contra la sesión, nunca se envía como parámetro.
   const response = await request('', signal, fetcher);
   const value: unknown = await response.json().catch(() => invalidContract());
-  return parseOwnPayslips(value, workerId) ?? invalidContract();
+  return parseOwnPayslipCollection(value, workerId) ?? invalidContract();
 }
 export async function downloadOwnPayslip(
   payslip: OwnPayslip,
@@ -82,6 +90,11 @@ export async function downloadOwnPayslip(
     .json()
     .catch(() => invalidContract());
   const integrity = parsePayslipIntegrity(value, payslip) ?? invalidContract();
+  if (integrity.status === 'MISSING')
+    throw new PayslipError(
+      'El archivo no está disponible; informa al administrador.',
+      404,
+    );
   if (!integrity.valid) throw alteredFile();
   const response = await request(path + '/download', signal, fetcher);
   const mime = response.headers.get('content-type')?.split(';')[0].trim();

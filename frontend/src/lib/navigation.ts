@@ -36,6 +36,11 @@ export function getNavigationItems(
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
     ];
   const home: NavigationItem = { href: '/dashboard', label: 'Inicio' };
+  if (role === 'SUPERVISOR')
+    return [
+      home,
+      { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
+    ];
   return role === 'ADMINISTRADOR'
     ? [
         home,
@@ -52,6 +57,12 @@ export function getHomePath(role: Role): HomePath {
 // Se aplica a las páginas privadas; las API conservan su autorización propia.
 export function getPageRedirect(role: Role, pathname: string): string | null {
   const inPortal = pathname === '/portal' || pathname.startsWith('/portal/');
+  if (
+    role === 'SUPERVISOR' &&
+    (pathname === '/portal/liquidaciones' ||
+      pathname.startsWith('/portal/liquidaciones/'))
+  )
+    return null;
   if (role === 'TRABAJADOR')
     return inPortal ? null : '/portal?reason=forbidden';
   if (inPortal) return '/dashboard?reason=forbidden';

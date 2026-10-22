@@ -4,6 +4,8 @@ import {
   inputClass,
   panelTitleClass,
   tablePanelClass,
+  buttonClass,
+  primaryButtonClass,
 } from '@/components/ui/styles';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
@@ -12,19 +14,15 @@ import {
   type OwnPayslip,
 } from '@/lib/my-payslips';
 import {
-  loadOwnPayslips,
+  loadOwnPayslipCollection,
   downloadOwnPayslip,
   PayslipError,
 } from '@/lib/my-payslips-client';
 
-import {
-  buttonClass as button,
-  primaryButtonClass as primary,
-} from '@/components/ui/styles';
 type State =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; items: OwnPayslip[] };
+  | { status: 'ready'; items: OwnPayslip[]; invalidCount?: number };
 export function MyPayslipsPanel({
   workerId,
 }: {
@@ -40,9 +38,10 @@ export function MyPayslipsPanel({
   const downloadController = useRef<AbortController | null>(null);
   useEffect(() => {
     const controller = new AbortController();
-    loadOwnPayslips(workerId, controller.signal).then(
-      (items) => {
-        if (!controller.signal.aborted) setState({ status: 'ready', items });
+    loadOwnPayslipCollection(workerId, controller.signal).then(
+      (collection) => {
+        if (!controller.signal.aborted)
+          setState({ status: 'ready', ...collection });
       },
       (error: unknown) => {
         if (!controller.signal.aborted)
@@ -60,16 +59,15 @@ export function MyPayslipsPanel({
       downloadController.current?.abort();
     };
   }, [workerId, retry]);
-  function reload(): undefined {
+  function reload(): void {
     if (downloadController.current) return;
     setState({ status: 'loading' });
     setFailure('');
     setNotice('');
     setVerified({});
     setRetry((current) => current + 1);
-    return undefined;
   }
-  async function download(payslip: OwnPayslip): Promise<undefined> {
+  async function download(payslip: OwnPayslip): Promise<void> {
     if (downloadController.current) return;
     const controller = new AbortController();
     downloadController.current = controller;
@@ -106,7 +104,6 @@ export function MyPayslipsPanel({
       downloadController.current = null;
       if (!controller.signal.aborted) setDownloadId('');
     }
-    return undefined;
   }
   if (state.status === 'loading')
     return (
@@ -130,7 +127,11 @@ export function MyPayslipsPanel({
           </h2>
           <p className="mt-2 text-sm leading-6 text-ink2">{state.message}</p>
         </div>
-        <button type="button" onClick={reload} className={'mt-4 ' + button}>
+        <button
+          type="button"
+          onClick={reload}
+          className={'mt-4 ' + buttonClass}
+        >
           Reintentar
         </button>
       </section>
@@ -151,7 +152,7 @@ export function MyPayslipsPanel({
           type="button"
           onClick={reload}
           disabled={Boolean(downloadId)}
-          className={button}
+          className={buttonClass}
         >
           Actualizar listado
         </button>
@@ -174,6 +175,12 @@ export function MyPayslipsPanel({
             ))}
           </select>
         </label>
+      )}
+      {Boolean(state.invalidCount) && (
+        <p role="alert" className="rounded-lg bg-warn-bg p-4 text-sm text-ink2">
+          No se pudieron verificar {state.invalidCount} liquidaciones. Se
+          muestran las válidas; informa al administrador.
+        </p>
       )}
       {failure && (
         <p
@@ -207,7 +214,7 @@ export function MyPayslipsPanel({
             <button
               type="button"
               onClick={() => setPeriod('')}
-              className={'mt-4 ' + button}
+              className={'mt-4 ' + buttonClass}
             >
               Ver todos los períodos
             </button>
@@ -232,6 +239,9 @@ export function MyPayslipsPanel({
                     {item.fileName}
                   </p>
                   <p className="mt-2 text-xs text-ink2">
+                    Fecha de firma: {item.signedAt}
+                  </p>
+                  <p className="mt-2 text-xs text-ink2">
                     Publicada el{' '}
                     {new Intl.DateTimeFormat('es-CL', {
                       dateStyle: 'short',
@@ -249,7 +259,7 @@ export function MyPayslipsPanel({
                   type="button"
                   onClick={() => download(item)}
                   disabled={Boolean(downloadId)}
-                  className={primary}
+                  className={primaryButtonClass}
                   aria-label={
                     'Descargar liquidación de ' +
                     payslipPeriodLabel(item.period)

@@ -231,4 +231,4 @@ La sesiÃ³n de usuarios se limpia mediante /admin/usuarios/session-expired cuando
 
 ## Mis liquidaciones (SPRINT-2-T17)
 
-Panel, contrato y pruebas: [docs/SPRINT-2-T17.md](docs/SPRINT-2-T17.md). Integración real con T15 pendiente.
+Panel, contrato y pruebas: [docs/SPRINT-2-T17.md](docs/SPRINT-2-T17.md). API de T15 conectada mediante BFF; contrato en Swagger (/api/docs).

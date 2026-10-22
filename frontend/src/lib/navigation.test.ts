@@ -45,7 +45,11 @@ test('Cada rol recibe únicamente enlaces permitidos y el trabajador conserva su
     for (const item of getNavigationItems(role))
       assert.equal(getPageRedirect(role, item.href), null);
     assert.equal(getNavigationItems(role)[0].href, getHomePath(role));
-    if (role !== 'ADMINISTRADOR' && role !== 'TRABAJADOR')
+    if (
+      role !== 'ADMINISTRADOR' &&
+      role !== 'TRABAJADOR' &&
+      role !== 'SUPERVISOR'
+    )
       assert.equal(getNavigationItems(role).length, 1);
   }
   assert.deepEqual(getNavigationItems(null), [
@@ -134,7 +138,7 @@ test('El módulo de SPRINT-2-T17 usa la navegación común y respeta los roles',
     title: 'Mis liquidaciones',
   });
   for (const role of ROLES) {
-    const allowed = role === 'TRABAJADOR';
+    const allowed = role === 'TRABAJADOR' || role === 'SUPERVISOR';
     assert.equal(
       getNavigationItems(role).some(
         (item) => item.href === '/portal/liquidaciones',

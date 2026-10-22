@@ -19,6 +19,7 @@ const first: OwnPayslip = {
   sha256: sha(pdf),
   status: 'PUBLISHED',
   publishedAt: '2026-10-15T12:00:00Z',
+  signedAt: '2026-10-14',
 };
 const older: OwnPayslip = {
   ...first,
@@ -79,6 +80,7 @@ async function simulate(page: Page) {
           versionId: item.versionId,
           workerId: item.workerId,
           valid: !state.mismatch,
+          status: state.mismatch ? 'ALTERED' : 'VALID',
           expectedHash: item.sha256,
           actualHash: state.mismatch ? 'b'.repeat(64) : item.sha256,
           checkedAt: '2026-10-15T13:00:00Z',
@@ -310,7 +312,7 @@ test('Sin simular liquidaciones: rol, sesión, solo lectura y rechazo de paráme
   ];
   for (const path of paths) {
     const response = await context.request.get(path);
-    expect(response.status()).toBe(503);
+    expect(response.status()).toBe(path === '/api/my-payroll' ? 200 : 404);
     expect(response.headers()['cache-control']).toContain('no-store');
   }
   expect(
@@ -328,13 +330,10 @@ test('Sin simular liquidaciones: rol, sesión, solo lectura y rechazo de paráme
     (await context.request.post('/api/my-payroll', { data: {} })).status(),
   ).toBe(405);
   await page.goto('/portal/liquidaciones');
-  await expect(page.locator('main').getByRole('alert')).toContainText(
-    'servicio de liquidaciones aún no está disponible',
-  );
+  await expect(page.getByRole('heading', { name: 'Aún no tienes liquidaciones publicadas' })).toBeVisible();
   for (const token of [
     'test-my-admin',
     'test-my-accountant',
-    'test-my-supervisor',
   ]) {
     await context.clearCookies();
     await context.addCookies([
