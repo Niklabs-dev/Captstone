@@ -8,9 +8,11 @@ retainUntil se interpreta como YYYY-MM-DD sin desplazar el día por UTC. Las ver
 
 ## Validación
 
-Lint, formato, build, unitarios, navegador aislado y NestJS/PostgreSQL reales. Evidencia al finalizar. Docker pendiente por Windows 19044 (el instalador requiere 19045 o superior). No se marca Hecho.
+Evidencia del 22-10-2026: lint, format:check y compilación de producción aprobados; 15 pruebas unitarias del módulo, 7 del proxy y 1 de fechas aprobadas. También pasaron 12 escenarios de navegador aislados en escritorio y móvil.
 
-Evidencia 22-10-2026: lint, format:check y build aprobados; 13 pruebas documentales, 5 del proxy y regresiones existentes; 12 escenarios aislados y 2 contra NestJS/PostgreSQL 16 reales. Verificados creación, nueva versión, historial inmutable, SHA-256, descarga y conservación. Docker pendiente por Windows 19044.
+Docker Compose ejecutado en un runner Linux efímero de GitHub Actions: build de backend y frontend, PostgreSQL 16, migraciones y seed reales, más 2 escenarios Playwright contra la API real (1440×900 y 390×844). Evidencia: https://github.com/Niklabs-dev/Captstone/actions/runs/39830829218
+
+El workflow conserva logs, informe JUnit, capturas y trazas en sus artifacts durante 7 días. Usa datos sintéticos, base y almacenamiento exclusivos, y elimina sus recursos al finalizar. El override docker-compose.test.yml comparte el almacenamiento de pruebas para verificar MISSING sin alterar datos reales. Docker Desktop no se instaló en este PC; la validación se completó en GitHub. No se marca Hecho sin la revisión del usuario.
 
 ## Seguimiento fuera del alcance: fecha de celebración
 
