@@ -44,8 +44,10 @@ usan con las utilidades de Tailwind (`bg-tint`, `text-ink2`, `border-line`…).
 | `muted`            | `#78645d`             | Metadatos, placeholders, IDs y textos de menor jerarquía                      |
 | `crit` / `crit-bg` | `#b4382b` / `#fbebe8` | Errores, estado «Desactivado» y acciones destructivas                         |
 | `ok` / `ok-bg`     | `#237a55` / `#e9f6f0` | Estado «Activo» y confirmaciones                                              |
-| `warn` / `warn-bg` | `#d98a1f` / `#fcf2e2` | Advertencias y plazos próximos a vencer                                       |
+| `warn` / `warn-bg` | `#8a5511` / `#fcf2e2` | Advertencias y plazos próximos a vencer                                       |
 | `info` / `info-bg` | `#35669f` / `#ecf2fa` | Información neutra (por ejemplo, el rol Contador)                             |
+
+El token global `warn` cambia de `#d98a1f` a `#8a5511` para cumplir contraste AA sobre `warn-bg`. Afecta a todas las vistas que usan este token.
 
 Reglas de color:
 
