@@ -1,0 +1,15 @@
+# Solo para desarrollo local: `docker compose up` lo combina automáticamente con
+# docker-compose.yml y publica los puertos en el host. Coolify despliega
+# únicamente docker-compose.yml, por lo que estos puertos nunca se publican en
+# el servidor (el acceso es por dominio a través de su proxy).
+services:
+  db:
+    # 5433 en el host para no chocar con un PostgreSQL local en 5432; dentro de la red Docker la BD usa 5432
+    ports:
+      - "${DB_PORT_HOST:-5433}:5432"
+  backend:
+    ports:
+      - "3001:3001"
+  frontend:
+    ports:
+      - "3000:3000"
