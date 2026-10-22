@@ -30,7 +30,8 @@ jobs:
         working-directory: Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación
     env:
       COMPOSE_PROJECT_NAME: sprint2-ci
-      COMPOSE_FILE: docker-compose.yml:docker-compose.test.yml
+      # El override local publica 3000/3001/5433 en el runner para curl, Playwright y Prisma
+      COMPOSE_FILE: docker-compose.yml:docker-compose.override.yml:docker-compose.test.yml
       DB_PASSWORD: ci-disposable-password
       DATABASE_URL: postgresql://postgres:ci-disposable-password@127.0.0.1:5433/subway_gestion
       ADMIN_PASSWORD: ci-admin-test-only-2026

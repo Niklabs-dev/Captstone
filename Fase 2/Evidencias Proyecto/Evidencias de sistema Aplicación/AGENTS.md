@@ -20,7 +20,8 @@ Sistema web de gestión interna para el franquiciado de Subway **"Moi-food"** (3
 Evidencias de sistema Aplicación/
 ├── backend/            # API NestJS 12 (ESM, TypeScript estricto, Vitest)
 ├── frontend/           # Next.js 16 (App Router, React 19, Tailwind 4, src/)
-├── docker-compose.yml  # PostgreSQL + backend + frontend
+├── docker-compose.yml  # PostgreSQL + backend + frontend (sin puertos publicados, apto para Coolify)
+├── docker-compose.override.yml  # solo local: publica 5433, 3001 y 3000 en el host
 └── AGENTS.md           # este archivo
 ```
 

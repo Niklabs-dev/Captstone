@@ -35,7 +35,13 @@ espera al anterior.
 | `backend` | API NestJS en `http://localhost:3001`, con los archivos del gestor documental en el volumen `documents_data` | No |
 | `frontend` | Web Next.js en `http://localhost:3000` | No |
 
-Que `subway_migrate` y `subway_seed` terminen con código `0` es lo esperado.
+Que los contenedores de `migrate` y `seed` terminen con código `0` es lo esperado.
+
+Los puertos `5433`, `3001` y `3000` del host los publica
+`docker-compose.override.yml`, que Compose combina automáticamente con
+`docker-compose.yml` al usar `docker compose up` sin `-f`. El
+`docker-compose.yml` por sí solo no publica puertos (solo `expose`), porque es
+el que despliega Coolify (ver [Despliegue con Coolify](#despliegue-con-coolify)).
 
 ### Verificar que quedó funcionando
 
@@ -63,7 +69,7 @@ archivo `.env` junto a `docker-compose.yml` (nunca se commitea):
 | Variable | Por defecto | Uso |
 | --- | --- | --- |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | `postgres` / `cambiar-en-produccion` / `subway_gestion` | Credenciales de PostgreSQL |
-| `DB_PORT_HOST` | `5433` | Puerto de PostgreSQL en el host (evita chocar con un PostgreSQL local en `5432`) |
+| `DB_PORT_HOST` | `5433` | Puerto de PostgreSQL en el host, solo en local vía `docker-compose.override.yml` (evita chocar con un PostgreSQL local en `5432`) |
 | `JWT_SECRET` | `dev-secret-cambiar-en-produccion` | Firma de los access tokens |
 | `JWT_EXPIRES_IN` / `JWT_REFRESH_EXPIRES_IN` | `1d` / `7d` | Vida del access token y del refresh token |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@moi-food.cl` / `admin-cambiar-en-produccion` | Administrador creado por el seed |
@@ -113,9 +119,54 @@ docker run --rm -v <proyecto>_documents_data:/data -v "$PWD":/backup:ro alpine \
   tar xzf /backup/documentos-AAAA-MM-DD.tar.gz -C /data
 ```
 
-En Coolify, los volúmenes nombrados del `docker-compose.yml` se crean igual;
+En Coolify, los volúmenes nombrados del `docker-compose.yml` se crean igual (con
+el identificador del recurso como prefijo, así que pruebas y producción no los
+comparten);
 no usar un *bind mount* a una carpeta del host sin darle permisos de escritura
 al usuario `nestjs` del contenedor, porque el backend no corre como root.
+
+## Despliegue con Coolify
+
+Coolify despliega el `docker-compose.yml` de la rama configurada en cada
+recurso. El archivo está preparado para eso:
+
+- **Sin `ports`:** los servicios solo declaran `expose`. Un puerto publicado se
+  salta el proxy de Coolify y dejaría la base de datos o la API accesibles
+  directamente en la IP del servidor. Solo el frontend recibe dominio; el
+  navegador nunca llama al backend directamente (Next.js lo consulta por la red
+  interna en `http://backend:3001`).
+- **Sin `container_name`:** Coolify antepone el identificador del recurso a
+  contenedores y volúmenes, así que el entorno de pruebas y el de producción
+  conviven en el mismo servidor con base de datos y documentos propios.
+- `docker-compose.override.yml` **no se usa** en Coolify: solo aplica al
+  `docker compose up` local.
+
+| Entorno | Rama | Datos |
+| --- | --- | --- |
+| Pruebas (Sprint Review con el cliente) | `test` | Base y volumen de documentos propios, solo datos sintéticos; **nunca datos reales** |
+| Producción | `main` | Datos reales de Moi-food |
+
+### Configurar el recurso de pruebas
+
+1. En Coolify: **New Resource → Docker Compose** desde el repositorio de GitHub,
+   rama `test`, *Base Directory* `/Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación`
+   y *Docker Compose Location* `/docker-compose.yml`.
+2. En **Domains**, asignar el dominio de pruebas **solo al servicio `frontend`**,
+   con el puerto interno: `https://<dominio-de-pruebas>:3000`. El resto de los
+   servicios queda sin dominio.
+3. En **Environment Variables**, reemplazar los valores por defecto de
+   `DB_PASSWORD`, `JWT_SECRET` y `ADMIN_PASSWORD` por secretos propios del
+   entorno (distintos de los de producción).
+4. Activar el despliegue automático (*Auto Deploy* con la GitHub App o el
+   webhook) para que cada push a `test` despliegue el incremento.
+
+Para llevar cambios al entorno de pruebas se integra `main` en `test`
+(`git checkout test && git merge --ff-only main && git push`).
+
+`migrate` y `seed` terminan tras aplicar migraciones y datos base. Si Coolify
+muestra el recurso como *degraded* por esos contenedores detenidos, es
+esperable: el estado real lo dan `db`, `backend` y `frontend`, que tienen
+`healthcheck`.
 
 ## Opción 2: desarrollo local (sin Docker para la app)
 
@@ -166,7 +217,7 @@ TEST_DATABASE_URL="postgresql://postgres:cambiar-en-produccion@localhost:5433/su
 | Síntoma | Causa y solución |
 | --- | --- |
 | `port is already allocated` en `5433`, `3000` o `3001` | Otro proceso usa el puerto. Detenerlo, o cambiar `DB_PORT_HOST` para la base de datos. |
-| `subway_migrate` termina con error | Revisar `docker compose logs migrate`. Si la base local quedó en un estado inconsistente: `docker compose down -v` y volver a levantar (borra los datos). |
+| El contenedor de `migrate` termina con error | Revisar `docker compose logs migrate`. Si la base local quedó en un estado inconsistente: `docker compose down -v` y volver a levantar (borra los datos). |
 | El backend no puede guardar archivos (`EACCES`) | El volumen o carpeta de `DOCUMENTS_STORAGE_PATH` no es escribible por el usuario `nestjs`. Con el volumen nombrado de Compose no ocurre; si se usa un *bind mount*, darle permisos a la carpeta del host. |
 | El backend no conecta a la base desde `npm run start:dev` | `DATABASE_URL` en `backend/.env` debe apuntar a `localhost:5433`, no a `db:5432` (ese host solo existe dentro de la red Docker). |
 | El frontend no llega a la API tras cambiar `NEXT_PUBLIC_API_URL` | Es una variable de compilación: reconstruir con `docker compose up --build frontend`. |
