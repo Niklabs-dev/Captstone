@@ -111,3 +111,41 @@ test('Falla de forma controlada ante red caída, JSON inválido y UUID malformad
   assert.equal((await proxyBackend('/dt-alerts', 'test-only')).status, 502);
   assert.equal(isProxyUuid('../auth'), false);
 });
+
+test('El proxy distingue duplicados sin exponer los identificadores del backend', async (context) => {
+  context.mock.method(globalThis, 'fetch', async () =>
+    Response.json(
+      {
+        message:
+          'Este archivo ya está registrado (documento 123e4567-e89b-42d3-a456-426614174000, versión 2)',
+      },
+      { status: 409 },
+    ),
+  );
+  const response = await proxyBackend('/documents', 'test-only');
+  const body = await response.json();
+  assert.equal(body.code, 'DUPLICATE_FILE');
+  assert.ok(!JSON.stringify(body).includes('123e4567'));
+});
+test('El proxy distingue liquidación existente y no clasifica mensajes internos', async (context) => {
+  const mocked = context.mock.method(globalThis, 'fetch', async () =>
+    Response.json(
+      {
+        message:
+          'Ya existe una liquidación de este trabajador para el período o el archivo ya está registrado',
+      },
+      { status: 409 },
+    ),
+  );
+  assert.equal(
+    (await (await proxyBackend('/payroll', 'test-only')).json()).code,
+    'PAYROLL_ALREADY_EXISTS',
+  );
+  mocked.mock.mockImplementation(async () =>
+    Response.json({ message: 'SQL secreto' }, { status: 409 }),
+  );
+  assert.equal(
+    (await (await proxyBackend('/payroll', 'test-only')).json()).code,
+    undefined,
+  );
+});

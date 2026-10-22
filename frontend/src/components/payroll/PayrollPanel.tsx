@@ -1,4 +1,5 @@
 'use client';
+import { formatCalendarDate, formatChileDate } from '@/lib/display-date';
 import {
   tableHeaderClass,
   tableDescriptionClass,
@@ -18,6 +19,7 @@ import {
 import { useEffect, useState, type ReactElement } from 'react';
 import {
   filterPayroll,
+  payrollBusinessDate,
   payrollPeriodLabel,
   type Payroll,
   type PayrollCollection,
@@ -205,7 +207,7 @@ export function PayrollPanel({
             <input
               type="month"
               min="1900-01"
-              max="2199-12"
+              max={payrollBusinessDate().slice(0, 7)}
               value={period}
               onChange={(event) => setPeriod(event.target.value)}
               className={`${inputClass} mt-2`}
@@ -333,8 +335,11 @@ export function PayrollPanel({
                             <dt>Fecha de carga</dt>
                             <dd>
                               {new Intl.DateTimeFormat('es-CL', {
-                                dateStyle: 'short',
-                                timeStyle: 'short',
+                                day: '2-digit',
+                                month: '2-digit',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
                                 timeZone: 'America/Santiago',
                               }).format(new Date(item.createdAt))}
                             </dd>
@@ -342,18 +347,13 @@ export function PayrollPanel({
                           {item.publishedAt && (
                             <div>
                               <dt>Fecha de publicación</dt>
-                              <dd>
-                                {new Intl.DateTimeFormat('es-CL', {
-                                  dateStyle: 'short',
-                                  timeZone: 'America/Santiago',
-                                }).format(new Date(item.publishedAt))}
-                              </dd>
+                              <dd>{formatChileDate(item.publishedAt)}</dd>
                             </div>
                           )}
                           {item.signedAt && (
                             <div>
                               <dt>Fecha de firma</dt>
-                              <dd>{item.signedAt}</dd>
+                              <dd>{formatCalendarDate(item.signedAt)}</dd>
                             </div>
                           )}
                         </dl>
@@ -377,7 +377,9 @@ export function PayrollPanel({
                       </p>
                     </td>
                     <td className={tableCellClass}>
-                      {item.signedAt ?? 'Pendiente de firma'}
+                      {item.signedAt
+                        ? formatCalendarDate(item.signedAt)
+                        : 'Pendiente de firma'}
                     </td>
                     <td className={tableCellClass}>
                       {canManage && item.status === 'PENDING_SIGNATURE' && (

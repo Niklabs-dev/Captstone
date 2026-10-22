@@ -338,3 +338,36 @@ test('Controla fallo de red y cancelación de la consulta', async () => {
     (error: unknown) => error instanceof Error && error.name === 'AbortError',
   );
 });
+
+test('La carga rechaza meses futuros según Chile, incluso cerca del cambio de mes', () => {
+  const empty = { ...collection, items: [] };
+  const now = new Date('2026-11-01T01:00:00Z');
+  assert.equal(
+    validatePayrollUpload(person.id, '2026-10', pdf, empty, now),
+    null,
+  );
+  assert.match(
+    validatePayrollUpload(person.id, '2026-11', pdf, empty, now) ?? '',
+    /posterior al mes actual/,
+  );
+});
+test('La carga distingue archivo repetido de conflicto de publicación y no reintenta', async () => {
+  const form = new FormData();
+  form.set('workerId', person.id);
+  form.set('period', '2026-09');
+  form.set('file', pdf);
+  for (const [code, text] of [
+    ['DUPLICATE_FILE', /Este archivo ya está registrado/],
+    ['PAYROLL_ALREADY_EXISTS', /Ya existe una liquidación/],
+  ] as const) {
+    await assert.rejects(
+      uploadPayroll(form, pending.sha256, async () =>
+        Response.json({ code }, { status: 409 }),
+      ),
+      (error) =>
+        error instanceof PayrollError &&
+        text.test(error.message) &&
+        !error.message.includes('cambió'),
+    );
+  }
+});
