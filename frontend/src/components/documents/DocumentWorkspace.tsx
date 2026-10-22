@@ -18,7 +18,6 @@ import {
   DOCUMENT_TYPES,
   DOCUMENT_LABELS,
   documentDate,
-  documentDownloadName,
   type DocumentCollection,
   type DocumentVersion,
   type VersionHistory,
@@ -108,11 +107,11 @@ export function DocumentWorkspace({
     onBusy(true);
     try {
       if (download) {
-        const blob = await downloadDocument(version);
+        const { blob, fileName } = await downloadDocument(version);
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = documentDownloadName(version.fileName);
+        link.download = fileName;
         document.body.append(link);
         link.click();
         link.remove();
@@ -447,7 +446,10 @@ export function DocumentWorkspace({
               <strong className="block text-ink">
                 Eliminación bloqueada por conservación
               </strong>
-              {selected.deletionReason}
+              {selected.deletionReason?.replace(
+                /\b\d{4}-\d{2}-\d{2}\b/g,
+                (date) => documentDate(date),
+              )}
             </p>
           )}
           {historyBusy && (
