@@ -32,7 +32,7 @@ export default async function WorkerPortalPage({
           aria-labelledby="welcome-title"
           className="rounded-[14px] border border-line bg-bg p-6"
         >
-          <p className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-salmon-ink">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-salmon-ink">
             Bienvenido a MoiFood
           </p>
           <h2 id="welcome-title" className="mt-2 text-xl font-bold">

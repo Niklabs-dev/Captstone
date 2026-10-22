@@ -53,7 +53,7 @@ ni contraseñas de demostración al frontend.
 El trabajador que intenta entrar al dashboard, administración, documentos,
 propinas, ventas, caja, inventario, usuarios o auditoría vuelve a
 `/portal?reason=forbidden`. Sus subrutas tienen la misma protección.
-El portal es exclusivo del trabajador; los otros roles regresan al dashboard.
+El inicio del portal es exclusivo del trabajador. Los supervisores también pueden acceder a /portal/liquidaciones para consultar únicamente sus documentos publicados.
 Las páginas `/admin/*` están reservadas al administrador.
 La política se centraliza en `src/lib/navigation.ts`; login, renovación,
 inicio, login con sesión abierta y proxy usan el rol verificado por NestJS.
@@ -240,3 +240,7 @@ Panel y pruebas: [docs/SPRINT-2-T11.md](docs/SPRINT-2-T11.md). Conecta con la AP
 ## Gestión de liquidaciones (SPRINT-2-T16)
 
 Panel, permisos y pruebas: [docs/SPRINT-2-T16.md](docs/SPRINT-2-T16.md). API de T13/T14 conectada mediante BFF; contrato en Swagger (/api/docs).
+
+## Mis liquidaciones (SPRINT-2-T17)
+
+Panel, contrato y pruebas: [docs/SPRINT-2-T17.md](docs/SPRINT-2-T17.md). API de T15 conectada mediante BFF; contrato en Swagger (/api/docs).
