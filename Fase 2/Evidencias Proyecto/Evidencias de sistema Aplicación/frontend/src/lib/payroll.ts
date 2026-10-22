@@ -196,6 +196,7 @@ export function validatePayrollUpload(
   period: string,
   file: Pick<File, 'name' | 'type' | 'size'> | null,
   collection: PayrollCollection,
+  now = new Date(),
 ): string | null {
   if (!collection.policy.canUpload)
     return 'La carga no está habilitada para tu cuenta.';
@@ -207,6 +208,8 @@ export function validatePayrollUpload(
     return 'Selecciona un trabajador activo.';
   if (!isPayrollPeriod(period))
     return 'Selecciona un período válido (año y mes).';
+  if (period > payrollBusinessDate(now).slice(0, 7))
+    return 'El período no puede ser posterior al mes actual (hora de Chile).';
   if (
     collection.items.some(
       (item) => item.worker.id === workerId && item.period === period,

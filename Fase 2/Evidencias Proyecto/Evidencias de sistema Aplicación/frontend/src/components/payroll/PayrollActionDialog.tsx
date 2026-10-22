@@ -170,15 +170,19 @@ export function PayrollActionDialog({
             <label className={labelClass}>
               Período
               <input
+                aria-describedby="payroll-period-help"
                 name="period"
                 type="month"
                 min="1900-01"
-                max="2199-12"
+                max={payrollBusinessDate().slice(0, 7)}
                 required
                 disabled={busy}
                 className={`${inputClass} mt-2`}
               />
             </label>
+            <p id="payroll-period-help" className="text-xs text-ink2">
+              Selecciona el mes actual o uno anterior (hora de Chile).
+            </p>
             <label className={labelClass}>
               Archivo PDF
               <input

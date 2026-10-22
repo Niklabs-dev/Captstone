@@ -37,10 +37,23 @@ async function request(
         : AbortSignal.timeout(15000),
     });
     if (!response.ok) {
+      const error: unknown = await response.json().catch(() => null);
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? error.code
+          : null;
+      const conflict =
+        code === 'DUPLICATE_FILE'
+          ? 'Este archivo ya está registrado. Selecciona otro archivo.'
+          : code === 'PAYROLL_ALREADY_EXISTS' ||
+              (path === '' && init.method === 'POST')
+            ? 'Ya existe una liquidación para ese trabajador y período o el archivo ya está registrado. Revisa el listado y selecciona otro archivo si corresponde.'
+            : 'La liquidación cambió desde tu consulta. Actualiza el listado antes de publicarla.';
       const messages: Record<number, string> = {
         401: 'Tu sesión venció. Vuelve a iniciar sesión.',
         403: 'No tienes permiso para realizar esta operación.',
-        409: 'La liquidación cambió o ya existe para ese período. Actualiza el listado antes de continuar.',
+        400: 'Revisa el trabajador, período y archivo. El período no puede ser posterior al mes actual (hora de Chile).',
+        409: conflict,
         413: 'El archivo supera el tamaño permitido.',
         422: 'Revisa el trabajador, período y archivo seleccionado.',
         503: 'El servicio de liquidaciones aún no está disponible. Intenta más tarde.',
@@ -78,6 +91,12 @@ export async function uploadPayroll(
   expectedHash: string,
   fetcher: typeof fetch = fetch,
 ): Promise<Payroll> {
+  const period = form.get('period');
+  if (typeof period === 'string' && period > payrollBusinessDate().slice(0, 7))
+    throw new PayrollError(
+      'El período no puede ser posterior al mes actual (hora de Chile).',
+      400,
+    );
   const result = parsePayroll(
     await request('', { method: 'POST', body: form }, fetcher),
   );
