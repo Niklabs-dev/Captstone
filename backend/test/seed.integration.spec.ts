@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import {
   BASE_ROLES,
+  BASE_STORES,
   DOCUMENT_TYPES,
   seedDatabase,
   type SeedOptions,
@@ -136,6 +137,45 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
       expect(conRegistro).toEqual(['ANEXO', 'CONTRATO', 'FINIQUITO']);
       // Los pactos laborales (E1-H3) existen como tipo de documento.
       expect(tipos.map((t) => t.code)).toContain('PACTO');
+    });
+  });
+
+  it('crea los tres locales de Moi-food con su UUID fijo (SPRINT-2-T26)', async () => {
+    await withinRollback(async (tx) => {
+      const resultado = await seedDatabase(tx, opciones);
+      expect(resultado.storeIds).toEqual(BASE_STORES.map((s) => s.id));
+
+      for (const esperado of BASE_STORES) {
+        const local = await tx.store.findUniqueOrThrow({
+          where: { id: esperado.id },
+        });
+        expect(local.name).toBe(esperado.name);
+        expect(local.city).toBe(esperado.city);
+        expect(local.address).toBe(esperado.address);
+        expect(local.isActive).toBe(true);
+      }
+    });
+  });
+
+  it('no duplica los locales y restaura sus datos si cambiaron', async () => {
+    await withinRollback(async (tx) => {
+      await seedDatabase(tx, opciones);
+      await tx.store.update({
+        where: { id: BASE_STORES[0].id },
+        data: { name: 'Nombre antiguo', isActive: false },
+      });
+
+      await seedDatabase(tx, opciones);
+
+      const locales = await tx.store.findMany({
+        where: { id: { in: BASE_STORES.map((s) => s.id) } },
+      });
+      expect(locales).toHaveLength(BASE_STORES.length);
+      const restaurado = await tx.store.findUniqueOrThrow({
+        where: { id: BASE_STORES[0].id },
+      });
+      expect(restaurado.name).toBe(BASE_STORES[0].name);
+      expect(restaurado.isActive).toBe(true);
     });
   });
 

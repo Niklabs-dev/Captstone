@@ -31,7 +31,7 @@ espera al anterior.
 | --- | --- | --- |
 | `db` | PostgreSQL con volumen persistente `postgres_data` | No (queda corriendo) |
 | `migrate` | `prisma migrate deploy`: aplica las migraciones pendientes | Sí |
-| `seed` | `prisma db seed`: roles, tipos de documento y administrador inicial (idempotente) | Sí |
+| `seed` | `prisma db seed`: roles, tipos de documento, los tres locales (Santa María, Ugalde y Calera) y administrador inicial (idempotente) | Sí |
 | `backend` | API NestJS en `http://localhost:3001`, con los archivos del gestor documental en el volumen `documents_data` | No |
 | `frontend` | Web Next.js en `http://localhost:3000` | No |
 
