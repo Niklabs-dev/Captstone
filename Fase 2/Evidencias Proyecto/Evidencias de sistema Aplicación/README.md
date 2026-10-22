@@ -149,8 +149,11 @@ recurso. El archivo está preparado para eso:
 ### Configurar el recurso de pruebas
 
 1. En Coolify: **New Resource → Docker Compose** desde el repositorio de GitHub,
-   rama `test`, *Base Directory* `/Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación`
-   y *Docker Compose Location* `/docker-compose.yml`.
+   rama `test`, *Base Directory* `/app` y *Docker Compose Location*
+   `/docker-compose.yml`. `app` es un enlace simbólico en la raíz del
+   repositorio hacia esta carpeta: Coolify no encuentra el compose si el
+   *Base Directory* tiene espacios o tildes, y así las carpetas de evidencias
+   se mantienen sin cambios.
 2. En **Domains**, asignar el dominio de pruebas **solo al servicio `frontend`**,
    con el puerto interno: `https://<dominio-de-pruebas>:3000`. El resto de los
    servicios queda sin dominio.
