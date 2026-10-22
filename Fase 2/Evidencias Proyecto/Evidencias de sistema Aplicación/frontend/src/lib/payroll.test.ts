@@ -10,6 +10,7 @@ import {
   payrollFileHash,
   filterPayroll,
   payrollPeriodLabel,
+  validatePayrollSignedAt,
   type Payroll,
   type PayrollCollection,
 } from './payroll';
@@ -40,6 +41,7 @@ const pending: Payroll = {
   sha256: 'a'.repeat(64),
   createdAt: '2026-10-14T12:00:00Z',
   publishedAt: null,
+  signedAt: null,
   status: 'PENDING_SIGNATURE',
   revision: 'revision-1',
   canPublish: true,
@@ -48,6 +50,7 @@ const published: Payroll = {
   ...pending,
   status: 'PUBLISHED',
   publishedAt: '2026-10-14T13:00:00Z',
+  signedAt: '2026-10-14',
   revision: 'revision-2',
   canPublish: false,
 };
@@ -60,6 +63,14 @@ const collection: PayrollCollection = {
     canUpload: true,
   },
 };
+
+test('La firma exige una fecha real entre el día de carga y hoy en Chile', () => {
+  const now = new Date('2026-10-16T12:00:00Z');
+  assert.equal(validatePayrollSignedAt('2026-10-14', pending, now), null);
+  assert.equal(validatePayrollSignedAt('2026-10-16', pending, now), null);
+  for (const date of ['2026-10-13', '2026-10-17', '2026-02-30', ''])
+    assert.ok(validatePayrollSignedAt(date, pending, now));
+});
 test('Permisos: contador gestiona, administrador consulta y los otros roles no acceden', () => {
   assert.equal(canManagePayroll('CONTADOR'), true);
   assert.equal(canReadPayroll('CONTADOR'), true);
@@ -95,7 +106,6 @@ test('Proyecta solo metadatos necesarios y valida estados inmutables', () => {
     { sha256: 'short' },
     { createdAt: '2026-02-30T12:00:00Z' },
     { revision: '' },
-    { fileName: 'file.exe' },
     { publishedAt: '2026-10-14T12:00:00Z' },
     { status: 'UNKNOWN' },
   ])
@@ -224,7 +234,6 @@ test('Carga multipart vincula trabajador, período, archivo, tamaño y hash de l
     { period: '2026-10' },
     { worker: { ...person, id: '31000000-0000-4000-8000-000000000216' } },
     { size: pdf.size + 1 },
-    { fileName: 'other.pdf' },
     { ...published },
   ])
     await assert.rejects(
@@ -234,18 +243,42 @@ test('Carga multipart vincula trabajador, período, archivo, tamaño y hash de l
       (error: unknown) => error instanceof PayrollError && error.status === 502,
     );
 });
+
+test('Acepta el nombre saneado y conserva liquidaciones válidas ante un registro inválido', async () => {
+  const longName = 'á'.repeat(251) + '.pdf';
+  assert.ok(parsePayroll({ ...pending, fileName: longName }));
+  assert.equal(parsePayroll({ ...pending, fileName: 'x'.repeat(256) }), null);
+  const parsed = parsePayrollCollection({
+    ...collection,
+    items: [pending, { ...pending, id: 'inválido' }],
+  });
+  assert.deepEqual(parsed?.items, [pending]);
+  assert.equal(parsed?.invalidCount, 1);
+  const form = new FormData();
+  form.set('workerId', person.id);
+  form.set('period', pending.period);
+  form.set('file', pdf);
+  const uploaded = await uploadPayroll(form, pending.sha256, async () =>
+    Response.json({ ...pending, fileName: 'liquidación septiembre.pdf' }),
+  );
+  assert.equal(uploaded.fileName, 'liquidación septiembre.pdf');
+});
 test('Solo publica pendientes habilitadas y exige mismo contenido, trabajador y período', async () => {
   const fetcher: typeof fetch = async (url, init) => {
     assert.equal(url, '/api/payroll/' + pending.id + '/publish');
     assert.deepEqual(JSON.parse(String(init?.body)), {
       revision: pending.revision,
+      signedAt: '2026-10-14',
     });
     return Response.json(published);
   };
-  assert.deepEqual(await publishPayroll(pending, fetcher), published);
+  assert.deepEqual(
+    await publishPayroll(pending, '2026-10-14', fetcher),
+    published,
+  );
   let calls = 0;
   await assert.rejects(
-    publishPayroll(published, async () => {
+    publishPayroll(published, '2026-10-14', async () => {
       calls++;
       return Response.json(published);
     }),
@@ -259,7 +292,7 @@ test('Solo publica pendientes habilitadas y exige mismo contenido, trabajador y 
     { ...pending },
   ])
     await assert.rejects(
-      publishPayroll(pending, async () =>
+      publishPayroll(pending, '2026-10-14', async () =>
         Response.json({ ...published, ...patch }),
       ),
       (error: unknown) => error instanceof PayrollError && error.status === 502,

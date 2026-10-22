@@ -38,6 +38,7 @@ const pending: Payroll = {
   sha256: hash,
   createdAt: '2026-10-14T12:00:00Z',
   publishedAt: null,
+  signedAt: null,
   status: 'PENDING_SIGNATURE',
   revision: 'revision-1',
   canPublish: true,
@@ -53,6 +54,7 @@ const published: Payroll = {
   period: '2026-08',
   status: 'PUBLISHED',
   publishedAt: '2026-10-14T13:00:00Z',
+ signedAt: '2026-10-14',
   canPublish: false,
 };
 async function simulate(page: Page) {
@@ -91,11 +93,12 @@ async function simulate(page: Page) {
           (item) => item.id === url.pathname.split('/')[3],
         );
         if (!item) throw new Error('Registro de prueba no encontrado.');
-        expect(request.postDataJSON()).toEqual({ revision: item.revision });
+        expect(request.postDataJSON()).toEqual({ revision: item.revision, signedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
         const result: Payroll = {
           ...item,
           status: 'PUBLISHED',
           publishedAt: '2026-10-14T15:00:00Z',
+ signedAt: request.postDataJSON().signedAt,
           revision: 'revision-2',
           canPublish: false,
           sha256: state.wrongPublication ? 'b'.repeat(64) : item.sha256,
@@ -171,8 +174,8 @@ test('Listado, estados, metadatos y filtros por local, período y estado en escr
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/liquidaciones');
-  const list = page.getByRole('list', { name: 'Liquidaciones', exact: true });
-  await expect(list.getByRole('listitem')).toHaveCount(3);
+  const list = page.locator('tbody');
+  await expect(list.getByRole('row')).toHaveCount(3);
   await page.getByLabel('Local', { exact: true }).selectOption(diego.store.id);
   await expect(list.getByRole('heading')).toHaveText('Diego Prueba');
   await page.getByLabel('Período', { exact: true }).fill('2026-08');
@@ -181,7 +184,7 @@ test('Listado, estados, metadatos y filtros por local, período y estado en escr
   ).toBeVisible();
   await page.getByRole('button', { name: 'Limpiar filtros' }).click();
   await page.getByLabel('Estado', { exact: true }).selectOption('PUBLISHED');
-  await expect(list.getByRole('listitem')).toHaveCount(1);
+  await expect(list.getByRole('row')).toHaveCount(1);
   await expect(
     list.getByRole('button', { name: 'Publicar', exact: true }),
   ).toHaveCount(0);
@@ -266,8 +269,8 @@ test('Carga valida cabecera PDF, trabajador activo y duplicados; guarda solo pen
   await expect(page.getByRole('status')).toContainText('pendiente de firma');
   await expect(
     page
-      .getByRole('list', { name: 'Liquidaciones', exact: true })
-      .getByRole('listitem'),
+      .locator('tbody')
+      .getByRole('row'),
   ).toHaveCount(4);
   expect(state.uploads).toBe(1);
 });
@@ -378,7 +381,7 @@ test('BFF autoriza lectura/escritura por rol y origen; administrador solo consul
   context,
   baseURL,
 }) => {
-  expect((await context.request.get('/api/payroll')).status()).toBe(503);
+  expect((await context.request.get('/api/payroll')).status()).toBe(200);
   expect(
     (
       await context.request.post('/api/payroll', {
@@ -386,7 +389,7 @@ test('BFF autoriza lectura/escritura por rol y origen; administrador solo consul
         data: {},
       })
     ).status(),
-  ).toBe(503);
+  ).toBe(400);
   expect(
     (
       await context.request.post('/api/payroll/x/publish', {
@@ -398,9 +401,7 @@ test('BFF autoriza lectura/escritura por rol y origen; administrador solo consul
   expect((await context.request.delete('/api/payroll/x')).status()).toBe(405);
   await page.goto('/dashboard');
   await page.getByRole('link', { name: 'Abrir liquidaciones' }).click();
-  await expect(page.locator('main').getByRole('alert')).toContainText(
-    'servicio de liquidaciones aún no está disponible',
-  );
+  await expect(page.getByRole('heading', { name: 'Aún no hay liquidaciones' })).toBeVisible();
   await context.clearCookies();
   await context.addCookies([
     {
@@ -410,7 +411,7 @@ test('BFF autoriza lectura/escritura por rol y origen; administrador solo consul
       httpOnly: true,
     },
   ]);
-  expect((await context.request.get('/api/payroll')).status()).toBe(503);
+  expect((await context.request.get('/api/payroll')).status()).toBe(200);
   for (const path of [
     '/api/payroll',
     '/api/payroll/' + pending.id + '/publish',
@@ -428,8 +429,8 @@ test('BFF autoriza lectura/escritura por rol y origen; administrador solo consul
   await expect(page.getByText(/Acceso de consulta/)).toBeVisible();
   await expect(
     page
-      .getByRole('list', { name: 'Liquidaciones', exact: true })
-      .getByRole('listitem'),
+      .locator('tbody')
+      .getByRole('row'),
   ).toHaveCount(3);
   await expect(
     page.getByRole('button', { name: 'Subir liquidación' }),

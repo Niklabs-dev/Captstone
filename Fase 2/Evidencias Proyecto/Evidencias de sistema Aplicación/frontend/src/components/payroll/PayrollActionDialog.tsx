@@ -1,5 +1,10 @@
 'use client';
-import { labelClass } from '@/components/ui/styles';
+import {
+  labelClass,
+  buttonClass,
+  inputClass,
+  primaryButtonClass,
+} from '@/components/ui/styles';
 import {
   useEffect,
   useRef,
@@ -10,16 +15,13 @@ import {
 import {
   payrollFileHash,
   payrollPeriodLabel,
+  payrollBusinessDate,
+  validatePayrollSignedAt,
   validatePayrollUpload,
   type Payroll,
   type PayrollCollection,
 } from '@/lib/payroll';
 import { publishPayroll, uploadPayroll } from '@/lib/payroll-client';
-import {
-  buttonClass as payrollButton,
-  inputClass as payrollInput,
-  primaryButtonClass as payrollPrimary,
-} from '@/components/ui/styles';
 
 export type PayrollAction =
   | { kind: 'upload'; collection: PayrollCollection }
@@ -30,8 +32,8 @@ export function PayrollActionDialog({
   onSaved,
 }: {
   action: PayrollAction;
-  onClose: () => undefined;
-  onSaved: (record: Payroll, published: boolean) => undefined;
+  onClose: () => void;
+  onSaved: (record: Payroll, published: boolean) => void;
 }): ReactElement {
   const dialog = useRef<HTMLDialogElement>(null);
   const [busy, setBusy] = useState(false);
@@ -46,7 +48,7 @@ export function PayrollActionDialog({
       if (focus instanceof HTMLElement) focus.focus();
     };
   }, []);
-  async function submit(event: FormEvent<HTMLFormElement>): Promise<undefined> {
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (busy) return;
     const form = new FormData(event.currentTarget);
@@ -64,7 +66,17 @@ export function PayrollActionDialog({
         setError(message);
         return;
       }
-    } else if (!confirmed) return;
+    } else {
+      if (!confirmed) return;
+      const message = validatePayrollSignedAt(
+        String(form.get('signedAt')),
+        action.record,
+      );
+      if (message) {
+        setError(message);
+        return;
+      }
+    }
     setError('');
     setBusy(true);
     try {
@@ -84,7 +96,10 @@ export function PayrollActionDialog({
           );
         onSaved(result, false);
       } else if (action.kind === 'publish')
-        onSaved(await publishPayroll(action.record), true);
+        onSaved(
+          await publishPayroll(action.record, String(form.get('signedAt'))),
+          true,
+        );
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -94,7 +109,6 @@ export function PayrollActionDialog({
     } finally {
       setBusy(false);
     }
-    return undefined;
   }
   return (
     <dialog
@@ -116,7 +130,7 @@ export function PayrollActionDialog({
           aria-label="Cerrar ventana"
           disabled={busy}
           onClick={onClose}
-          className={`${payrollButton} float-right ml-3`}
+          className={`${buttonClass} float-right ml-3`}
         >
           ×
         </button>
@@ -139,7 +153,7 @@ export function PayrollActionDialog({
                 required
                 defaultValue=""
                 disabled={busy}
-                className={`${payrollInput} mt-2`}
+                className={`${inputClass} mt-2`}
               >
                 <option value="" disabled>
                   Selecciona un trabajador activo
@@ -162,7 +176,7 @@ export function PayrollActionDialog({
                 max="2199-12"
                 required
                 disabled={busy}
-                className={`${payrollInput} mt-2`}
+                className={`${inputClass} mt-2`}
               />
             </label>
             <label className={labelClass}>
@@ -174,7 +188,7 @@ export function PayrollActionDialog({
                 required
                 disabled={busy}
                 aria-describedby="payroll-file-help"
-                className={`${payrollInput} mt-2`}
+                className={`${inputClass} mt-2`}
               />
             </label>
             <p id="payroll-file-help" className="text-xs leading-5 text-ink2">
@@ -217,7 +231,20 @@ export function PayrollActionDialog({
               Al publicar, esta liquidación quedará visible para su trabajador.
               Una liquidación publicada no se puede editar ni eliminar.
             </p>
-            <label className="flex items-start gap-3 text-sm leading-6">
+            <label className={labelClass}>
+              Fecha de firma
+              <input
+                name="signedAt"
+                type="date"
+                required
+                disabled={busy}
+                defaultValue={payrollBusinessDate()}
+                min={payrollBusinessDate(new Date(action.record.createdAt))}
+                max={payrollBusinessDate()}
+                className={`${inputClass} mt-2`}
+              />
+            </label>
+            <label className="flex min-h-11 items-start gap-3 text-sm leading-6">
               <input
                 type="checkbox"
                 checked={confirmed}
@@ -243,14 +270,14 @@ export function PayrollActionDialog({
             type="button"
             disabled={busy}
             onClick={onClose}
-            className={payrollButton}
+            className={buttonClass}
           >
             Cancelar
           </button>
           <button
             type="submit"
             disabled={busy || (action.kind === 'publish' && !confirmed)}
-            className={payrollPrimary}
+            className={primaryButtonClass}
           >
             {busy
               ? 'Guardando…'

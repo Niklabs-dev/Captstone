@@ -1,11 +1,19 @@
 'use client';
-import { badgeClass } from '@/components/ui/styles';
-import { filterPanelClass } from '@/components/ui/styles';
 import {
+  tableHeaderClass,
+  tableDescriptionClass,
+  tableClass,
+  tableHeadClass,
+  tableHeadingClass,
+  tableCellClass,
+  badgeClass,
+  filterPanelClass,
   labelClass,
   panelTitleClass,
-  tableDescriptionClass,
   tablePanelClass,
+  buttonClass,
+  inputClass,
+  primaryButtonClass,
 } from '@/components/ui/styles';
 import { useEffect, useState, type ReactElement } from 'react';
 import {
@@ -16,11 +24,6 @@ import {
 } from '@/lib/payroll';
 import { loadPayroll } from '@/lib/payroll-client';
 import { PayrollActionDialog, type PayrollAction } from './PayrollActionDialog';
-import {
-  buttonClass as payrollButton,
-  inputClass as payrollInput,
-  primaryButtonClass as payrollPrimary,
-} from '@/components/ui/styles';
 
 type State =
   | { status: 'loading' }
@@ -57,13 +60,12 @@ export function PayrollPanel({
     );
     return () => controller.abort();
   }, [retry]);
-  function reload(): undefined {
+  function reload(): void {
     setState({ status: 'loading' });
     setNotice('');
     setRetry((current) => current + 1);
-    return undefined;
   }
-  function saved(record: Payroll, published: boolean): undefined {
+  function saved(record: Payroll, published: boolean): void {
     setAction(null);
     setState((current) =>
       current.status === 'ready'
@@ -86,7 +88,6 @@ export function PayrollPanel({
             '. Ya está disponible para su trabajador.'
         : 'Liquidación recibida en estado pendiente de firma. Aún no es visible para el trabajador.',
     );
-    return undefined;
   }
   if (state.status === 'loading')
     return (
@@ -113,7 +114,7 @@ export function PayrollPanel({
         <button
           type="button"
           onClick={reload}
-          className={'mt-4 ' + payrollButton}
+          className={'mt-4 ' + buttonClass}
         >
           Reintentar
         </button>
@@ -146,7 +147,7 @@ export function PayrollPanel({
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={reload} className={payrollButton}>
+          <button type="button" onClick={reload} className={buttonClass}>
             Actualizar listado
           </button>
           {canManage && (
@@ -157,7 +158,7 @@ export function PayrollPanel({
                 setNotice('');
                 setAction({ kind: 'upload', collection: state.data });
               }}
-              className={payrollPrimary}
+              className={primaryButtonClass}
             >
               Subir liquidación
             </button>
@@ -189,7 +190,7 @@ export function PayrollPanel({
               aria-label="Local"
               value={store}
               onChange={(event) => setStore(event.target.value)}
-              className={`${payrollInput} mt-2`}
+              className={`${inputClass} mt-2`}
             >
               <option value="">Todos los locales</option>
               {stores.map((item) => (
@@ -207,7 +208,7 @@ export function PayrollPanel({
               max="2199-12"
               value={period}
               onChange={(event) => setPeriod(event.target.value)}
-              className={`${payrollInput} mt-2`}
+              className={`${inputClass} mt-2`}
             />
           </label>
           <label className={labelClass}>
@@ -216,7 +217,7 @@ export function PayrollPanel({
               aria-label="Estado"
               value={status}
               onChange={(event) => setStatus(event.target.value)}
-              className={`${payrollInput} mt-2`}
+              className={`${inputClass} mt-2`}
             >
               <option value="">Todos los estados</option>
               <option value="PENDING_SIGNATURE">Pendiente de firma</option>
@@ -225,6 +226,12 @@ export function PayrollPanel({
           </label>
         </div>
       </section>
+      {Boolean(state.data.invalidCount) && (
+        <p role="alert" className="rounded-lg bg-warn-bg p-4 text-sm text-ink2">
+          No se pudieron verificar {state.data.invalidCount} liquidaciones. Se
+          muestran las válidas; informa al administrador.
+        </p>
+      )}
       {notice && (
         <p
           role="status"
@@ -253,101 +260,157 @@ export function PayrollPanel({
                 setPeriod('');
                 setStatus('');
               }}
-              className={'mt-4 ' + payrollButton}
+              className={'mt-4 ' + buttonClass}
             >
               Limpiar filtros
             </button>
           )}
         </div>
       ) : (
-        <ul aria-label="Liquidaciones" className={tablePanelClass}>
-          {visible.map((item) => (
-            <li
-              key={item.id}
-              className="border-b border-line p-5 last:border-b-0 sm:p-6"
-            >
-              <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
-                <div className="w-full min-w-0 flex-1 sm:w-auto">
-                  <h3 className="break-words font-bold">{item.worker.name}</h3>
-                  <p className={tableDescriptionClass}>
-                    {item.worker.store.name} · {payrollPeriodLabel(item.period)}
-                  </p>
-                  <p className="mt-2 break-words text-sm text-ink2">
-                    {item.fileName}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <span
-                    className={`${badgeClass} ${item.status === 'PUBLISHED' ? 'bg-ok-bg text-ok' : 'bg-tint2 text-salmon-ink'}`}
-                  >
-                    {item.status === 'PUBLISHED'
-                      ? 'Publicada'
-                      : 'Pendiente de firma'}
-                  </span>
-                  {canManage && item.status === 'PENDING_SIGNATURE' && (
-                    <button
-                      type="button"
-                      disabled={!item.canPublish}
-                      onClick={() => {
-                        setNotice('');
-                        setAction({ kind: 'publish', record: item });
-                      }}
-                      className={payrollPrimary}
-                    >
-                      Publicar
-                    </button>
-                  )}
-                </div>
-              </div>
-              <p className="mt-3 text-xs text-ink2">
-                {item.status === 'PUBLISHED'
-                  ? 'Visible para su trabajador. No se puede editar ni eliminar.'
-                  : 'No visible para el trabajador hasta su publicación.'}
+        <section
+          aria-labelledby="payroll-table-title"
+          className={tablePanelClass}
+        >
+          <header className={tableHeaderClass}>
+            <div>
+              <h2 id="payroll-table-title" className={panelTitleClass}>
+                Liquidaciones registradas
+              </h2>
+              <p className={tableDescriptionClass}>
+                Estado, firma y publicación por trabajador y período.
               </p>
-              {canManage &&
-                item.status === 'PENDING_SIGNATURE' &&
-                !item.canPublish && (
-                  <p className="mt-2 text-xs text-ink2">
-                    La publicación de esta liquidación no está habilitada por el
-                    servicio.
-                  </p>
-                )}
-              <details className="mt-4 text-xs text-ink2">
-                <summary className="min-h-11 cursor-pointer py-3 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink">
-                  Ver metadatos
-                </summary>
-                <dl className="mt-3 space-y-2">
-                  <div>
-                    <dt>SHA-256 registrado</dt>
-                    <dd className="mt-2 break-all font-mono">{item.sha256}</dd>
-                  </div>
-                  <div>
-                    <dt>Fecha de carga</dt>
-                    <dd>
-                      {new Intl.DateTimeFormat('es-CL', {
-                        dateStyle: 'short',
-                        timeStyle: 'short',
-                        timeZone: 'America/Santiago',
-                      }).format(new Date(item.createdAt))}
-                    </dd>
-                  </div>
-                  {item.publishedAt && (
-                    <div>
-                      <dt>Fecha de publicación</dt>
-                      <dd>
-                        {new Intl.DateTimeFormat('es-CL', {
-                          dateStyle: 'short',
-                          timeStyle: 'short',
-                          timeZone: 'America/Santiago',
-                        }).format(new Date(item.publishedAt))}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              </details>
-            </li>
-          ))}
-        </ul>
+            </div>
+          </header>
+          <div
+            role="region"
+            aria-label="Tabla de liquidaciones"
+            tabIndex={0}
+            className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-salmon-ink"
+          >
+            <table className={tableClass}>
+              <caption className="sr-only">Liquidaciones</caption>
+              <thead className={tableHeadClass}>
+                <tr>
+                  {[
+                    'Trabajador y archivo',
+                    'Período',
+                    'Estado',
+                    'Fecha de firma',
+                    'Acciones',
+                  ].map((column) => (
+                    <th key={column} scope="col" className={tableHeadingClass}>
+                      {column}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((item) => (
+                  <tr
+                    key={item.id}
+                    className="border-b border-line last:border-b-0 hover:bg-tint"
+                  >
+                    <td className={tableCellClass}>
+                      <h3 className="font-semibold">{item.worker.name}</h3>
+                      <p className="mt-2 text-xs text-ink2">
+                        {item.worker.store.name}
+                      </p>
+                      <p className="mt-2 break-words text-sm text-ink2">
+                        {item.fileName}
+                      </p>
+                      <details className="mt-3 text-xs text-ink2">
+                        <summary className="min-h-11 cursor-pointer py-3 font-semibold focus-visible:outline-2 focus-visible:outline-salmon-ink">
+                          Ver metadatos
+                        </summary>
+                        <dl className="mt-3 space-y-2">
+                          <div>
+                            <dt>SHA-256 registrado</dt>
+                            <dd className="max-w-64 break-all font-mono">
+                              {item.sha256}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Fecha de carga</dt>
+                            <dd>
+                              {new Intl.DateTimeFormat('es-CL', {
+                                dateStyle: 'short',
+                                timeStyle: 'short',
+                                timeZone: 'America/Santiago',
+                              }).format(new Date(item.createdAt))}
+                            </dd>
+                          </div>
+                          {item.publishedAt && (
+                            <div>
+                              <dt>Fecha de publicación</dt>
+                              <dd>
+                                {new Intl.DateTimeFormat('es-CL', {
+                                  dateStyle: 'short',
+                                  timeZone: 'America/Santiago',
+                                }).format(new Date(item.publishedAt))}
+                              </dd>
+                            </div>
+                          )}
+                          {item.signedAt && (
+                            <div>
+                              <dt>Fecha de firma</dt>
+                              <dd>{item.signedAt}</dd>
+                            </div>
+                          )}
+                        </dl>
+                      </details>
+                    </td>
+                    <td className={tableCellClass}>
+                      {payrollPeriodLabel(item.period)}
+                    </td>
+                    <td className={tableCellClass}>
+                      <span
+                        className={`${badgeClass} ${item.status === 'PUBLISHED' ? 'bg-ok-bg text-ok' : 'bg-tint2 text-salmon-ink'}`}
+                      >
+                        {item.status === 'PUBLISHED'
+                          ? 'Publicada'
+                          : 'Pendiente de firma'}
+                      </span>
+                      <p className="mt-3 max-w-64 text-xs text-ink2">
+                        {item.status === 'PUBLISHED'
+                          ? 'Visible para su trabajador. No se puede editar ni eliminar.'
+                          : 'No visible para el trabajador hasta su publicación.'}
+                      </p>
+                    </td>
+                    <td className={tableCellClass}>
+                      {item.signedAt ?? 'Pendiente de firma'}
+                    </td>
+                    <td className={tableCellClass}>
+                      {canManage && item.status === 'PENDING_SIGNATURE' && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={!item.canPublish}
+                            onClick={() => {
+                              setNotice('');
+                              setAction({ kind: 'publish', record: item });
+                            }}
+                            className={primaryButtonClass}
+                          >
+                            Publicar
+                          </button>
+                          {!item.canPublish && (
+                            <p className="mt-2 text-xs text-ink2">
+                              La publicación de esta liquidación no está
+                              habilitada por el servicio.
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <footer className="border-t border-line px-5 py-4 text-xs text-ink2">
+            {visible.length} liquidaciones
+          </footer>
+        </section>
       )}
       <p className="text-xs leading-5 text-ink2">
         La publicación se confirma individualmente para cada trabajador y
@@ -358,7 +421,6 @@ export function PayrollPanel({
           action={action}
           onClose={() => {
             setAction(null);
-            return undefined;
           }}
           onSaved={saved}
         />

@@ -55,6 +55,10 @@ createServer(async (request, response) => {
     response.end(JSON.stringify({ ...user, role: roles[token] }));
     return;
   }
+  if (url.pathname === '/payroll' && request.method === 'GET') {
+    response.end(JSON.stringify({ items: [], workers: [], policy: { maxBytes: 26214400, allowedMimes: ['application/pdf'], canUpload: roles[token] === 'CONTADOR' } }));
+    return;
+  }
   response.writeHead(404);
   response.end('{}');
 }).listen(3147, '127.0.0.1', () =>
