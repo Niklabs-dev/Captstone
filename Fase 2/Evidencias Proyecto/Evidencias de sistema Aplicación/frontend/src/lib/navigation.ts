@@ -4,7 +4,13 @@ export type HomePath = '/portal' | '/dashboard';
 
 export interface NavigationItem {
   href:
-    HomePath | '/admin/usuarios' | '/admin/auditoria' | '/portal/liquidaciones';
+    | HomePath
+    | '/admin/usuarios'
+    | '/admin/auditoria'
+    | '/admin/documentos'
+    | '/admin/alertas-dt'
+    | '/liquidaciones'
+    | '/portal/liquidaciones';
   label: string;
 }
 
@@ -14,6 +20,9 @@ export function getNavigationView(pathname: string): {
 } {
   const views = [
     { href: '/portal/liquidaciones', title: 'Mis liquidaciones' },
+    { href: '/admin/documentos', title: 'Gestor documental' },
+    { href: '/admin/alertas-dt', title: 'Alertas de registro en la DT' },
+    { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
     { href: '/dashboard', title: 'Inicio' },
     { href: '/admin/usuarios', title: 'Usuarios y roles' },
     { href: '/admin/auditoria', title: 'Auditoría del sistema' },
@@ -46,8 +55,13 @@ export function getNavigationItems(
         home,
         { href: '/admin/usuarios', label: 'Usuarios' },
         { href: '/admin/auditoria', label: 'Auditoría' },
+        { href: '/admin/documentos', label: 'Documentos' },
+        { href: '/admin/alertas-dt', label: 'Alertas DT' },
+        { href: '/liquidaciones', label: 'Liquidaciones' },
       ]
-    : [home];
+    : role === 'CONTADOR'
+      ? [home, { href: '/liquidaciones', label: 'Liquidaciones' }]
+      : [home];
 }
 
 export function getHomePath(role: Role): HomePath {
@@ -66,6 +80,12 @@ export function getPageRedirect(role: Role, pathname: string): string | null {
   if (role === 'TRABAJADOR')
     return inPortal ? null : '/portal?reason=forbidden';
   if (inPortal) return '/dashboard?reason=forbidden';
+  if (
+    (pathname === '/liquidaciones' || pathname.startsWith('/liquidaciones/')) &&
+    role !== 'ADMINISTRADOR' &&
+    role !== 'CONTADOR'
+  )
+    return '/dashboard?reason=forbidden';
   const inAdmin = pathname === '/admin' || pathname.startsWith('/admin/');
   if (inAdmin && role !== 'ADMINISTRADOR') return '/dashboard?reason=forbidden';
   return null;
