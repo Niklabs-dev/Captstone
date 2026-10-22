@@ -1,6 +1,39 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { isProxyUuid, proxyBackend } from './backend-proxy';
+import { isProxyUuid, proxyBackend, readProxyForm } from './backend-proxy';
+
+test('Lee multipart sin Content-Length y rechaza el cuerpo antes de superar el límite', async () => {
+  const form = new FormData();
+  form.set('period', '2026-09');
+  const request = new Request('http://example.test/api/payroll', {
+    method: 'POST',
+    body: form,
+  });
+  assert.equal(request.headers.has('Content-Length'), false);
+  assert.equal((await readProxyForm(request, 1))?.get('period'), '2026-09');
+  let cancelled = false;
+  const oversized = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(1024 * 1024 + 10));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const init: RequestInit & { duplex: 'half' } = {
+    method: 'POST',
+    body: oversized,
+    duplex: 'half',
+  };
+  assert.equal(
+    await readProxyForm(
+      new Request('http://example.test/api/payroll', init),
+      1,
+    ),
+    null,
+  );
+  assert.equal(cancelled, true);
+});
 
 test('El proxy conserva bearer en servidor, no usa caché y reenvía JSON sin seguir redirecciones', async (context) => {
   context.mock.method(

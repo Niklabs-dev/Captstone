@@ -72,3 +72,33 @@ export function isProxyUuid(value: string): boolean {
     value,
   );
 }
+
+// Acota el cuerpo antes de interpretar multipart, también sin Content-Length.
+export async function readProxyForm(
+  request: Request,
+  maxBytes: number,
+): Promise<FormData | null> {
+  if (!request.body) return null;
+  const reader = request.body.getReader();
+  const chunks: BlobPart[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes + 1024 * 1024) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(new Uint8Array(value));
+    }
+    return await new Response(new Blob(chunks), {
+      headers: { 'Content-Type': request.headers.get('Content-Type') ?? '' },
+    }).formData();
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+}
