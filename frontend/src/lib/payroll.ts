@@ -1,6 +1,6 @@
 import type { Role } from './auth';
 
-// Contrato interno propuesto. Confirmar con Swagger de SPRINT-2-T13/T14.
+// Contrato de SPRINT-2-T13/T14 documentado en Swagger (/api/docs).
 export const MAX_PAYROLL_BYTES = 25 * 1024 * 1024;
 export type PayrollWorker = {
   id: string;
@@ -17,6 +17,7 @@ export type Payroll = {
   sha256: string;
   createdAt: string;
   publishedAt: string | null;
+  signedAt: string | null;
   status: 'PENDING_SIGNATURE' | 'PUBLISHED';
   revision: string;
   canPublish: boolean;
@@ -30,6 +31,7 @@ export type PayrollCollection = {
   items: Payroll[];
   workers: PayrollWorker[];
   policy: PayrollPolicy;
+  invalidCount?: number;
 };
 export function canReadPayroll(role: Role): boolean {
   return role === 'CONTADOR' || role === 'ADMINISTRADOR';
@@ -100,8 +102,7 @@ export function parsePayroll(value: unknown): Payroll | null {
     !person ||
     !uuid(value.id) ||
     !isPayrollPeriod(value.period) ||
-    !text(value.fileName) ||
-    !/\.pdf$/i.test(value.fileName) ||
+    !text(value.fileName, 255) ||
     typeof value.size !== 'number' ||
     !Number.isSafeInteger(value.size) ||
     value.size <= 0 ||
@@ -113,8 +114,10 @@ export function parsePayroll(value: unknown): Payroll | null {
     typeof value.canPublish !== 'boolean' ||
     (value.status !== 'PENDING_SIGNATURE' && value.status !== 'PUBLISHED') ||
     (value.status === 'PUBLISHED'
-      ? !timestamp(value.publishedAt) || value.canPublish
-      : value.publishedAt !== null)
+      ? !timestamp(value.publishedAt) ||
+        !calendarDate(value.signedAt) ||
+        value.canPublish
+      : value.publishedAt !== null || value.signedAt !== null)
   )
     return null;
   return {
@@ -125,7 +128,8 @@ export function parsePayroll(value: unknown): Payroll | null {
     size: value.size,
     sha256: value.sha256,
     createdAt: value.createdAt,
-    publishedAt: value.publishedAt as string | null,
+    publishedAt: timestamp(value.publishedAt) ? value.publishedAt : null,
+    signedAt: calendarDate(value.signedAt) ? value.signedAt : null,
     status: value.status,
     revision: value.revision,
     canPublish: value.canPublish,
@@ -151,6 +155,7 @@ export function parsePayrollCollection(
     return null;
   const workers: PayrollWorker[] = [];
   const items: Payroll[] = [];
+  let invalidCount = 0;
   for (const candidate of value.workers) {
     const person = worker(candidate);
     if (!person || workers.some((previous) => previous.id === person.id))
@@ -159,8 +164,11 @@ export function parsePayrollCollection(
   }
   for (const candidate of value.items) {
     const item = parsePayroll(candidate);
+    if (!item) {
+      invalidCount++;
+      continue;
+    }
     if (
-      !item ||
       items.some(
         (previous) =>
           previous.id === item.id ||
@@ -180,6 +188,7 @@ export function parsePayrollCollection(
       allowedMimes: ['application/pdf'],
       canUpload: value.policy.canUpload,
     },
+    ...(invalidCount ? { invalidCount } : {}),
   };
 }
 export function validatePayrollUpload(
@@ -246,4 +255,37 @@ export function payrollPeriodLabel(period: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   }).format(new Date(period + '-01T12:00:00Z'));
+}
+
+export function calendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value))
+    return false;
+  const date = new Date(value + 'T12:00:00Z');
+  return (
+    Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value
+  );
+}
+
+export function payrollBusinessDate(value = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Santiago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value);
+  return ['year', 'month', 'day']
+    .map((type) => parts.find((part) => part.type === type)?.value)
+    .join('-');
+}
+
+export function validatePayrollSignedAt(
+  value: string,
+  record: Payroll,
+  now = new Date(),
+): string | null {
+  return calendarDate(value) &&
+    value >= payrollBusinessDate(new Date(record.createdAt)) &&
+    value <= payrollBusinessDate(now)
+    ? null
+    : 'Selecciona una fecha de firma entre el día de carga y hoy (hora de Chile).';
 }

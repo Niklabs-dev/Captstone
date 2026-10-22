@@ -1,6 +1,8 @@
 import {
   parsePayroll,
   parsePayrollCollection,
+  payrollBusinessDate,
+  validatePayrollSignedAt,
   type Payroll,
   type PayrollCollection,
 } from './payroll';
@@ -88,25 +90,27 @@ export async function uploadPayroll(
     result.sha256 !== expectedHash ||
     !file ||
     typeof file === 'string' ||
-    result.size !== file.size ||
-    result.fileName !== file.name
+    result.size !== file.size
   )
     invalidContract();
   return result;
 }
 export async function publishPayroll(
   previous: Payroll,
+  signedAt: string = payrollBusinessDate(),
   fetcher: typeof fetch = fetch,
 ): Promise<Payroll> {
   if (previous.status !== 'PENDING_SIGNATURE' || !previous.canPublish)
     throw new PayrollError('Esta liquidación no permite publicación.', 403);
+  const error = validatePayrollSignedAt(signedAt, previous);
+  if (error) throw new PayrollError(error, 400);
   const result = parsePayroll(
     await request(
       '/' + encodeURIComponent(previous.id) + '/publish',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revision: previous.revision }),
+        body: JSON.stringify({ revision: previous.revision, signedAt }),
       },
       fetcher,
     ),
@@ -121,7 +125,8 @@ export async function publishPayroll(
     result.sha256 !== previous.sha256 ||
     result.size !== previous.size ||
     result.fileName !== previous.fileName ||
-    result.createdAt !== previous.createdAt
+    result.createdAt !== previous.createdAt ||
+    result.signedAt !== signedAt
   )
     invalidContract();
   return result;
