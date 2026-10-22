@@ -1,6 +1,6 @@
 import { callBackend } from './auth-backend';
 
-export function proxyError(status: number): Response {
+export function proxyError(status: number, code?: string): Response {
   const messages: Record<number, string> = {
     400: 'La solicitud no es válida. Revisa los datos ingresados.',
     401: 'Tu sesión venció. Vuelve a iniciar sesión.',
@@ -14,7 +14,7 @@ export function proxyError(status: number): Response {
     503: 'No se pudo conectar con el servicio. Intenta nuevamente más tarde.',
   };
   return Response.json(
-    { message: messages[status] ?? messages[502] },
+    { message: messages[status] ?? messages[502], ...(code ? { code } : {}) },
     { status, headers: { 'Cache-Control': 'private, no-store' } },
   );
 }
@@ -35,11 +35,34 @@ export async function proxyBackend(
   });
   if (!upstream) return proxyError(503);
   if (!upstream.ok) {
-    await upstream.body?.cancel();
+    let code: string | undefined;
+    if (upstream.status === 409) {
+      const data: unknown = await upstream.json().catch(() => null);
+      if (
+        typeof data === 'object' &&
+        data !== null &&
+        'message' in data &&
+        typeof data.message === 'string'
+      ) {
+        if (
+          data.message === 'Este archivo ya está registrado' ||
+          /^Este archivo ya está registrado \(documento [0-9a-f-]+, versión \d+\)$/.test(
+            data.message,
+          )
+        )
+          code = 'DUPLICATE_FILE';
+        else if (
+          data.message ===
+          'Ya existe una liquidación de este trabajador para el período o el archivo ya está registrado'
+        )
+          code = 'PAYROLL_ALREADY_EXISTS';
+      }
+    } else await upstream.body?.cancel();
     return proxyError(
       [400, 401, 403, 404, 409, 413, 415, 429].includes(upstream.status)
         ? upstream.status
         : 502,
+      code,
     );
   }
   if (download) {

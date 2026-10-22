@@ -165,3 +165,12 @@ export function dtDate(value: string): string {
   // La fecha límite es una fecha de calendario del servidor, sin conversión de zona horaria.
   return value.split('-').reverse().join('-');
 }
+
+export function dtDocumentTypeLabel(code: string): string {
+  const names: Record<string, string> = {
+    CONTRATO: 'Contrato',
+    ANEXO: 'Anexo',
+    FINIQUITO: 'Finiquito',
+  };
+  return names[code] ?? 'Documento';
+}

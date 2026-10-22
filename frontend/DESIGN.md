@@ -47,6 +47,8 @@ usan con las utilidades de Tailwind (`bg-tint`, `text-ink2`, `border-line`…).
 | `warn` / `warn-bg` | `#8a5511` / `#fcf2e2` | Advertencias y plazos próximos a vencer                                       |
 | `info` / `info-bg` | `#35669f` / `#ecf2fa` | Información neutra (por ejemplo, el rol Contador)                             |
 
+El token global `warn` cambia de `#d98a1f` a `#8a5511` para cumplir contraste AA sobre `warn-bg`. Afecta a todas las vistas que usan este token.
+
 Reglas de color:
 
 - El botón primario lleva **texto `ink` sobre `salmon`**. El texto blanco sobre
@@ -216,6 +218,6 @@ Desvíos existentes que deben corregirse cuando se toque el archivo:
 - [ ] Si se cambió una regla de este documento, `DESIGN.md` se actualizó en el
       mismo PR.
 
-## Listados de alertas y consultas personales
+## Tarjetas de consulta y alertas
 
-El mockup de alertas DT y Mis liquidaciones usa tarjetas para priorizar el plazo y la acción de cada documento. Estas vistas pueden usar una lista semántica `<ul>` dentro de una sección con título accesible, `tablePanelClass`, separadores `border-line`, controles compartidos y un conteo visible. No reemplaza el patrón de tabla de las vistas administrativas, como la gestión de liquidaciones. Estados con `badgeClass` y texto explícito, además del color. El token warn se oscurece para conservar contraste AA sobre warn-bg.
+Se permiten tarjetas semánticas `<ul>` en alertas y consultas personales de solo lectura, según el mockup: sección con título accesible, `tablePanelClass`, separadores `border-line`, conteo y controles compartidos. Cada tarjeta agrupa sus metadatos y acciones. Las vistas administrativas mantienen el patrón de tabla.

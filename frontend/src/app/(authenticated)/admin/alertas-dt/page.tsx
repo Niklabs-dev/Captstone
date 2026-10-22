@@ -15,8 +15,9 @@ export default async function DtAlertsPage(): Promise<ReactElement> {
   return (
     <>
       <p className={introClass}>
-        Revisa los contratos próximos a vencer o vencidos sin registro en la
-        Dirección del Trabajo, por trabajador y local.
+        Revisa los contratos, anexos y finiquitos con plazo próximo a vencer o
+        vencido para su registro en la Dirección del Trabajo, por trabajador y
+        local.
       </p>
       <DtAlertsPanel />
     </>

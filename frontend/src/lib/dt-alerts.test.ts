@@ -1,3 +1,4 @@
+import { dtDocumentTypeLabel } from './dt-alerts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -218,4 +219,11 @@ test('Controla fallos de red y respeta cancelación del componente', async () =>
     }),
     (error: unknown) => error instanceof Error && error.name === 'AbortError',
   );
+});
+
+test('El tipo de documento se muestra con su nombre en español', () => {
+  assert.equal(dtDocumentTypeLabel('CONTRATO'), 'Contrato');
+  assert.equal(dtDocumentTypeLabel('ANEXO'), 'Anexo');
+  assert.equal(dtDocumentTypeLabel('FINIQUITO'), 'Finiquito');
+  assert.equal(dtDocumentTypeLabel('OTRO'), 'Documento');
 });
