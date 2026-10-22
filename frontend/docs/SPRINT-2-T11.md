@@ -8,12 +8,8 @@ Las tarjetas siguen el mockup de alertas para priorizar documento, plazo y confi
 
 ## Validación
 
-- npm run lint
-- npm run format:check
-- npm run build
-- npm run test:dt-alerts
-- npm run test:dt-alerts:e2e
+Evidencia del 22-10-2026: lint, format:check y compilación de producción aprobados; 12 pruebas unitarias del módulo, 7 del proxy y 1 de fechas aprobadas. También pasaron 12 escenarios de navegador aislados en escritorio y móvil.
 
-La prueba contra backend real verifica listado, tipos, confirmación persistente y conflicto por revisión desactualizada. La evidencia ejecutada se registra al finalizar. Docker Desktop no puede instalarse en este equipo hasta actualizar Windows 10 de la compilación 19044 a 19045 o superior.
+Docker Compose ejecutado en un runner Linux efímero de GitHub Actions: build de backend y frontend, PostgreSQL 16, migraciones y seed reales, más 2 escenarios Playwright contra la API real (1440×900 y 390×844). Evidencia: https://github.com/Niklabs-dev/Captstone/actions/runs/39830847740
 
-Evidencia 22-10-2026: lint, format:check y build aprobados; 11 pruebas del módulo y 5 del proxy; 12 escenarios de navegador aislados y 2 contra NestJS/PostgreSQL 16 reales. Migraciones y seed aplicados desde cero. Pendiente exclusivamente la ejecución mediante Docker tras actualizar Windows. No se marca Hecho.
+El workflow conserva logs, informe JUnit, capturas y trazas en sus artifacts durante 7 días. Usa datos sintéticos, base y almacenamiento exclusivos, y elimina sus recursos al finalizar. El override docker-compose.test.yml comparte el almacenamiento de pruebas para verificar MISSING sin alterar datos reales. Docker Desktop no se instaló en este PC; la validación se completó en GitHub. No se marca Hecho sin la revisión del usuario.
