@@ -12,6 +12,7 @@ import {
 import { useEffect, useState, type ReactElement } from 'react';
 import {
   dtDate,
+  dtDocumentTypeLabel,
   dtRemainingLabel,
   filterDtAlerts,
   type DtAlert,
@@ -122,8 +123,11 @@ export function DtAlertsPanel(): ReactElement {
           <p className="mt-2 text-sm text-ink2">
             Plazos informados por el servicio · Consulta del{' '}
             {new Intl.DateTimeFormat('es-CL', {
-              dateStyle: 'short',
-              timeStyle: 'short',
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
               timeZone: 'America/Santiago',
             }).format(new Date(calculatedAt))}
           </p>
@@ -250,7 +254,8 @@ export function DtAlertsPanel(): ReactElement {
                     {alert.worker.name}
                   </h3>
                   <p className="mt-2 break-words text-sm text-ink2">
-                    {alert.documentType} · {alert.contractTitle}
+                    {dtDocumentTypeLabel(alert.documentType)} ·{' '}
+                    {alert.contractTitle}
                   </p>
                   <p className="mt-3 text-sm text-ink2">
                     {alert.store.name} · Fecha límite:{' '}
