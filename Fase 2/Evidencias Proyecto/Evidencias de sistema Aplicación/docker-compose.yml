@@ -101,8 +101,11 @@ services:
     environment:
       BACKEND_INTERNAL_URL: http://backend:3001
       AUTH_REFRESH_COOKIE_MAX_AGE: ${AUTH_REFRESH_COOKIE_MAX_AGE:-604800}
-      AUDIT_STORES: ${AUDIT_STORES:-[]}
-      USER_MANAGEMENT_STORES: ${USER_MANAGEMENT_STORES:-[]}
+      # Locales creados por el seed (BASE_STORES en backend/prisma/seed.ts, con
+      # los mismos UUID). Valor literal y no ${VAR:-...}: las llaves del JSON
+      # no deben depender de cómo cada herramienta interpola el valor por defecto.
+      AUDIT_STORES: '[{"id":"1010021e-9bab-42d5-851c-417e9e2503bf","name":"Santa María"},{"id":"73b590e0-11b2-4781-ba7b-4f7f8c2c6e35","name":"Ugalde"},{"id":"9ba7ac40-9463-47ec-b0b1-e53c79a185f9","name":"Calera"}]'
+      USER_MANAGEMENT_STORES: '[{"id":"1010021e-9bab-42d5-851c-417e9e2503bf","name":"Santa María"},{"id":"73b590e0-11b2-4781-ba7b-4f7f8c2c6e35","name":"Ugalde"},{"id":"9ba7ac40-9463-47ec-b0b1-e53c79a185f9","name":"Calera"}]'
     expose:
       - "3000"
     depends_on:
