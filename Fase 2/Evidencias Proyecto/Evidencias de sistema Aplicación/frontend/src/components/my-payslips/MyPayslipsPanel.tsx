@@ -1,4 +1,5 @@
 'use client';
+import { formatCalendarDate, formatChileDate } from '@/lib/display-date';
 import {
   labelClass,
   inputClass,
@@ -239,15 +240,10 @@ export function MyPayslipsPanel({
                     {item.fileName}
                   </p>
                   <p className="mt-2 text-xs text-ink2">
-                    Fecha de firma: {item.signedAt}
+                    Fecha de firma: {formatCalendarDate(item.signedAt)}
                   </p>
                   <p className="mt-2 text-xs text-ink2">
-                    Publicada el{' '}
-                    {new Intl.DateTimeFormat('es-CL', {
-                      dateStyle: 'short',
-                      timeZone: 'America/Santiago',
-                    }).format(new Date(item.publishedAt))}{' '}
-                    ·{' '}
+                    Publicada el {formatChileDate(item.publishedAt)} ·{' '}
                     {item.size < 1024
                       ? item.size + ' B'
                       : (item.size / 1024).toLocaleString('es-CL', {
