@@ -2,18 +2,23 @@
 # Uso: docker compose up --build
 # Los valores por defecto permiten levantar sin pasos manuales en desarrollo;
 # en producción se sobrescriben con un archivo .env (ver backend/.env.example).
+#
+# Compatible con Coolify: los servicios solo declaran `expose` (puertos
+# internos de la red Docker) y no publican puertos en el host; Coolify enruta el
+# dominio al frontend con su proxy. Tampoco se fija `container_name`, para que
+# los entornos de pruebas y producción convivan en el mismo servidor sin
+# chocar. En local, docker-compose.override.yml (se aplica solo) publica los
+# puertos 5433, 3001 y 3000.
 services:
   db:
     image: postgres:16-alpine
-    container_name: subway_db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-cambiar-en-produccion}
       POSTGRES_DB: ${DB_NAME:-subway_gestion}
-    # 5433 en el host para no chocar con un PostgreSQL local en 5432; dentro de la red Docker la BD usa 5432
-    ports:
-      - "${DB_PORT_HOST:-5433}:5432"
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +29,6 @@ services:
 
   backend:
     build: ./backend
-    container_name: subway_backend
     restart: unless-stopped
     environment:
       PORT: 3001
@@ -43,8 +47,8 @@ services:
     # aparte (ver README, "Respaldo de los volúmenes").
     volumes:
       - documents_data:/app/storage/documents
-    ports:
-      - "3001:3001"
+    expose:
+      - "3001"
     depends_on:
       db:
         condition: service_healthy
@@ -61,7 +65,6 @@ services:
     build:
       context: ./backend
       target: deps
-    container_name: subway_migrate
     restart: "no"
     environment:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-cambiar-en-produccion}@db:5432/${DB_NAME:-subway_gestion}
@@ -77,7 +80,6 @@ services:
     build:
       context: ./backend
       target: deps
-    container_name: subway_seed
     restart: "no"
     environment:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-cambiar-en-produccion}@db:5432/${DB_NAME:-subway_gestion}
@@ -95,18 +97,23 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
-    container_name: subway_frontend
     restart: unless-stopped
     environment:
       BACKEND_INTERNAL_URL: http://backend:3001
       AUTH_REFRESH_COOKIE_MAX_AGE: ${AUTH_REFRESH_COOKIE_MAX_AGE:-604800}
       AUDIT_STORES: ${AUDIT_STORES:-[]}
       USER_MANAGEMENT_STORES: ${USER_MANAGEMENT_STORES:-[]}
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       backend:
         condition: service_started
+    # 127.0.0.1 y no localhost: Next.js escucha solo en IPv4 (HOSTNAME=0.0.0.0)
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/login > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
