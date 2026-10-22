@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { formatCalendarDate } from '../../src/lib/display-date';
 import { readFileSync } from 'node:fs';
 import { rename } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -124,7 +125,9 @@ test('API real: aislamiento, pendientes ocultas, stream verificado, supervisor y
   );
   await page.goto('/portal/liquidaciones');
   await expect(
-    page.getByText(`Fecha de firma: ${ownFile.signedAt}`).first(),
+    page
+      .getByText(`Fecha de firma: ${formatCalendarDate(ownFile.signedAt)}`)
+      .first(),
   ).toBeVisible();
   // Se retira temporalmente solo el archivo sintético de esta prueba y se restaura siempre.
   type DatabaseClient = {
