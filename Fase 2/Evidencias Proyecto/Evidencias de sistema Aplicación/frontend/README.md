@@ -228,3 +228,7 @@ en `capstone-sprint1-t10` para inspección. No ejecutar contra datos de producci
 Las capturas y trazas se guardan en `test-results/`, fuera de Git.
 
 La sesión de usuarios se limpia mediante /admin/usuarios/session-expired cuando la cuenta ya no está activa. Este Route Handler de navegación revalida la cuenta antes de borrar cookies y conserva el host público usando Location relativa. Las API de usuarios siguen respondiendo JSON. test:users:integration ejecuta su build automáticamente.
+
+## Gestor documental (SPRINT-2-T10)
+
+Carga, versiones y descarga conectadas a T05/T06 mediante el BFF. Contrato en Swagger (/api/docs); ver [SPRINT-2-T10](docs/SPRINT-2-T10.md).
