@@ -40,13 +40,11 @@ test('API real: carga, nuevas versiones inmutables, hash, descarga y conservaci�
   await dialog
     .getByLabel('Tipo de documento', { exact: true })
     .selectOption('CONTRATO');
-  await dialog
-    .getByLabel('Archivo', { exact: true })
-    .setInputFiles({
-      name: 'contrato firmado.pdf',
-      mimeType: 'application/pdf',
-      buffer: first,
-    });
+  await dialog.getByLabel('Archivo', { exact: true }).setInputFiles({
+    name: 'contrato firmado.pdf',
+    mimeType: 'application/pdf',
+    buffer: first,
+  });
   const createdResponse = page.waitForResponse(
     (response) =>
       response.url().endsWith('/api/documents') &&
@@ -68,13 +66,11 @@ test('API real: carga, nuevas versiones inmutables, hash, descarga y conservaci�
   const row = page.getByRole('row').filter({ hasText: title });
   await expect(row).toContainText('Eliminación bloqueada');
   await row.getByRole('button', { name: 'Nueva versión', exact: true }).click();
-  await dialog
-    .getByLabel('Archivo', { exact: true })
-    .setInputFiles({
-      name: 'contrato firmado versión 2.pdf',
-      mimeType: 'application/pdf',
-      buffer: second,
-    });
+  await dialog.getByLabel('Archivo', { exact: true }).setInputFiles({
+    name: 'contrato firmado versión 2.pdf',
+    mimeType: 'application/pdf',
+    buffer: second,
+  });
   await dialog
     .getByRole('button', { name: 'Guardar nueva versión', exact: true })
     .click();
