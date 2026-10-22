@@ -1,0 +1,38 @@
+name: Publicar rama deploy-test para Coolify
+
+# Coolify no carga el compose desde una carpeta con espacios y tildes. En cada
+# push a test se extrae la carpeta de la aplicación (con su historial) y se
+# publica en deploy-test, con docker-compose.yml en la raíz. La rama es
+# generada: nunca se edita a mano.
+on:
+  push:
+    branches:
+      - test
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-test-branch
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Extraer aplicación y publicar deploy-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: test
+          fetch-depth: 0
+      - name: Generar rama con la aplicación en la raíz
+        # quotePath=false: sin él, git subtree falla con la tilde de la ruta
+        run: |
+          git -c core.quotePath=false subtree split \
+            --prefix="Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación" \
+            -b deploy-test
+          git ls-tree --name-only deploy-test | grep -qx docker-compose.yml
+      - name: Publicar deploy-test
+        run: git push --force origin deploy-test
