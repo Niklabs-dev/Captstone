@@ -232,3 +232,7 @@ La sesión de usuarios se limpia mediante /admin/usuarios/session-expired cuando
 ## Gestor documental (SPRINT-2-T10)
 
 Carga, versiones y descarga conectadas a T05/T06 mediante el BFF. Contrato en Swagger (/api/docs); ver [SPRINT-2-T10](docs/SPRINT-2-T10.md).
+
+## Alertas de registro DT (SPRINT-2-T11)
+
+Panel y pruebas: [docs/SPRINT-2-T11.md](docs/SPRINT-2-T11.md). Conecta con la API de SPRINT-2-T08 documentada en Swagger (`/api/docs`).

@@ -44,8 +44,10 @@ usan con las utilidades de Tailwind (`bg-tint`, `text-ink2`, `border-line`…).
 | `muted`            | `#78645d`             | Metadatos, placeholders, IDs y textos de menor jerarquía                      |
 | `crit` / `crit-bg` | `#b4382b` / `#fbebe8` | Errores, estado «Desactivado» y acciones destructivas                         |
 | `ok` / `ok-bg`     | `#237a55` / `#e9f6f0` | Estado «Activo» y confirmaciones                                              |
-| `warn` / `warn-bg` | `#d98a1f` / `#fcf2e2` | Advertencias y plazos próximos a vencer                                       |
+| `warn` / `warn-bg` | `#8a5511` / `#fcf2e2` | Advertencias y plazos próximos a vencer                                       |
 | `info` / `info-bg` | `#35669f` / `#ecf2fa` | Información neutra (por ejemplo, el rol Contador)                             |
+
+El token global `warn` cambia de `#d98a1f` a `#8a5511` para cumplir contraste AA sobre `warn-bg`. Afecta a todas las vistas que usan este token.
 
 Reglas de color:
 
@@ -215,3 +217,7 @@ Desvíos existentes que deben corregirse cuando se toque el archivo:
 - [ ] Se probaron los estados de carga, vacío y error.
 - [ ] Si se cambió una regla de este documento, `DESIGN.md` se actualizó en el
       mismo PR.
+
+## Tarjetas de consulta y alertas
+
+Se permiten tarjetas semánticas `<ul>` en alertas y consultas personales de solo lectura, según el mockup: sección con título accesible, `tablePanelClass`, separadores `border-line`, conteo y controles compartidos. Cada tarjeta agrupa sus metadatos y acciones. Las vistas administrativas mantienen el patrón de tabla.

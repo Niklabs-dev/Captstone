@@ -3,7 +3,12 @@ import type { Role } from './auth';
 export type HomePath = '/portal' | '/dashboard';
 
 export interface NavigationItem {
-  href: HomePath | '/admin/usuarios' | '/admin/auditoria' | '/admin/documentos';
+  href:
+    | HomePath
+    | '/admin/usuarios'
+    | '/admin/auditoria'
+    | '/admin/documentos'
+    | '/admin/alertas-dt';
   label: string;
 }
 
@@ -13,6 +18,7 @@ export function getNavigationView(pathname: string): {
 } {
   const views = [
     { href: '/admin/documentos', title: 'Gestor documental' },
+    { href: '/admin/alertas-dt', title: 'Alertas de registro en la DT' },
     { href: '/dashboard', title: 'Inicio' },
     { href: '/admin/usuarios', title: 'Usuarios y roles' },
     { href: '/admin/auditoria', title: 'Auditoría del sistema' },
@@ -37,6 +43,7 @@ export function getNavigationItems(
         { href: '/admin/usuarios', label: 'Usuarios' },
         { href: '/admin/auditoria', label: 'Auditoría' },
         { href: '/admin/documentos', label: 'Documentos' },
+        { href: '/admin/alertas-dt', label: 'Alertas DT' },
       ]
     : [home];
 }
