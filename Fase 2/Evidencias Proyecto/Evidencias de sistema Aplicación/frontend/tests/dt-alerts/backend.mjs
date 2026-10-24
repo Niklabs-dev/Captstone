@@ -78,6 +78,13 @@ createServer(async (request, response) => {
     response.end(JSON.stringify([admin]));
     return;
   }
+  if (url.pathname === '/stores' && request.method === 'GET') {
+    response.end(JSON.stringify([
+      {id:'40000000-0000-4000-8000-000000000211',name:'Local de prueba Centro'},
+      {id:'41000000-0000-4000-8000-000000000211',name:'Local de prueba Norte'},
+    ].map(store => ({...store,city:'Melipilla',address:'Av. Prueba 325',isActive:true,createdAt:'2026-10-24T12:00:00Z',updatedAt:'2026-10-24T12:00:00Z'}))));
+    return;
+  }
   if (url.pathname === '/dt-alerts' && request.method === 'GET') {
     response.end(JSON.stringify({ items: [], calculatedAt: new Date().toISOString() }));
     return;

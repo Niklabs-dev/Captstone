@@ -5,6 +5,7 @@ export type HomePath = '/portal' | '/dashboard';
 export interface NavigationItem {
   href:
     | HomePath
+    | '/admin/locales'
     | '/admin/usuarios'
     | '/admin/auditoria'
     | '/admin/documentos'
@@ -25,6 +26,7 @@ export function getNavigationView(pathname: string): {
     { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
     { href: '/dashboard', title: 'Inicio' },
     { href: '/admin/usuarios', title: 'Usuarios y roles' },
+    { href: '/admin/locales', title: 'Locales' },
     { href: '/admin/auditoria', title: 'Auditoría del sistema' },
     { href: '/portal', title: 'Portal del Trabajador' },
   ] as const;
@@ -54,6 +56,7 @@ export function getNavigationItems(
     ? [
         home,
         { href: '/admin/usuarios', label: 'Usuarios' },
+        { href: '/admin/locales', label: 'Locales' },
         { href: '/admin/auditoria', label: 'Auditoría' },
         { href: '/admin/documentos', label: 'Documentos' },
         { href: '/admin/alertas-dt', label: 'Alertas DT' },

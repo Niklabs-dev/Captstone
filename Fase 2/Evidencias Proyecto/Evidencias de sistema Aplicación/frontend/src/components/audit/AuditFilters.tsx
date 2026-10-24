@@ -1,3 +1,5 @@
+'use client';
+import { useStoreOptions } from '@/lib/use-store-options';
 import {
   inputClass,
   buttonClass,
@@ -10,7 +12,7 @@ import type { ReactElement } from 'react';
 import { AUDIT_PAGE_SIZE, type AuditStore } from '@/lib/audit';
 
 export function AuditFilters({
-  stores,
+  stores: initialStores,
   selected,
   limit,
   queryKey,
@@ -20,6 +22,7 @@ export function AuditFilters({
   limit: number;
   queryKey: string;
 }): ReactElement {
+  const { stores, catalogError } = useStoreOptions(initialStores);
   const missingStore =
     selected.storeId && !stores.some((store) => store.id === selected.storeId);
   return (
@@ -57,6 +60,7 @@ export function AuditFilters({
             {stores.map((store) => (
               <option key={store.id} value={store.id}>
                 {store.name}
+                {store.isActive === false ? ' (inactivo)' : ''}
               </option>
             ))}
           </select>
@@ -100,6 +104,11 @@ export function AuditFilters({
         Fechas inclusivas según la hora de Chile. Puedes dejar uno o ambos
         extremos vacíos.
       </p>
+      {catalogError && (
+        <p role="alert" className="mt-3 text-sm text-crit">
+          {catalogError}
+        </p>
+      )}
       {stores.length === 0 && (
         <p className="mt-2 text-xs text-ink2">
           No hay locales disponibles para seleccionar. Puedes consultar todas

@@ -29,6 +29,7 @@ export function CreateUserForm({
   onSubmit: (input: CreateUserInput) => Promise<undefined>;
   onCancel: () => undefined;
 }): ReactElement {
+  const activeStores = stores.filter((store) => store.isActive !== false);
   const [role, setRole] = useState<UserRole>('CONTADOR');
   const [validationError, setValidationError] = useState('');
   async function submit(event: FormEvent<HTMLFormElement>): Promise<undefined> {
@@ -45,6 +46,13 @@ export function CreateUserForm({
     });
     if (!parsed.ok) {
       setValidationError(parsed.message);
+      return;
+    }
+    if (
+      needsStore(role) &&
+      !activeStores.some((store) => store.id === parsed.data.storeId)
+    ) {
+      setValidationError('Selecciona un local activo.');
       return;
     }
     setValidationError('');
@@ -118,7 +126,7 @@ export function CreateUserForm({
               <option
                 key={code}
                 value={code}
-                disabled={needsStore(code) && stores.length === 0}
+                disabled={needsStore(code) && activeStores.length === 0}
               >
                 {ROLE_LABELS[code]}
               </option>
@@ -137,7 +145,7 @@ export function CreateUserForm({
               <option value="" disabled>
                 Selecciona un local
               </option>
-              {stores.map((store) => (
+              {activeStores.map((store) => (
                 <option key={store.id} value={store.id}>
                   {store.name}
                 </option>

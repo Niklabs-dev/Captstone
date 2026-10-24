@@ -126,7 +126,6 @@ test('Auditoría HTTP: autorización, filtros, paginación, proyección segura y
       env: {
         ...process.env,
         BACKEND_INTERNAL_URL: `http://127.0.0.1:${address.port}`,
-        AUDIT_STORES: '[]',
       },
       stdio: 'pipe',
     },

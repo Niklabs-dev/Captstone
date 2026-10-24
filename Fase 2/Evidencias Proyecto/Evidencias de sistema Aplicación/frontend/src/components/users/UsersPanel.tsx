@@ -1,6 +1,7 @@
 'use client';
 import { useMemo, useState, type ReactElement } from 'react';
 import { useRouter } from 'next/navigation';
+import { useStoreOptions } from '@/lib/use-store-options';
 import {
   filterUsers,
   isObject,
@@ -36,7 +37,7 @@ export function UsersPanel({
   initialUsers,
   initialError,
   currentUserId,
-  stores,
+  stores: initialStores,
 }: {
   initialUsers: ManagedUser[];
   initialError: string;
@@ -44,6 +45,11 @@ export function UsersPanel({
   stores: StoreOption[];
 }): ReactElement {
   const router = useRouter();
+  const {
+    stores,
+    catalogError,
+    reload: refreshCatalog,
+  } = useStoreOptions(initialStores);
   const [users, setUsers] = useState(initialUsers);
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
@@ -89,7 +95,12 @@ export function UsersPanel({
     setError('');
     setNotice('');
     try {
-      const result = parseUserList(await request('/api/users'));
+      const [data] = await Promise.all([
+        request('/api/users'),
+        refreshCatalog(),
+      ]);
+      const result = parseUserList(data);
+      window.dispatchEvent(new Event('stores-updated'));
       if (!result) throw new Error('No se pudo leer la lista de usuarios.');
       setUsers(result);
     } catch (failure) {
@@ -215,6 +226,7 @@ export function UsersPanel({
               {stores.map((store) => (
                 <option key={store.id} value={store.id}>
                   {store.name}
+                  {store.isActive === false ? ' (inactivo)' : ''}
                 </option>
               ))}
             </select>
@@ -226,9 +238,22 @@ export function UsersPanel({
           </button>
           <button
             disabled={busy}
-            onClick={() => {
-              setCreating(true);
-              setDialogError('');
+            onClick={async () => {
+              setBusy(true);
+              setError('');
+              try {
+                await refreshCatalog();
+                setCreating(true);
+                setDialogError('');
+              } catch (cause) {
+                setError(
+                  cause instanceof Error
+                    ? cause.message
+                    : 'No se pudo cargar el catálogo.',
+                );
+              } finally {
+                setBusy(false);
+              }
             }}
             className={primaryButtonClass}
           >
@@ -236,12 +261,12 @@ export function UsersPanel({
           </button>
         </div>
       </section>
-      {error && (
+      {(error || catalogError) && (
         <p
           role="alert"
           className="rounded-lg border border-crit/20 bg-crit-bg px-3.5 py-3 text-sm text-crit"
         >
-          {error}
+          {error || catalogError}
         </p>
       )}
       <p role="status" className="text-sm text-ink2">

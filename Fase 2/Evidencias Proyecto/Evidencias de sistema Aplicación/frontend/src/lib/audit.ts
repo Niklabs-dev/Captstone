@@ -183,18 +183,6 @@ export function mergeAuditStores(...groups: AuditStore[][]): AuditStore[] {
     a.name.localeCompare(b.name, 'es'),
   );
 }
-export function parseConfiguredAuditStores(
-  value: string | undefined,
-): AuditStore[] | null {
-  try {
-    const data: unknown = JSON.parse(value ?? '[]');
-    return Array.isArray(data) && data.every(isAuditStore)
-      ? mergeAuditStores(data)
-      : null;
-  } catch {
-    return null;
-  }
-}
 export function formatAuditDate(value: string): string {
   return new Intl.DateTimeFormat('es-CL', {
     timeZone: AUDIT_TIME_ZONE,

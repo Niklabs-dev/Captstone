@@ -8,10 +8,11 @@ import {
   auditPageHref,
   mergeAuditStores,
   parseAuditFilters,
-  parseConfiguredAuditStores,
 } from '@/lib/audit';
 import { fetchAuditPage } from '@/lib/audit-backend';
 import { getAuditSession } from '@/lib/audit-session';
+import { fetchStores } from '@/lib/stores-backend';
+import { storeOptions } from '@/lib/stores';
 import { buttonClass, introClass } from '@/components/ui/styles';
 
 export default async function AuditPage({
@@ -32,9 +33,13 @@ export default async function AuditPage({
       for (const part of value) params.append(key, part);
   }
   const filters = parseAuditFilters(params);
-  const configured = parseConfiguredAuditStores(process.env.AUDIT_STORES);
+  const catalog = session.ok ? await fetchStores(session.data.token) : null;
+  if (catalog && !catalog.ok && catalog.status === 401)
+    redirect('/session-expired');
+  if (catalog && !catalog.ok && catalog.status === 403)
+    redirect('/dashboard?reason=forbidden');
   const result =
-    session.ok && filters.ok && configured
+    session.ok && filters.ok && catalog?.ok
       ? await fetchAuditPage(session.data.token, filters.data)
       : null;
   if (result && !result.ok && result.status === 401)
@@ -43,7 +48,12 @@ export default async function AuditPage({
     redirect('/dashboard?reason=forbidden');
   const stores = mergeAuditStores(
     session.ok ? session.data.stores : [],
-    configured ?? [],
+    catalog?.ok
+      ? storeOptions(catalog.data).map((store) => ({
+          id: store.id,
+          name: store.name + (store.isActive === false ? ' (inactivo)' : ''),
+        }))
+      : [],
     result?.ok
       ? result.data.items.flatMap((entry) => (entry.store ? [entry.store] : []))
       : [],
@@ -52,8 +62,8 @@ export default async function AuditPage({
     ? session.message
     : !filters.ok
       ? filters.message
-      : configured === null
-        ? 'No se pudo cargar la lista de locales. Intenta nuevamente.'
+      : catalog && !catalog.ok
+        ? catalog.message
         : result && !result.ok
           ? result.message
           : null;
