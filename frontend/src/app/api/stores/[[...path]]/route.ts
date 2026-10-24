@@ -29,7 +29,12 @@ async function forward(
   const response = await proxyBackend(path, token, init);
   if (!response.ok)
     return respond(
-      { message: storeErrorMessage(response.status) },
+      {
+        message: storeErrorMessage(
+          response.status,
+          path.endsWith('/deactivate'),
+        ),
+      },
       response.status,
     );
   const raw: unknown = await response.json().catch(() => null);

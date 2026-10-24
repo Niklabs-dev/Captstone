@@ -149,6 +149,22 @@ test('CRUD real, catálogo inmediato en Usuarios y Auditoría, inactivos e histo
     .click();
   dialog = page.getByRole('dialog', { name: 'Desactivar local' });
   await dialog.getByRole('button', { name: 'Confirmar desactivación' }).click();
+  await expect(dialog.getByRole('alert')).toContainText(
+    'usuarios activos asignados',
+  );
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  // La cuenta queda inactiva, pero conserva su asignación y su historial.
+  expect(
+    (
+      await context.request.patch('/api/users/' + user.id + '/deactivate', {
+        headers: { Origin: baseURL! },
+      })
+    ).status(),
+  ).toBe(200);
+  await page
+    .getByRole('button', { name: 'Desactivar ' + updatedName, exact: true })
+    .click();
+  await dialog.getByRole('button', { name: 'Confirmar desactivación' }).click();
   await expect(dialog).not.toBeVisible();
   await expect(
     page.getByRole('row').filter({ hasText: updatedName }),

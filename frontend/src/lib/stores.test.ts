@@ -26,6 +26,17 @@ const store: Store = {
   updatedAt: '2026-10-24T12:00:00Z',
 };
 const input = { name: store.name, city: store.city, address: store.address };
+test('El conflicto de desactivación explica las cuentas activas y no acusa un nombre duplicado', async () => {
+  await assert.rejects(
+    changeStoreState(store, async () =>
+      Response.json({ message: 'detalle interno' }, { status: 409 }),
+    ),
+    (error) =>
+      error instanceof StoreError &&
+      /usuarios activos asignados/.test(error.message) &&
+      !/otro nombre|detalle interno/.test(error.message),
+  );
+});
 test('Normaliza espacios e invisibles como el backend, conserva tildes y valida límites', () => {
   assert.equal(normalizeStoreText('  Santa\u200b   María  '), 'Santa María');
   assert.deepEqual(
