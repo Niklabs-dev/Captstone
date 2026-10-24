@@ -1,4 +1,6 @@
 'use client';
+import type { StoreOption } from '@/lib/users';
+import { useStoreOptions } from '@/lib/use-store-options';
 import {
   filterPanelClass,
   labelClass,
@@ -26,6 +28,7 @@ type State =
   | { status: 'error'; message: string }
   | { status: 'ready'; data: DtAlertCollection };
 export function DtAlertsPanel(): ReactElement {
+  const { stores: catalog, catalogError } = useStoreOptions();
   const [state, setState] = useState<State>({ status: 'loading' });
   const [retry, setRetry] = useState(0);
   const [search, setSearch] = useState('');
@@ -108,7 +111,7 @@ export function DtAlertsPanel(): ReactElement {
       </section>
     );
   const { items, calculatedAt } = state.data;
-  const stores = [
+  const stores: StoreOption[] = [
     ...new Map(items.map((item) => [item.store.id, item.store])).values(),
   ];
   const visible = filterDtAlerts(items, search, store, status);
@@ -175,13 +178,21 @@ export function DtAlertsPanel(): ReactElement {
               className={`${inputClass} mt-2`}
             >
               <option value="">Todos los locales</option>
-              {stores.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
+              {(catalog.length || !catalogError ? catalog : stores).map(
+                (item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                    {item.isActive === false ? ' (inactivo)' : ''}
+                  </option>
+                ),
+              )}
             </select>
           </label>
+          {catalogError && (
+            <p role="alert" className="text-sm text-crit">
+              {catalogError}
+            </p>
+          )}
           <label className={labelClass}>
             Estado
             <select

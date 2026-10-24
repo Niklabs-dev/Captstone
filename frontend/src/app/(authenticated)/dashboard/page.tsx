@@ -43,6 +43,13 @@ export default async function DashboardPage({
               Gestionar usuarios
             </Link>
             <Link
+              href="/admin/locales"
+              prefetch={false}
+              className={buttonClass}
+            >
+              Gestionar locales
+            </Link>
+            <Link
               href="/admin/auditoria"
               prefetch={false}
               className={buttonClass}

@@ -16,6 +16,5 @@ services:
     container_name: capstone_t10_frontend
     environment:
       BACKEND_INTERNAL_URL: http://backend:3001
-      USER_MANAGEMENT_STORES: ${USER_MANAGEMENT_STORES:-[]}
     ports: !override
       - "3102:3000"

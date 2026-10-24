@@ -36,6 +36,7 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
   assert.deepEqual(getNavigationItems('ADMINISTRADOR'), [
     { href: '/dashboard', label: 'Inicio' },
     { href: '/admin/usuarios', label: 'Usuarios' },
+    { href: '/admin/locales', label: 'Locales' },
     { href: '/admin/auditoria', label: 'Auditoría' },
     { href: '/admin/documentos', label: 'Documentos' },
     { href: '/admin/alertas-dt', label: 'Alertas DT' },

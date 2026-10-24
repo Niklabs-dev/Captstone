@@ -15,6 +15,5 @@ services:
   frontend:
     container_name: capstone_t16_frontend
     environment:
-      AUDIT_STORES: ${AUDIT_STORES:-[]}
     ports: !override
       - "3106:3000"

@@ -92,7 +92,6 @@ test(
         env: {
           ...process.env,
           BACKEND_INTERNAL_URL: `http://127.0.0.1:${address.port}`,
-          USER_MANAGEMENT_STORES: '[]',
         },
         stdio: 'pipe',
       },
