@@ -40,6 +40,21 @@ test('Auditoría HTTP: autorización, filtros, paginación, proyección segura y
       response.end(JSON.stringify({ ...user, role: roleMap[token] }));
       return;
     }
+    if (request.url === '/stores') {
+      response.end(
+        JSON.stringify([
+          {
+            ...store,
+            city: 'Melipilla',
+            address: 'Av. Prueba 325',
+            isActive: true,
+            createdAt: '2026-10-24T12:00:00Z',
+            updatedAt: '2026-10-24T12:00:00Z',
+          },
+        ]),
+      );
+      return;
+    }
     if (request.url === '/users' || request.url?.startsWith('/users?')) {
       response.end(
         JSON.stringify(
