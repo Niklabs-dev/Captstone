@@ -8,7 +8,12 @@ describe('Normalización de locales', () => {
   });
 
   it('normaliza el nombre para comparar duplicados sin alterar su presentación', () => {
-    expect(normalizeStoreName('  santa   maría  ')).toBe('SANTA MARÍA');
+    expect(normalizeStoreName('  santa   maría  ')).toBe('SANTA MARIA');
     expect(normalizeStoreText('  santa   maría  ')).toBe('santa maría');
+  });
+
+  it('elimina caracteres invisibles antes de validar el contenido', () => {
+    expect(normalizeStoreText('\u200b')).toBe('');
+    expect(normalizeStoreText('Santa\u200b María')).toBe('Santa María');
   });
 });

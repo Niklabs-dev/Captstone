@@ -7,3 +7,8 @@ export interface StoreResponse {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface StoreStateChange {
+  store: StoreResponse;
+  changed: boolean;
+}

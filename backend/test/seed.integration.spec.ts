@@ -142,6 +142,14 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
 
   it('crea los tres locales de Moi-food con su UUID fijo (SPRINT-2-T26)', async () => {
     await withinRollback(async (tx) => {
+      for (const esperado of BASE_STORES) {
+        await tx.store.upsert({
+          where: { id: esperado.id },
+          update: { ...esperado, isActive: true },
+          create: { ...esperado },
+        });
+      }
+
       const resultado = await seedDatabase(tx, opciones);
       expect(resultado.storeIds).toEqual(BASE_STORES.map((s) => s.id));
 
