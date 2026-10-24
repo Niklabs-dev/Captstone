@@ -10,10 +10,10 @@ export async function fetchStores(
     return {
       ok: false,
       status: response.status,
-      message: storeErrorMessage(response.status),
+      message: storeErrorMessage(response.status, 'load'),
     };
   const stores = parseStores(await response.json().catch(() => null));
   return stores
     ? { ok: true, data: stores }
-    : { ok: false, status: 502, message: storeErrorMessage(502) };
+    : { ok: false, status: 502, message: storeErrorMessage(502, 'load') };
 }

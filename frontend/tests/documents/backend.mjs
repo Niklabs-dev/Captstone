@@ -126,6 +126,27 @@ const server = createServer(async (request, response) => {
     );
     return;
   }
+  if (url.pathname === '/stores' && request.method === 'GET') {
+    response.end(
+      JSON.stringify(
+        [
+          store,
+          {
+            id: '61000000-0000-4000-8000-000000000210',
+            name: 'Local de prueba Norte',
+          },
+        ].map((item) => ({
+          ...item,
+          city: 'Melipilla',
+          address: 'Av. Prueba 325',
+          isActive: true,
+          createdAt: '2026-10-24T12:00:00Z',
+          updatedAt: '2026-10-24T12:00:00Z',
+        })),
+      ),
+    );
+    return;
+  }
   if (url.pathname === '/users') {
     if (roles[token] !== 'ADMINISTRADOR') {
       response.writeHead(403);
@@ -140,7 +161,16 @@ const server = createServer(async (request, response) => {
     return;
   }
   if (url.pathname === '/documents' && request.method === 'GET') {
-    response.end(JSON.stringify({ items: [], policy: { maxBytes: 26214400, allowedMimes: ['application/pdf','image/png','image/jpeg'], canUpload: true } }));
+    response.end(
+      JSON.stringify({
+        items: [],
+        policy: {
+          maxBytes: 26214400,
+          allowedMimes: ['application/pdf', 'image/png', 'image/jpeg'],
+          canUpload: true,
+        },
+      }),
+    );
     return;
   }
   response.writeHead(404);

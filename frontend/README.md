@@ -229,6 +229,6 @@ Panel, contrato y pruebas: [docs/SPRINT-2-T17.md](docs/SPRINT-2-T17.md). API de 
 
 ## Locales (SPRINT-3-T02)
 
-`/admin/locales` permite crear, editar, desactivar y reactivar locales como administrador. `GET /api/stores` expone el catálogo autenticado y las mutaciones del BFF conservan el token en servidor y validan origen, rol y datos. Usuarios, Auditoría, Alertas DT y Liquidaciones consumen la API sin caché; los locales nuevos aparecen sin configurar variables ni redeplegar.
+`/admin/locales` permite crear, editar, desactivar y reactivar locales como administrador. `GET /api/stores` expone el catálogo autenticado y las mutaciones del BFF conservan el token en servidor y validan origen, rol y datos. Usuarios, Auditoría, Documentos, Alertas DT y Liquidaciones consumen la API sin caché; los locales nuevos aparecen sin configurar variables ni redeplegar. Documentos incluye locales sin trabajadores e identifica los inactivos; Auditoría conserva esa identificación desde el HTML inicial.
 
 Calidad: `npm run test:stores`, `npm run lint`, `npm run format:check`, `npm run build`. Integración: `TEST_REAL_DISPOSABLE=true npx playwright test --config playwright.stores.config.ts` solo con backend/base/almacenamiento de pruebas y fixtures preparados mediante `scripts/prepare-real-api.mjs`. GitHub Actions ejecuta Docker y conserva evidencia; consultar `docs/SPRINT-3-T02.md`.

@@ -121,7 +121,7 @@ export function StoreDialog({
         <>
           <p className="break-words text-sm text-ink2">
             {action.store.isActive
-              ? 'El local dejará de estar disponible para nuevas asignaciones. Primero debes reasignar o desactivar sus usuarios activos. Los usuarios, documentos y registros históricos se conservarán.'
+              ? 'El local dejará de estar disponible para nuevas asignaciones. Primero debes desactivar sus usuarios activos desde Usuarios. Los usuarios, documentos y registros históricos se conservarán.'
               : 'El local volverá a estar disponible para nuevas asignaciones.'}
           </p>
           <p className="mt-3 break-words text-sm font-semibold">

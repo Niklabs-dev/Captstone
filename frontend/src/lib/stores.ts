@@ -11,6 +11,7 @@ export interface Store {
 }
 export type StoreInput = Pick<Store, 'name' | 'city' | 'address'>;
 export type StoreField = keyof StoreInput;
+export type StoreOperation = 'load' | 'save' | 'deactivate';
 export const STORE_FIELDS = ['name', 'city', 'address'] as const;
 export const STORE_LABELS: Record<StoreField, string> = {
   name: 'Nombre del local',
@@ -112,10 +113,10 @@ export function storeOptions(
 }
 export function storeErrorMessage(
   status: number,
-  deactivating = false,
+  operation: StoreOperation = 'save',
 ): string {
-  if (status === 409 && deactivating)
-    return 'No se puede desactivar el local porque tiene usuarios activos asignados. Reasigna o desactiva esas cuentas primero.';
+  if (status === 409 && operation === 'deactivate')
+    return 'No se puede desactivar el local porque tiene usuarios activos asignados. Desactiva esas cuentas desde Usuarios antes de volver a intentarlo.';
   const messages: Record<number, string> = {
     400: 'Revisa el nombre, la ciudad y la dirección del local.',
     401: 'Tu sesión venció. Vuelve a iniciar sesión.',
@@ -125,5 +126,10 @@ export function storeErrorMessage(
     502: 'La respuesta del catálogo no pudo verificarse. Actualiza antes de repetir la operación.',
     503: 'No se pudo conectar con el catálogo de locales. Intenta nuevamente.',
   };
-  return messages[status] ?? 'No se pudo guardar el local. Intenta nuevamente.';
+  return (
+    messages[status] ??
+    (operation === 'load'
+      ? 'No se pudo cargar el catálogo de locales. Vuelve a cargar la vista o actualiza el catálogo.'
+      : 'No se pudo guardar el local. Intenta nuevamente.')
+  );
 }
