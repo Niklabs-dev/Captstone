@@ -110,7 +110,12 @@ export function storeOptions(
     .filter((store) => !activeOnly || store.isActive)
     .map(({ id, name, isActive }) => ({ id, name, isActive }));
 }
-export function storeErrorMessage(status: number): string {
+export function storeErrorMessage(
+  status: number,
+  deactivating = false,
+): string {
+  if (status === 409 && deactivating)
+    return 'No se puede desactivar el local porque tiene usuarios activos asignados. Reasigna o desactiva esas cuentas primero.';
   const messages: Record<number, string> = {
     400: 'Revisa el nombre, la ciudad y la dirección del local.',
     401: 'Tu sesión venció. Vuelve a iniciar sesión.',

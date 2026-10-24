@@ -6,8 +6,11 @@ import {
   type StoreInput,
 } from './stores';
 export class StoreError extends Error {
-  constructor(public readonly status: number) {
-    super(storeErrorMessage(status));
+  constructor(
+    public readonly status: number,
+    deactivating = false,
+  ) {
+    super(storeErrorMessage(status, deactivating));
     this.name = 'StoreError';
   }
 }
@@ -31,7 +34,8 @@ async function request(
     if (error instanceof Error && error.name === 'AbortError') throw error;
     throw new StoreError(503);
   }
-  if (!response.ok) throw new StoreError(response.status);
+  if (!response.ok)
+    throw new StoreError(response.status, path.endsWith('/deactivate'));
   return response.json().catch(() => {
     throw new StoreError(502);
   });

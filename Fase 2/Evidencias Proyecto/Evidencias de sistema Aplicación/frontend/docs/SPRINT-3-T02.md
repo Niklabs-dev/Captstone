@@ -2,6 +2,8 @@
 
 Vista `/admin/locales` para administradores activos, con creación, edición, desactivación y reactivación lógica. Tabla, filtros, estados, diálogos nativos y controles compartidos según DESIGN.md. No elimina locales ni su historial.
 
+El backend bloquea con 409 la desactivación de un local con usuarios activos asignados. La vista explica que primero deben reasignarse o desactivarse esas cuentas; este conflicto no se presenta como un nombre duplicado.
+
 ## Integración
 
 El BFF `/api/stores` utiliza la cookie de sesión solo en servidor. GET requiere sesión; POST y PATCH requieren administrador activo y validación de origen. Valida UUID, rutas, filtros y datos; descarta campos extra y no expone mensajes internos. Contratos de SPRINT-3-T01 documentados en Swagger `/api/docs`:
