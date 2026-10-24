@@ -14,6 +14,8 @@ const STORE = {
 
 function createService(store: typeof STORE | null = STORE, activeUsers = 0) {
   const prisma = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    $transaction: vi.fn(),
     store: {
       findUnique: vi.fn().mockResolvedValue(store),
       findMany: vi.fn().mockResolvedValue([]),
@@ -24,6 +26,10 @@ function createService(store: typeof STORE | null = STORE, activeUsers = 0) {
       count: vi.fn().mockResolvedValue(activeUsers),
     },
   };
+  prisma.$transaction.mockImplementation(
+    (callback: (tx: typeof prisma) => unknown) =>
+      Promise.resolve(callback(prisma)),
+  );
   return {
     service: new StoresService(prisma as unknown as PrismaService),
     prisma,
@@ -40,11 +46,24 @@ describe('StoresService', () => {
     expect(prisma.store.update).not.toHaveBeenCalled();
   });
 
+  it('desactiva dentro de una transacción con bloqueo de fila', async () => {
+    const { service, prisma } = createService();
+    prisma.store.update.mockResolvedValue({ ...STORE, isActive: false });
+
+    await expect(service.deactivate(STORE.id)).resolves.toMatchObject({
+      store: { isActive: false },
+      changed: true,
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
   it('mantiene idempotente la desactivación de un local ya inactivo', async () => {
     const { service, prisma } = createService({ ...STORE, isActive: false });
 
     await expect(service.deactivate(STORE.id)).resolves.toMatchObject({
-      isActive: false,
+      store: { isActive: false },
+      changed: false,
     });
     expect(prisma.user.count).not.toHaveBeenCalled();
     expect(prisma.store.update).not.toHaveBeenCalled();

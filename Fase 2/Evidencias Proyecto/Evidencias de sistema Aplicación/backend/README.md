@@ -115,10 +115,12 @@ Todos los endpoints exigen JWT. El listado está disponible para los roles auten
 | Endpoint | Descripción |
 | --- | --- |
 | `GET /stores` | Lista locales ordenados por nombre, con filtro opcional `isActive=true\|false`. |
-| `POST /stores` | Crea un local activo con `name`, `city` y `address`. Recorta y colapsa espacios; responde 409 si el nombre ya existe, ignorando mayúsculas y espacios repetidos. |
-| `PATCH /stores/:id` | Edita uno o más de esos campos y aplica las mismas validaciones. |
+| `POST /stores` | Crea un local activo con `name`, `city` y `address`. Recorta y colapsa espacios; responde 409 si el nombre ya existe, ignorando mayúsculas, tildes y espacios repetidos. |
+| `PATCH /stores/:id` | Edita uno o más de esos campos y aplica las mismas validaciones; `null` responde 400. |
 | `PATCH /stores/:id/deactivate` | Desactiva el local sin borrar su historial. Responde 409 si tiene usuarios activos asignados; es idempotente si ya estaba inactivo. |
 | `PATCH /stores/:id/reactivate` | Reactiva el local para permitir asignaciones y operaciones nuevas; es idempotente si ya estaba activo. |
+
+Nombre y ciudad deben incluir al menos una letra; dirección, al menos una letra o número. Los caracteres invisibles se eliminan antes de validar. Las altas de usuarios y los cambios de estado del local se serializan con bloqueo de fila para evitar usuarios activos en locales inactivos. Las llamadas idempotentes sin cambio de estado no duplican auditoría.
 
 Los locales inactivos no admiten asignación de usuarios ni cargas nuevas de documentos o liquidaciones. Las consultas históricas siguen disponibles. El seed solo crea los locales iniciales ausentes y no revierte los cambios realizados mediante esta API.
 

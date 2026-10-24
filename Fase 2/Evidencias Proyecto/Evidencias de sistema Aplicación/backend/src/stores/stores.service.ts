@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import type { CreateStoreDto } from './dto/create-store.dto.js';
 import type { ListStoresQueryDto } from './dto/list-stores-query.dto.js';
 import type { UpdateStoreDto } from './dto/update-store.dto.js';
-import type { StoreResponse } from './types/stores.types.js';
+import type { StoreResponse, StoreStateChange } from './types/stores.types.js';
 import {
   normalizeStoreName,
   normalizeStoreText,
@@ -100,37 +100,47 @@ export class StoresService {
     }
   }
 
-  async deactivate(id: string): Promise<StoreResponse> {
-    const existing = await this.findById(id);
-    if (!existing.isActive) return toStoreResponse(existing);
+  async deactivate(id: string): Promise<StoreStateChange> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM stores WHERE id = ${id}::uuid FOR UPDATE`;
+      const existing = await this.findById(id, tx);
+      if (!existing.isActive) {
+        return { store: toStoreResponse(existing), changed: false };
+      }
 
-    const activeUsers = await this.prisma.user.count({
-      where: { storeId: id, isActive: true },
-    });
-    if (activeUsers > 0) {
-      throw new ConflictException(
-        'No se puede desactivar el local: tiene usuarios activos asignados; deben reasignarse o desactivarse primero',
-      );
-    }
+      const activeUsers = await tx.user.count({
+        where: { storeId: id, isActive: true },
+      });
+      if (activeUsers > 0) {
+        throw new ConflictException(
+          'No se puede desactivar el local: tiene usuarios activos asignados; deben reasignarse o desactivarse primero',
+        );
+      }
 
-    const store = await this.prisma.store.update({
-      where: { id },
-      data: { isActive: false },
-      select: STORE_SELECT,
+      const store = await tx.store.update({
+        where: { id },
+        data: { isActive: false },
+        select: STORE_SELECT,
+      });
+      return { store: toStoreResponse(store), changed: true };
     });
-    return toStoreResponse(store);
   }
 
-  async reactivate(id: string): Promise<StoreResponse> {
-    const existing = await this.findById(id);
-    if (existing.isActive) return toStoreResponse(existing);
+  async reactivate(id: string): Promise<StoreStateChange> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM stores WHERE id = ${id}::uuid FOR UPDATE`;
+      const existing = await this.findById(id, tx);
+      if (existing.isActive) {
+        return { store: toStoreResponse(existing), changed: false };
+      }
 
-    const store = await this.prisma.store.update({
-      where: { id },
-      data: { isActive: true },
-      select: STORE_SELECT,
+      const store = await tx.store.update({
+        where: { id },
+        data: { isActive: true },
+        select: STORE_SELECT,
+      });
+      return { store: toStoreResponse(store), changed: true };
     });
-    return toStoreResponse(store);
   }
 
   async assertActive(id: string): Promise<StoreResponse> {
@@ -143,8 +153,11 @@ export class StoresService {
     return toStoreResponse(store);
   }
 
-  private async findById(id: string): Promise<StoreRecord> {
-    const store = await this.prisma.store.findUnique({
+  private async findById(
+    id: string,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<StoreRecord> {
+    const store = await client.store.findUnique({
       where: { id },
       select: STORE_SELECT,
     });

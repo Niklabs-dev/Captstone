@@ -51,8 +51,10 @@ export class AuditInterceptor implements NestInterceptor<unknown, unknown> {
     // el contexto que haya fijado con setAuditContext.
     return next.handle().pipe(
       concatMap(async (response: unknown) => {
+        const info = this.requestInfo(context);
+        if (info.context?.skipAudit === true) return response;
         await this.auditService.record(
-          buildAuditEvent(options, this.requestInfo(context), response),
+          buildAuditEvent(options, info, response),
         );
         return response;
       }),

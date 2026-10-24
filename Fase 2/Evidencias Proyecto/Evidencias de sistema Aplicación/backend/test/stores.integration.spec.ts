@@ -244,6 +244,53 @@ describe.skipIf(!databaseUrl)(
       await changeState(MISSING_ID, 'reactivate').expect(404);
     });
 
+    it('rechaza null en PATCH sin provocar errores de servidor', async () => {
+      const store = (await createStore(storePayload('Patch null')).expect(201))
+        .body as StoreResponse;
+
+      for (const field of ['name', 'city', 'address']) {
+        await updateStore(store.id, { [field]: null }).expect(400);
+      }
+
+      expect(
+        await prisma.store.findUniqueOrThrow({ where: { id: store.id } }),
+      ).toMatchObject({
+        name: store.name,
+        city: store.city,
+        address: store.address,
+      });
+    });
+
+    it('rechaza caracteres invisibles y valores sin contenido significativo', async () => {
+      const invalidValues = [
+        { name: '\u200b', city: '\u200b', address: '\u200b' },
+        { name: '---', city: 'Melipilla', address: 'Calle 123' },
+        { name: 'Local', city: '...', address: 'Calle 123' },
+        { name: 'Local', city: 'Melipilla', address: '!!!' },
+        { name: '1', city: '2', address: '3' },
+      ];
+      for (const [index, values] of invalidValues.entries()) {
+        await createStore(
+          storePayload(`Sin contenido ${index}`, values),
+        ).expect(400);
+      }
+
+      const store = (
+        await createStore(storePayload('Contenido válido')).expect(201)
+      ).body as StoreResponse;
+      for (const field of ['name', 'city', 'address']) {
+        await updateStore(store.id, { [field]: '\u200b' }).expect(400);
+        await updateStore(store.id, { [field]: '---' }).expect(400);
+      }
+      expect(
+        await prisma.store.findUniqueOrThrow({ where: { id: store.id } }),
+      ).toMatchObject({
+        name: store.name,
+        city: store.city,
+        address: store.address,
+      });
+    });
+
     it('rechaza duplicados normalizados y conserva la unicidad en PostgreSQL', async () => {
       const first = (await createStore(storePayload('Duplicado')).expect(201))
         .body as StoreResponse;
@@ -255,6 +302,11 @@ describe.skipIf(!databaseUrl)(
       expect((duplicate.body as ErrorResponse).message).toBe(
         'Ya existe un local con ese nombre',
       );
+      await createStore({
+        name: `${STORE_PREFIX} Dúplicado`,
+        city: 'Melipilla',
+        address: 'Duplicado con tilde 456',
+      }).expect(409);
 
       await updateStore(first.id, {
         name: `${STORE_PREFIX.toUpperCase()} DUPLICADO`,
@@ -269,7 +321,7 @@ describe.skipIf(!databaseUrl)(
       await expect(
         prisma.store.create({
           data: {
-            name: `${STORE_PREFIX.toLowerCase()}   duplicado`,
+            name: `${STORE_PREFIX.toLowerCase()}   dúplicado`,
             city: 'Melipilla',
             address: 'Acceso directo a BD',
           },
@@ -352,6 +404,46 @@ describe.skipIf(!databaseUrl)(
       ).toBe(true);
     });
 
+    it('serializa el alta de usuarios y la desactivación sin dejar estados incompatibles', async () => {
+      for (let index = 0; index < 4; index += 1) {
+        const store = (
+          await createStore(storePayload(`Concurrencia ${index}`)).expect(201)
+        ).body as StoreResponse;
+        const [userResult, deactivateResult] = await Promise.all([
+          request(app.getHttpServer())
+            .post('/users')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({
+              email: `concurrencia-${index}${DOMAIN}`,
+              password: 'ClaveInicial123',
+              firstName: 'Usuario',
+              lastName: 'Concurrente',
+              roleCode: ROLE.TRABAJADOR,
+              storeId: store.id,
+            }),
+          changeState(store.id, 'deactivate'),
+        ]);
+
+        expect([201, 400]).toContain(userResult.status);
+        expect([200, 409]).toContain(deactivateResult.status);
+        const persisted = await prisma.store.findUniqueOrThrow({
+          where: { id: store.id },
+        });
+        const activeUsers = await prisma.user.count({
+          where: { storeId: store.id, isActive: true },
+        });
+        if (persisted.isActive) {
+          expect(userResult.status).toBe(201);
+          expect(deactivateResult.status).toBe(409);
+          expect(activeUsers).toBe(1);
+        } else {
+          expect(userResult.status).toBe(400);
+          expect(deactivateResult.status).toBe(200);
+          expect(activeUsers).toBe(0);
+        }
+      }
+    });
+
     it('audita creación, edición, desactivación y reactivación con listas blancas', async () => {
       const store = (await createStore(storePayload('Auditoría')).expect(201))
         .body as StoreResponse;
@@ -381,6 +473,28 @@ describe.skipIf(!databaseUrl)(
       expect(logs[1].detail).toEqual({ city: 'Ciudad Editada' });
       expect(logs[2].detail).toBeNull();
       expect(logs[3].detail).toBeNull();
+    });
+
+    it('no duplica auditorías cuando la desactivación o reactivación no cambia el estado', async () => {
+      const store = (
+        await createStore(storePayload('Auditoría idempotente')).expect(201)
+      ).body as StoreResponse;
+
+      await changeState(store.id, 'reactivate').expect(200);
+      await changeState(store.id, 'deactivate').expect(200);
+      await changeState(store.id, 'deactivate').expect(200);
+      await changeState(store.id, 'reactivate').expect(200);
+      await changeState(store.id, 'reactivate').expect(200);
+
+      const logs = await prisma.auditLog.findMany({
+        where: { entityType: 'stores', entityId: store.id },
+        orderBy: { id: 'asc' },
+      });
+      expect(logs.map((log) => log.action)).toEqual([
+        AUDIT_ACTION.STORE_CREATED,
+        AUDIT_ACTION.STORE_DEACTIVATED,
+        AUDIT_ACTION.STORE_REACTIVATED,
+      ]);
     });
 
     it('exige JWT, limita las mutaciones al administrador y deja el catálogo disponible', async () => {

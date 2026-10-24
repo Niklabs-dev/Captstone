@@ -275,7 +275,7 @@ Table stores {
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null]
 
-  Note: 'stores_name_normalized_key: nombre único normalizado a mayúsculas y sin espacios repetidos'
+  Note: 'stores_name_normalized_key: nombre único normalizado a mayúsculas, sin tildes ni espacios repetidos'
 }
 
 Table roles {

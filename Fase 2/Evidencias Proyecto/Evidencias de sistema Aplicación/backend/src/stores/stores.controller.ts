@@ -112,9 +112,12 @@ export class StoresController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StoreResponse> {
-    const store = await this.storesService.deactivate(id);
-    setAuditContext(res, { storeId: store.id });
-    return store;
+    const result = await this.storesService.deactivate(id);
+    setAuditContext(res, {
+      storeId: result.store.id,
+      skipAudit: !result.changed,
+    });
+    return result.store;
   }
 
   @Patch(':id/reactivate')
@@ -138,9 +141,12 @@ export class StoresController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StoreResponse> {
-    const store = await this.storesService.reactivate(id);
-    setAuditContext(res, { storeId: store.id });
-    return store;
+    const result = await this.storesService.reactivate(id);
+    setAuditContext(res, {
+      storeId: result.store.id,
+      skipAudit: !result.changed,
+    });
+    return result.store;
   }
 
   @Patch(':id')
