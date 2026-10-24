@@ -8,26 +8,31 @@ import {
   Patch,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { ROLE } from '../auth/constants/roles.constants.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import { AUDIT_ACTION } from '../audit/constants/audit-actions.constants.js';
 import { Audited } from '../audit/decorators/audited.decorator.js';
+import { setAuditContext } from '../audit/utils/audit-context.util.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { ListUsersQueryDto } from './dto/list-users-query.dto.js';
+import { UpdateUserDto } from './dto/update-user.dto.js';
 import { UserResponseDto } from './dto/user-response.dto.js';
 import type { UserResponse } from './types/users.types.js';
 import { UsersService } from './users.service.js';
@@ -108,5 +113,81 @@ export class UsersController {
     @CurrentUser() currentUser: AuthUser,
   ): Promise<UserResponse> {
     return this.usersService.deactivate(id, currentUser);
+  }
+
+  // Edición completa y reactivación (SPRINT-3-T03).
+  @Patch(':id')
+  @HttpCode(200)
+  @Audited({
+    action: AUDIT_ACTION.USER_UPDATED,
+    entityType: 'users',
+    entityIdFrom: 'params.id',
+    // Lista blanca: nunca correo, RUT, teléfono ni nombres (datos personales).
+    detailFromBody: ['roleCode', 'storeId'],
+  })
+  @ApiOperation({
+    summary:
+      'Edita datos personales, rol y local de un usuario (sin cambiar su contraseña)',
+  })
+  @ApiOkResponse({
+    description:
+      'Usuario actualizado. Si cambió el rol o el local, sus sesiones quedan revocadas y debe volver a iniciar sesión.',
+    type: UserResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'ID no es un UUID, body vacío o con datos inválidos (ej. RUT), null en un campo obligatorio, rol/local inexistente, inactivo o incompatible, o intento de cambiar el rol propio.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Solo ADMINISTRADOR puede editar usuarios.',
+  })
+  @ApiNotFoundResponse({ description: 'Usuario no encontrado.' })
+  @ApiConflictResponse({
+    description:
+      'Ya existe un usuario con ese correo o RUT, o la cuenta está anonimizada.',
+  })
+  update(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateUserDto,
+    @CurrentUser() currentUser: AuthUser,
+  ): Promise<UserResponse> {
+    return this.usersService.update(id, dto, currentUser);
+  }
+
+  @Patch(':id/reactivate')
+  @HttpCode(200)
+  @Audited({
+    action: AUDIT_ACTION.USER_REACTIVATED,
+    entityType: 'users',
+    entityIdFrom: 'params.id',
+  })
+  @ApiOperation({
+    summary:
+      'Reactiva una cuenta desactivada sin restaurar sus sesiones anteriores',
+  })
+  @ApiOkResponse({
+    description:
+      'Cuenta reactivada; el usuario debe iniciar sesión de nuevo (idempotente si ya estaba activa).',
+    type: UserResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'ID no es un UUID, o el rol o el local asignados no existen o están inactivos.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Solo ADMINISTRADOR puede reactivar usuarios.',
+  })
+  @ApiNotFoundResponse({ description: 'Usuario no encontrado.' })
+  @ApiConflictResponse({
+    description: 'La cuenta está anonimizada y no se puede reactivar.',
+  })
+  async reactivate(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<UserResponse> {
+    const result = await this.usersService.reactivate(id);
+    // Una reactivación sin efecto (ya estaba activa) no se audita.
+    setAuditContext(res, { skipAudit: !result.changed });
+    return result.user;
   }
 }

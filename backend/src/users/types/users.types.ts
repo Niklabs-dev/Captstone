@@ -25,3 +25,10 @@ export interface UserResponse {
   store: UserStoreSummary | null;
   createdAt: Date;
 }
+
+// Resultado de una reactivación (SPRINT-3-T03): changed es false si la cuenta
+// ya estaba activa, para no auditar una operación idempotente sin efecto.
+export interface UserStateChange {
+  user: UserResponse;
+  changed: boolean;
+}
