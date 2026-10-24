@@ -4,13 +4,14 @@ import {
   storeErrorMessage,
   type Store,
   type StoreInput,
+  type StoreOperation,
 } from './stores';
 export class StoreError extends Error {
   constructor(
     public readonly status: number,
-    deactivating = false,
+    operation: StoreOperation = 'save',
   ) {
-    super(storeErrorMessage(status, deactivating));
+    super(storeErrorMessage(status, operation));
     this.name = 'StoreError';
   }
 }
@@ -19,6 +20,12 @@ async function request(
   init: RequestInit,
   fetcher: typeof fetch,
 ): Promise<unknown> {
+  const operation: StoreOperation =
+    !init.method || init.method === 'GET'
+      ? 'load'
+      : path.endsWith('/deactivate')
+        ? 'deactivate'
+        : 'save';
   let response: Response;
   try {
     response = await fetcher('/api/stores' + path, {
@@ -32,12 +39,11 @@ async function request(
     });
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') throw error;
-    throw new StoreError(503);
+    throw new StoreError(503, operation);
   }
-  if (!response.ok)
-    throw new StoreError(response.status, path.endsWith('/deactivate'));
+  if (!response.ok) throw new StoreError(response.status, operation);
   return response.json().catch(() => {
-    throw new StoreError(502);
+    throw new StoreError(502, operation);
   });
 }
 export async function loadStores(
@@ -45,7 +51,7 @@ export async function loadStores(
   fetcher: typeof fetch = fetch,
 ): Promise<Store[]> {
   const stores = parseStores(await request('', { signal }, fetcher));
-  if (!stores) throw new StoreError(502);
+  if (!stores) throw new StoreError(502, 'load');
   return stores;
 }
 export async function saveStore(

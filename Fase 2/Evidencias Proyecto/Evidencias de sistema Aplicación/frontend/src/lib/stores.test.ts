@@ -26,6 +26,26 @@ const store: Store = {
   updatedAt: '2026-10-24T12:00:00Z',
 };
 const input = { name: store.name, city: store.city, address: store.address };
+test('Un fallo al cargar distingue la lectura del guardado y orienta una recuperación válida', async () => {
+  await assert.rejects(
+    loadStores(undefined, async () =>
+      Response.json({ message: 'detalle interno' }, { status: 500 }),
+    ),
+    (error) =>
+      error instanceof StoreError &&
+      /cargar el catálogo/.test(error.message) &&
+      !/guardar|detalle interno/.test(error.message),
+  );
+  await assert.rejects(
+    saveStore(null, input, async () =>
+      Response.json({ message: 'detalle interno' }, { status: 500 }),
+    ),
+    (error) =>
+      error instanceof StoreError &&
+      /guardar el local/.test(error.message) &&
+      !/detalle interno/.test(error.message),
+  );
+});
 test('El conflicto de desactivación explica las cuentas activas y no acusa un nombre duplicado', async () => {
   await assert.rejects(
     changeStoreState(store, async () =>
@@ -34,7 +54,8 @@ test('El conflicto de desactivación explica las cuentas activas y no acusa un n
     (error) =>
       error instanceof StoreError &&
       /usuarios activos asignados/.test(error.message) &&
-      !/otro nombre|detalle interno/.test(error.message),
+      /desde Usuarios/.test(error.message) &&
+      !/Reasigna|otro nombre|detalle interno/.test(error.message),
   );
 });
 test('Normaliza espacios e invisibles como el backend, conserva tildes y valida límites', () => {

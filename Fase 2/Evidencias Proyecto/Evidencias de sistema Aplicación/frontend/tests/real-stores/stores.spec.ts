@@ -32,7 +32,7 @@ async function assertNoOverflow(page: Page): Promise<void> {
     ),
   ).toBe(true);
 }
-test('CRUD real, catálogo inmediato en Usuarios y Auditoría, inactivos e historial', async ({
+test('CRUD real, catálogo completo en Documentos, Usuarios y Auditoría, inactivos e historial', async ({
   page,
   context,
   baseURL,
@@ -94,6 +94,26 @@ test('CRUD real, catálogo inmediato en Usuarios y Auditoría, inactivos e histo
   await dialog.getByLabel('Nombre del local').fill(updatedName);
   await dialog.getByRole('button', { name: 'Guardar local' }).click();
   await expect(dialog).not.toBeVisible();
+  // El local aún no tiene trabajadores: Documentos debe ofrecerlo igualmente.
+  await page.goto('/admin/documentos');
+  const documentStoreFilter = page.getByRole('combobox', {
+    name: 'Local',
+    exact: true,
+  });
+  await expect(
+    documentStoreFilter.locator(`option[value="${created.id}"]`),
+  ).toHaveText(updatedName);
+  await documentStoreFilter.selectOption(created.id);
+  await expect(
+    page.getByText('No hay trabajadores que coincidan con los filtros.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await assertNoOverflow(page);
+  await page.screenshot({
+    path: info.outputPath('documentos-local-vacio.png'),
+    fullPage: true,
+  });
   await page.goto('/admin/usuarios');
   await expect(
     page
@@ -189,12 +209,34 @@ test('CRUD real, catálogo inmediato en Usuarios y Auditoría, inactivos e histo
       .locator(`option[value="${created.id}"]`),
   ).toHaveCount(0);
   await userDialog.getByRole('button', { name: 'Cancelar' }).click();
+  // APIRequest lee el HTML sin ejecutar JavaScript ni hidratar el selector.
+  const auditResponse = await context.request.get('/admin/auditoria');
+  expect(auditResponse.status()).toBe(200);
+  const auditHtml = await auditResponse.text();
+  const initialAuditSelect = auditHtml.match(
+    /<select\b[^>]*\bid="audit-store"[^>]*>([\s\S]*?)<\/select>/,
+  )?.[1];
+  expect(initialAuditSelect).toBeDefined();
+  expect(initialAuditSelect).toContain(updatedName + ' (inactivo)');
   await page.goto('/admin/auditoria');
   await expect(
     page
       .getByRole('combobox', { name: 'Local', exact: true })
       .locator(`option[value="${created.id}"]`),
   ).toContainText('(inactivo)');
+  await page.goto('/admin/documentos');
+  await expect(
+    documentStoreFilter.locator(`option[value="${created.id}"]`),
+  ).toHaveText(updatedName + ' (inactivo)');
+  await documentStoreFilter.selectOption(created.id);
+  await expect(
+    page.getByRole('button', { name: /Trabajador Catálogo/ }),
+  ).toBeVisible();
+  await assertNoOverflow(page);
+  await page.screenshot({
+    path: info.outputPath('documentos-local-inactivo.png'),
+    fullPage: true,
+  });
   await page.goto('/admin/locales');
   await page
     .getByRole('button', { name: 'Reactivar ' + updatedName, exact: true })

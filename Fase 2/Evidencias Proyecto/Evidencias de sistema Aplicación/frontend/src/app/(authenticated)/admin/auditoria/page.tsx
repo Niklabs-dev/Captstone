@@ -48,14 +48,15 @@ export default async function AuditPage({
     redirect('/dashboard?reason=forbidden');
   const stores = mergeAuditStores(
     session.ok ? session.data.stores : [],
+    result?.ok
+      ? result.data.items.flatMap((entry) => (entry.store ? [entry.store] : []))
+      : [],
+    // El catálogo vigente tiene prioridad sobre los metadatos históricos.
     catalog?.ok
       ? storeOptions(catalog.data).map((store) => ({
           id: store.id,
           name: store.name + (store.isActive === false ? ' (inactivo)' : ''),
         }))
-      : [],
-    result?.ok
-      ? result.data.items.flatMap((entry) => (entry.store ? [entry.store] : []))
       : [],
   );
   const message = !session.ok

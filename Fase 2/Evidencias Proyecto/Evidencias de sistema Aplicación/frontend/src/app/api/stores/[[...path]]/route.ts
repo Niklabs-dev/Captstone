@@ -32,7 +32,11 @@ async function forward(
       {
         message: storeErrorMessage(
           response.status,
-          path.endsWith('/deactivate'),
+          !init.method || init.method === 'GET'
+            ? 'load'
+            : path.endsWith('/deactivate')
+              ? 'deactivate'
+              : 'save',
         ),
       },
       response.status,

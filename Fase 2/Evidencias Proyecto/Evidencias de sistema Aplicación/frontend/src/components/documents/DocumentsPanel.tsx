@@ -6,9 +6,11 @@ import {
   tableHeaderClass,
   labelClass,
   inputClass,
+  buttonClass,
 } from '@/components/ui/styles';
 import { useState, type ReactElement } from 'react';
 import type { ManagedUser } from '@/lib/users';
+import { useStoreOptions } from '@/lib/use-store-options';
 import { DocumentWorkspace } from './DocumentWorkspace';
 
 export function DocumentsPanel({
@@ -20,14 +22,8 @@ export function DocumentsPanel({
   const [store, setStore] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [busy, setBusy] = useState(false);
+  const { stores, catalogError, reload } = useStoreOptions();
   const selected = workers.find((worker) => worker.id === selectedId);
-  const stores = [
-    ...new Map(
-      workers.flatMap((worker) =>
-        worker.store ? [[worker.store.id, worker.store] as const] : [],
-      ),
-    ).values(),
-  ];
   const visible = workers.filter(
     (worker) =>
       (!store || worker.store?.id === store) &&
@@ -67,11 +63,28 @@ export function DocumentsPanel({
               {stores.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}
+                  {item.isActive === false ? ' (inactivo)' : ''}
                 </option>
               ))}
             </select>
           </label>
         </div>
+        {catalogError && (
+          <div className="mt-3 space-y-3">
+            <p role="alert" className="text-sm text-crit">
+              {catalogError}
+            </p>
+            <button
+              type="button"
+              className={buttonClass}
+              onClick={() => {
+                reload().catch(() => undefined);
+              }}
+            >
+              Actualizar locales
+            </button>
+          </div>
+        )}
       </section>
       {busy && (
         <p role="status" className="text-sm text-ink2">
@@ -121,8 +134,15 @@ export function DocumentsPanel({
                       {worker.email}
                     </span>
                     <span className="mt-2 block text-xs text-ink2">
-                      {worker.store?.name ?? 'Sin local'} ·{' '}
-                      {worker.isActive ? 'Activo' : 'Desactivado'}
+                      {stores.find((item) => item.id === worker.store?.id)
+                        ?.name ??
+                        worker.store?.name ??
+                        'Sin local'}
+                      {stores.find((item) => item.id === worker.store?.id)
+                        ?.isActive === false
+                        ? ' (inactivo)'
+                        : ''}{' '}
+                      · {worker.isActive ? 'Activo' : 'Desactivado'}
                     </span>
                   </button>
                 </li>
