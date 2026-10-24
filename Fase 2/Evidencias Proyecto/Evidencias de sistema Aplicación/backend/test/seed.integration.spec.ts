@@ -157,12 +157,17 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
     });
   });
 
-  it('no duplica los locales y restaura sus datos si cambiaron', async () => {
+  it('no duplica los locales ni sobrescribe sus cambios administrativos', async () => {
     await withinRollback(async (tx) => {
       await seedDatabase(tx, opciones);
       await tx.store.update({
         where: { id: BASE_STORES[0].id },
-        data: { name: 'Nombre antiguo', isActive: false },
+        data: {
+          name: 'Nombre administrado',
+          city: 'Ciudad administrada',
+          address: 'Dirección administrada',
+          isActive: false,
+        },
       });
 
       await seedDatabase(tx, opciones);
@@ -171,11 +176,15 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
         where: { id: { in: BASE_STORES.map((s) => s.id) } },
       });
       expect(locales).toHaveLength(BASE_STORES.length);
-      const restaurado = await tx.store.findUniqueOrThrow({
+      const administrado = await tx.store.findUniqueOrThrow({
         where: { id: BASE_STORES[0].id },
       });
-      expect(restaurado.name).toBe(BASE_STORES[0].name);
-      expect(restaurado.isActive).toBe(true);
+      expect(administrado).toMatchObject({
+        name: 'Nombre administrado',
+        city: 'Ciudad administrada',
+        address: 'Dirección administrada',
+        isActive: false,
+      });
     });
   });
 
