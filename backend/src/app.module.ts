@@ -8,6 +8,7 @@ import { DocumentsModule } from './documents/documents.module.js';
 import { DtAlertsModule } from './dt-alerts/dt-alerts.module.js';
 import { PayrollModule } from './payroll/payroll.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { StoresModule } from './stores/stores.module.js';
 import { UsersModule } from './users/users.module.js';
 
 @Module({
@@ -17,6 +18,7 @@ import { UsersModule } from './users/users.module.js';
     AuditModule,
     AuthModule,
     UsersModule,
+    StoresModule,
     DocumentsModule,
     DtAlertsModule,
     PayrollModule,

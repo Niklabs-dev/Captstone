@@ -6,6 +6,7 @@ import {
 } from '@nestjs/platform-express';
 import { maxUploadBytes } from '../documents/utils/upload-limits.util.js';
 import { StorageModule } from '../storage/storage.module.js';
+import { StoresModule } from '../stores/stores.module.js';
 import { PayrollController } from './payroll.controller.js';
 import { PayrollService } from './payroll.service.js';
 
@@ -14,6 +15,7 @@ import { PayrollService } from './payroll.service.js';
 @Module({
   imports: [
     StorageModule,
+    StoresModule,
     // Igual que el gestor documental: archivo en memoria (file.buffer) con
     // el límite de DOCUMENTS_MAX_SIZE_MB, que corta la subida con 413.
     MulterModule.registerAsync({

@@ -5,6 +5,7 @@ import {
   type MulterModuleOptions,
 } from '@nestjs/platform-express';
 import { StorageModule } from '../storage/storage.module.js';
+import { StoresModule } from '../stores/stores.module.js';
 import { DocumentsController } from './documents.controller.js';
 import { DocumentsService } from './documents.service.js';
 import { maxUploadBytes } from './utils/upload-limits.util.js';
@@ -13,6 +14,7 @@ import { maxUploadBytes } from './utils/upload-limits.util.js';
 @Module({
   imports: [
     StorageModule,
+    StoresModule,
     // Sin storage ni dest, Multer deja el archivo en memoria (file.buffer).
     // Límite igual a DOCUMENTS_MAX_SIZE_MB: corta la subida antes de cargar en
     // memoria un archivo demasiado grande (responde 413).

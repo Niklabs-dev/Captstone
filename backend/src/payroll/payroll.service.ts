@@ -29,6 +29,7 @@ import { sanitizeFileName } from '../documents/utils/file-name.util.js';
 import { maxUploadBytes } from '../documents/utils/upload-limits.util.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { StoresService } from '../stores/stores.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import { detectMimeType } from '../storage/utils/file-signature.util.js';
 import type { ListPayslipsQueryDto } from './dto/list-payslips-query.dto.js';
@@ -202,6 +203,7 @@ export class PayrollService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly stores: StoresService,
     config: ConfigService,
   ) {
     this.maxUploadBytes = maxUploadBytes(
@@ -310,6 +312,7 @@ export class PayrollService {
     if (!worker.isActive || worker.anonymizedAt !== null) {
       throw new BadRequestException('El trabajador no está activo');
     }
+    await this.stores.assertActive(workerStoreId);
 
     const periodDate = toDbDate(period);
     const existing = await this.prisma.payslip.findUnique({
