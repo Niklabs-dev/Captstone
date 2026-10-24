@@ -107,10 +107,10 @@ export const DOCUMENT_TYPES = [
   },
 ] as const;
 
-// Locales de Moi-food (SPRINT-2-T26). Los UUID son fijos para que el seed
-// sea idempotente (Store no tiene otra clave única) y para que coincidan con
-// los catálogos USER_MANAGEMENT_STORES y AUDIT_STORES de docker-compose.yml.
-// Las direcciones son provisionales hasta confirmar las reales.
+// Locales iniciales de Moi-food (SPRINT-2-T26). Los UUID fijos mantienen la
+// idempotencia y la coincidencia con los catálogos de docker-compose.yml.
+// Desde SPRINT-3-T01 el seed solo crea los ausentes: no revierte los cambios
+// administrados por API. Las direcciones iniciales son provisionales.
 export const BASE_STORES = [
   {
     id: '1010021e-9bab-42d5-851c-417e9e2503bf',
@@ -190,12 +190,7 @@ export async function seedDatabase(
   for (const local of BASE_STORES) {
     const guardado = await db.store.upsert({
       where: { id: local.id },
-      update: {
-        name: local.name,
-        city: local.city,
-        address: local.address,
-        isActive: true,
-      },
+      update: {},
       create: { ...local },
     });
     storeIds.push(guardado.id);

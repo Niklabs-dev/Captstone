@@ -19,6 +19,7 @@ import {
 import type { AuthUser } from '../auth/types/auth.types.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { StoresService } from '../stores/stores.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import { ALLOWED_MIME_TYPES } from '../storage/types/storage.types.js';
 import type { ListDocumentsQueryDto } from './dto/list-documents-query.dto.js';
@@ -155,6 +156,7 @@ export class DocumentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly stores: StoresService,
     config: ConfigService,
   ) {
     this.maxUploadBytes = maxUploadBytes(
@@ -354,6 +356,7 @@ export class DocumentsService {
         'El usuario indicado no es un trabajador con local asignado',
       );
     }
+    await this.stores.assertActive(workerStoreId);
 
     const documentType = await this.prisma.documentType.findUnique({
       where: { code: dto.documentTypeCode },
@@ -383,6 +386,7 @@ export class DocumentsService {
           'El documento indicado no pertenece a ese trabajador o no es de ese tipo',
         );
       }
+      await this.stores.assertActive(existing.storeId);
     } else {
       if (dto.title === undefined) {
         throw new BadRequestException(

@@ -54,6 +54,8 @@ export interface AuditContext {
   storeId?: string | null;
   /** Campos adicionales para detail; nunca contenido de archivos. */
   detail?: Record<string, unknown>;
+  /** Omite el evento si una operación idempotente no cambió el estado. */
+  skipAudit?: boolean;
 }
 
 // Datos de la solicitud HTTP que el interceptor extrae para armar el evento.

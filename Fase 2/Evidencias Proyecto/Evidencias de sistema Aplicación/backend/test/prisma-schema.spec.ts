@@ -173,4 +173,17 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     // Registro de auditoría de operaciones sobre datos.
     expect(sql).toContain('"detail" JSONB');
   });
+
+  it('garantiza nombres de local únicos con espacios y mayúsculas normalizados', () => {
+    const sql = readMigration('locales_nombre_normalizado_unico');
+    expect(sql).toContain('CREATE UNIQUE INDEX "stores_name_normalized_key"');
+    expect(sql).toContain('upper(regexp_replace(btrim("name")');
+  });
+
+  it('normaliza las tildes con funciones inmutables aptas para el índice', () => {
+    const sql = readMigration('locales_nombre_sin_tildes');
+    expect(sql).toContain('DROP INDEX "stores_name_normalized_key"');
+    expect(sql).toContain('upper(translate(');
+    expect(sql).not.toContain('unaccent');
+  });
 });

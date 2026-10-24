@@ -48,8 +48,8 @@ $ npm run prisma:migrate          # desarrollo (también crea migraciones nuevas
 $ npm run prisma:migrate:deploy   # producción/CI (solo aplica)
 
 # datos base: roles (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR),
-# tipos de documento laboral (CONTRATO, ANEXO, PACTO, FINIQUITO, LIQUIDACION,
-# PERMISO_SANITARIO) y usuario administrador inicial. Idempotente.
+# tipos de documento laboral, tres locales iniciales y administrador inicial.
+# Idempotente; no revierte los cambios administrativos de los locales.
 $ npm run prisma:seed
 
 # regenerar el cliente (corre solo en npm install vía postinstall)
@@ -108,6 +108,22 @@ Ambos decoradores documentan la respuesta 403 en Swagger automáticamente.
 listClosings(@Param('storeId') storeId: string) { ... }
 ```
 
+## Administración de locales
+
+Todos los endpoints exigen JWT. El listado está disponible para los roles autenticados; las mutaciones son exclusivas de `ADMINISTRADOR` (403 para el resto):
+
+| Endpoint | Descripción |
+| --- | --- |
+| `GET /stores` | Lista locales ordenados por nombre, con filtro opcional `isActive=true\|false`. |
+| `POST /stores` | Crea un local activo con `name`, `city` y `address`. Recorta y colapsa espacios; responde 409 si el nombre ya existe, ignorando mayúsculas, tildes y espacios repetidos. |
+| `PATCH /stores/:id` | Edita uno o más de esos campos y aplica las mismas validaciones; `null` responde 400. |
+| `PATCH /stores/:id/deactivate` | Desactiva el local sin borrar su historial. Responde 409 si tiene usuarios activos asignados; es idempotente si ya estaba inactivo. |
+| `PATCH /stores/:id/reactivate` | Reactiva el local para permitir asignaciones y operaciones nuevas; es idempotente si ya estaba activo. |
+
+Nombre y ciudad deben incluir al menos una letra; dirección, al menos una letra o número. Los caracteres invisibles se eliminan antes de validar. Las altas de usuarios y los cambios de estado del local se serializan con bloqueo de fila para evitar usuarios activos en locales inactivos. Las llamadas idempotentes sin cambio de estado no duplican auditoría.
+
+Los locales inactivos no admiten asignación de usuarios ni cargas nuevas de documentos o liquidaciones. Las consultas históricas siguen disponibles. El seed solo crea los locales iniciales ausentes y no revierte los cambios realizados mediante esta API.
+
 ## Gestión de usuarios
 
 Endpoints exclusivos del rol `ADMINISTRADOR` (403 para el resto):
@@ -148,6 +164,8 @@ Los endpoints marcados con `@Audited()` quedan registrados automáticamente (`Au
 | --- | --- |
 | `USER_LOGIN` / `USER_LOGIN_FAILED` | Inicio de sesión exitoso o rechazado (401). |
 | `USER_CREATED` / `USER_DEACTIVATED` | Creación y desactivación de usuarios. |
+| `STORE_CREATED` / `STORE_UPDATED` | Creación y edición de locales (detalle limitado a los campos recibidos). |
+| `STORE_DEACTIVATED` / `STORE_REACTIVATED` | Desactivación y reactivación lógica de locales, con el local afectado asociado al evento. |
 | `DOCUMENT_UPLOADED` / `DOCUMENT_VERSION_ADDED` | Carga de un documento laboral o de una nueva versión (detalle: trabajador, tipo, versión y SHA-256). |
 | `DOCUMENT_DOWNLOADED` | Descarga de una versión (detalle: documento y resultado de integridad `VALID`/`ALTERED`). |
 | `DOCUMENT_DELETED` / `DOCUMENT_DELETION_BLOCKED` | Eliminación vencido el plazo de conservación, o intento rechazado (409) antes de que venza. |
