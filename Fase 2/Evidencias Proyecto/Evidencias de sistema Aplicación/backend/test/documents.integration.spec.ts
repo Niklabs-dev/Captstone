@@ -433,6 +433,57 @@ describe.skipIf(!databaseUrl)(
       ).expect(400);
     });
 
+    it('rechaza documentos y versiones nuevas en un local inactivo', async () => {
+      const existing = (
+        await upload(
+          { workerId, documentTypeCode: 'CONTRATO', title: 'Contrato vigente' },
+          pdf(),
+        ).expect(201)
+      ).body as DocumentResponse;
+      await prisma.store.update({
+        where: { id: storeId },
+        data: { isActive: false },
+      });
+
+      try {
+        const rejected = await upload(
+          {
+            workerId,
+            documentTypeCode: 'PACTO',
+            title: 'Documento de local inactivo',
+          },
+          pdf(),
+        ).expect(400);
+        expect((rejected.body as ErrorResponse).message).toBe(
+          'El local indicado no existe o está inactivo',
+        );
+        await upload(
+          {
+            workerId,
+            documentTypeCode: 'CONTRATO',
+            documentId: existing.id,
+          },
+          pdf(),
+        ).expect(400);
+
+        expect(
+          await prisma.documentVersion.count({
+            where: { documentId: existing.id },
+          }),
+        ).toBe(1);
+        expect(
+          await prisma.document.count({
+            where: { title: 'Documento de local inactivo' },
+          }),
+        ).toBe(0);
+      } finally {
+        await prisma.store.update({
+          where: { id: storeId },
+          data: { isActive: true },
+        });
+      }
+    });
+
     it('responde 415 si el contenido no es PDF, PNG ni JPEG', async () => {
       await upload(
         { workerId, documentTypeCode: 'CONTRATO', title: 'Contrato' },

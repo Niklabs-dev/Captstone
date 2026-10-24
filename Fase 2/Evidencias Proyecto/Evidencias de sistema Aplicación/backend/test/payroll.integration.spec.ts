@@ -350,6 +350,34 @@ describe.skipIf(!databaseUrl)(
       ).toBe(1);
     });
 
+    it('rechaza liquidaciones nuevas en un local inactivo', async () => {
+      const before = await prisma.payslip.count({
+        where: { workerId: ids.trabajador },
+      });
+      await prisma.store.update({
+        where: { id: storeId },
+        data: { isActive: false },
+      });
+
+      try {
+        const response = await upload(
+          { workerId: ids.trabajador, period: '2025-03' },
+          uniquePdf(),
+        ).expect(400);
+        expect((response.body as { message: string | string[] }).message).toBe(
+          'El local indicado no existe o está inactivo',
+        );
+        expect(
+          await prisma.payslip.count({ where: { workerId: ids.trabajador } }),
+        ).toBe(before);
+      } finally {
+        await prisma.store.update({
+          where: { id: storeId },
+          data: { isActive: true },
+        });
+      }
+    });
+
     it('valida el período, el trabajador, el archivo y su tipo', async () => {
       // Período inválido o posterior al mes en curso.
       await upload(

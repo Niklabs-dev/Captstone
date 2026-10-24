@@ -67,27 +67,18 @@ export class UsersService {
       );
     }
 
+    const assignedStoreId = dto.storeId;
     // Los roles globales no se atan a un local; el resto lo exige.
     if (isGlobalRole(role.code)) {
-      if (dto.storeId !== undefined) {
+      if (assignedStoreId !== undefined) {
         throw new BadRequestException(
           `El rol ${role.code} es global y no admite local asignado`,
         );
       }
-    } else {
-      if (dto.storeId === undefined) {
-        throw new BadRequestException(
-          `El rol ${role.code} requiere un local asignado`,
-        );
-      }
-      const store = await this.prisma.store.findUnique({
-        where: { id: dto.storeId },
-      });
-      if (!store || !store.isActive) {
-        throw new BadRequestException(
-          'El local indicado no existe o está inactivo',
-        );
-      }
+    } else if (assignedStoreId === undefined) {
+      throw new BadRequestException(
+        `El rol ${role.code} requiere un local asignado`,
+      );
     }
 
     const hiredAt =
@@ -95,19 +86,34 @@ export class UsersService {
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
     try {
-      const user = await this.prisma.user.create({
-        data: {
-          email: dto.email,
-          passwordHash,
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          rut: dto.rut,
-          phone: dto.phone,
-          hiredAt,
-          roleId: role.id,
-          storeId: dto.storeId,
-        },
-        include: USER_INCLUDE,
+      const user = await this.prisma.$transaction(async (tx) => {
+        if (!isGlobalRole(role.code) && assignedStoreId !== undefined) {
+          // Serializa el alta con la desactivación del local, que toma el mismo bloqueo.
+          await tx.$queryRaw`SELECT id FROM stores WHERE id = ${assignedStoreId}::uuid FOR UPDATE`;
+          const store = await tx.store.findUnique({
+            where: { id: assignedStoreId },
+          });
+          if (!store || !store.isActive) {
+            throw new BadRequestException(
+              'El local indicado no existe o está inactivo',
+            );
+          }
+        }
+
+        return tx.user.create({
+          data: {
+            email: dto.email,
+            passwordHash,
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            rut: dto.rut,
+            phone: dto.phone,
+            hiredAt,
+            roleId: role.id,
+            storeId: assignedStoreId,
+          },
+          include: USER_INCLUDE,
+        });
       });
       return toUserResponse(user);
     } catch (error) {

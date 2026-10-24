@@ -12,6 +12,7 @@ import { DocumentsService } from '../src/documents/documents.service.js';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import type { PrismaService } from '../src/prisma/prisma.service.js';
 import { StorageService } from '../src/storage/storage.service.js';
+import { StoresService } from '../src/stores/stores.service.js';
 
 // Tests de integración de la consulta de documentos (SPRINT-2-T06) contra
 // PostgreSQL real, llamando al servicio directamente. Se omiten si no se
@@ -132,6 +133,7 @@ describe.skipIf(!databaseUrl)('Consulta de documentos (SPRINT-2-T06)', () => {
     const service = new DocumentsService(
       tx as unknown as PrismaService,
       storage,
+      new StoresService(tx as unknown as PrismaService),
       new ConfigService({ DOCUMENTS_MAX_SIZE_MB: '5' }),
     );
     return {
