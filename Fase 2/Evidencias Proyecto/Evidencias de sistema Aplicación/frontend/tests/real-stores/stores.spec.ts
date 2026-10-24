@@ -97,17 +97,17 @@ test('CRUD real, catálogo inmediato en Usuarios y Auditoría, inactivos e histo
   await page.goto('/admin/usuarios');
   await expect(
     page
-      .getByLabel('Local', { exact: true })
+      .getByRole('combobox', { name: 'Local', exact: true })
       .locator('option', { hasText: updatedName }),
   ).toHaveCount(1);
   await page.getByRole('button', { name: /Crear usuario/ }).click();
   const userDialog = page.getByRole('dialog', { name: 'Crear usuario' });
   await userDialog
-    .getByLabel('Rol', { exact: true })
+    .getByRole('combobox', { name: 'Rol', exact: true })
     .selectOption('TRABAJADOR');
   await expect(
     userDialog
-      .getByLabel('Local asignado')
+      .getByRole('combobox', { name: 'Local asignado', exact: true })
       .locator('option', { hasText: updatedName }),
   ).toHaveCount(1);
   await userDialog.getByRole('button', { name: 'Cancelar' }).click();
@@ -128,19 +128,19 @@ test('CRUD real, catálogo inmediato en Usuarios y Auditoría, inactivos e histo
   await page.goto('/admin/auditoria');
   await expect(
     page
-      .getByLabel('Local', { exact: true })
+      .getByRole('combobox', { name: 'Local', exact: true })
       .locator('option', { hasText: updatedName }),
   ).toHaveCount(1);
   await page.goto('/liquidaciones');
   await expect(
     page
-      .getByLabel('Local', { exact: true })
+      .getByRole('combobox', { name: 'Local', exact: true })
       .locator('option', { hasText: updatedName }),
   ).toHaveCount(1);
   await page.goto('/admin/alertas-dt');
   await expect(
     page
-      .getByLabel('Local', { exact: true })
+      .getByRole('combobox', { name: 'Local', exact: true })
       .locator('option', { hasText: updatedName }),
   ).toHaveCount(1);
   await page.goto('/admin/locales');
@@ -156,7 +156,7 @@ test('CRUD real, catálogo inmediato en Usuarios y Auditoría, inactivos e histo
   await page.goto('/admin/usuarios');
   await expect(
     page
-      .getByLabel('Local', { exact: true })
+      .getByRole('combobox', { name: 'Local', exact: true })
       .locator('option', { hasText: updatedName }),
   ).toContainText('(inactivo)');
   const users: { id: string; store: { id: string } | null }[] = await (
@@ -165,18 +165,18 @@ test('CRUD real, catálogo inmediato en Usuarios y Auditoría, inactivos e histo
   expect(users.find((item) => item.id === user.id)?.store?.id).toBe(created.id);
   await page.getByRole('button', { name: /Crear usuario/ }).click();
   await userDialog
-    .getByLabel('Rol', { exact: true })
+    .getByRole('combobox', { name: 'Rol', exact: true })
     .selectOption('TRABAJADOR');
   await expect(
     userDialog
-      .getByLabel('Local asignado')
+      .getByRole('combobox', { name: 'Local asignado', exact: true })
       .locator(`option[value="${created.id}"]`),
   ).toHaveCount(0);
   await userDialog.getByRole('button', { name: 'Cancelar' }).click();
   await page.goto('/admin/auditoria');
   await expect(
     page
-      .getByLabel('Local', { exact: true })
+      .getByRole('combobox', { name: 'Local', exact: true })
       .locator(`option[value="${created.id}"]`),
   ).toContainText('(inactivo)');
   await page.goto('/admin/locales');
