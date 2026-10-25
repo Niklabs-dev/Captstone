@@ -63,16 +63,31 @@ test('Rechaza nombres vacíos, correo inválido y límites excesivos', () => {
   ])
     assert.equal(parseCreateUser(value).ok, false);
 });
-test('Respeta el mínimo de contraseña y el límite bcrypt de 72 bytes', () => {
+test('Respeta la política de 8 a 32 caracteres y el límite bcrypt de 72 bytes', () => {
   assert.equal(parseCreateUser({ ...input, password: 'short' }).ok, false);
   assert.equal(
-    parseCreateUser({ ...input, password: 'á'.repeat(37) }).ok,
-    false,
-  );
-  assert.equal(
-    parseCreateUser({ ...input, password: 'a'.repeat(72) }).ok,
+    parseCreateUser({ ...input, password: 'a'.repeat(32) }).ok,
     true,
   );
+  assert.equal(
+    parseCreateUser({ ...input, password: 'a'.repeat(33) }).ok,
+    false,
+  );
+  // 'あ' ocupa 3 bytes: 24 caracteres = 72 bytes; 25 = 75 bytes.
+  assert.equal(
+    parseCreateUser({ ...input, password: 'あ'.repeat(24) }).ok,
+    true,
+  );
+  const tooManyBytes = parseCreateUser({
+    ...input,
+    password: 'あ'.repeat(25),
+  });
+  assert.equal(tooManyBytes.ok, false);
+  if (!tooManyBytes.ok)
+    assert.equal(
+      tooManyBytes.message,
+      'La contraseña debe tener entre 8 y 32 caracteres y no superar 72 bytes.',
+    );
 });
 test('Los roles locales requieren UUID; los globales no admiten local', () => {
   for (const roleCode of ['TRABAJADOR', 'SUPERVISOR']) {

@@ -202,16 +202,17 @@ export class UsersController {
     // Sin detailFromBody: la contraseña nunca se audita.
   })
   @ApiOperation({
-    summary: 'Restablece la contraseña de un usuario y cierra sus sesiones',
+    summary:
+      'Restablece la contraseña de un usuario y revoca sus refresh tokens',
   })
   @ApiOkResponse({
     description:
-      'Contraseña restablecida; las sesiones abiertas quedan revocadas y el usuario debe iniciar sesión con la clave nueva. Una cuenta desactivada sigue desactivada.',
+      'Contraseña restablecida y refresh tokens revocados: el usuario debe iniciar sesión con la clave nueva para obtener sesiones nuevas. Los access tokens ya emitidos siguen vigentes hasta su expiración (JWT_EXPIRES_IN). Una cuenta desactivada sigue desactivada.',
     type: UserResponseDto,
   })
   @ApiBadRequestResponse({
     description:
-      'ID no es un UUID, la contraseña no cumple la política (8 a 72 caracteres) o se intenta restablecer la cuenta propia.',
+      'ID no es un UUID, la contraseña no cumple la política (8 a 32 caracteres, sin superar 72 bytes) o se intenta restablecer la cuenta propia.',
   })
   @ApiForbiddenResponse({
     description: 'Solo ADMINISTRADOR puede restablecer contraseñas.',

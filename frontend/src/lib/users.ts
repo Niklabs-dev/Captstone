@@ -5,6 +5,10 @@ export const USER_ROLES = [
   'TRABAJADOR',
 ] as const;
 export type UserRole = (typeof USER_ROLES)[number];
+// Misma política de contraseña que el backend; bcrypt trunca sobre 72 bytes.
+export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MAX_LENGTH = 32;
+export const PASSWORD_MAX_BYTES = 72;
 export const ROLE_LABELS: Record<UserRole, string> = {
   ADMINISTRADOR: 'Administrador',
   CONTADOR: 'Contador',
@@ -79,14 +83,14 @@ export function parseCreateUser(value: unknown): InputResult<CreateUserInput> {
     };
   if (
     typeof value.password !== 'string' ||
-    value.password.length < 8 ||
-    value.password.length > 72 ||
-    new TextEncoder().encode(value.password).length > 72
+    value.password.length < PASSWORD_MIN_LENGTH ||
+    value.password.length > PASSWORD_MAX_LENGTH ||
+    new TextEncoder().encode(value.password).length > PASSWORD_MAX_BYTES
   )
     return {
       ok: false,
       message:
-        'La contraseña debe tener entre 8 y 72 caracteres y no superar 72 bytes.',
+        'La contraseña debe tener entre 8 y 32 caracteres y no superar 72 bytes.',
     };
   if (!isUserRole(value.roleCode))
     return { ok: false, message: 'Selecciona un rol válido.' };

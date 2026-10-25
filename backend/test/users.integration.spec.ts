@@ -251,6 +251,9 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
     for (const extra of [
       { email: 'no-es-correo' },
       { password: 'corta' },
+      // Política de contraseña: máximo 32 caracteres y 72 bytes UTF-8.
+      { password: 'a'.repeat(33) },
+      { password: 'あ'.repeat(25) },
       { roleCode: 'SUPERUSUARIO' },
       { rut: '12345678-9' },
       { hiredAt: '2026-02-30' },
@@ -263,6 +266,17 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
       where: { email: `invalido${DOMAIN}` },
     });
     expect(count).toBe(0);
+  });
+
+  it('acepta contraseñas en el límite de 32 caracteres y 72 bytes', async () => {
+    // 'a' ocupa 1 byte y 'あ' 3 bytes: 24 caracteres = 72 bytes.
+    for (const [suffix, password] of [
+      ['limite-ascii', 'a'.repeat(32)],
+      ['limite-bytes', 'あ'.repeat(24)],
+    ]) {
+      await createUser(worker(suffix, { password })).expect(201);
+      await login(`${suffix}${DOMAIN}`, password).expect(200);
+    }
   });
 
   it('responde 409 si el correo o el RUT ya existen', async () => {
@@ -841,6 +855,7 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
       expect(await bcrypt.compare(NEW_PASSWORD, usuario.passwordHash)).toBe(
         true,
       );
+      expect(bcrypt.getRounds(usuario.passwordHash)).toBe(12);
       // Sigue sin acceso hasta que se reactive.
       await login(`reset-inactivo${DOMAIN}`, NEW_PASSWORD).expect(401);
     });
@@ -851,15 +866,28 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
       await resetPassword(creado.id, { newPassword: 'a'.repeat(7) }).expect(
         400,
       );
-      await resetPassword(creado.id, { newPassword: 'a'.repeat(73) }).expect(
+      await resetPassword(creado.id, { newPassword: 'a'.repeat(33) }).expect(
         400,
       );
+      // 25 caracteres de 3 bytes = 75 bytes: supera el límite de bcrypt.
+      await resetPassword(creado.id, {
+        newPassword: 'あ'.repeat(25),
+      }).expect(400);
       await resetPassword(creado.id, {}).expect(400);
       await resetPassword(creado.id, { newPassword: 12345678 }).expect(400);
 
       // La contraseña original sigue vigente.
       await login(`reset-politica${DOMAIN}`).expect(200);
       expect(await countResets(creado.id)).toBe(0);
+    });
+
+    it('acepta claves nuevas en el límite de 32 caracteres y 72 bytes', async () => {
+      const creado = await createWorker('reset-limite');
+
+      for (const newPassword of ['a'.repeat(32), 'あ'.repeat(24)]) {
+        await resetPassword(creado.id, { newPassword }).expect(200);
+        await login(`reset-limite${DOMAIN}`, newPassword).expect(200);
+      }
     });
 
     it('no permite restablecer la contraseña propia', async () => {

@@ -130,9 +130,12 @@ Endpoints exclusivos del rol `ADMINISTRADOR` (403 para el resto):
 
 | Endpoint | Descripción |
 | --- | --- |
-| `POST /users` | Crea un usuario con rol (`roleCode`), local (`storeId`) y contraseña inicial (hash bcrypt). `SUPERVISOR` y `TRABAJADOR` requieren local; `ADMINISTRADOR` y `CONTADOR` son globales y no lo admiten (400). RUT validado con dígito verificador. 409 si el correo o el RUT ya existen. |
+| `POST /users` | Crea un usuario con rol (`roleCode`), local (`storeId`) y contraseña inicial (entre 8 y 32 caracteres, sin superar 72 bytes; hash bcrypt con costo 12). `SUPERVISOR` y `TRABAJADOR` requieren local; `ADMINISTRADOR` y `CONTADOR` son globales y no lo admiten (400). RUT validado con dígito verificador. 409 si el correo o el RUT ya existen. |
 | `GET /users` | Lista usuarios (sin hash de contraseña), con filtros opcionales `storeId`, `roleCode` e `isActive`. |
 | `PATCH /users/:id/deactivate` | Desactiva la cuenta: bloquea login y renovación de sesión (revoca sus refresh tokens) sin borrar sus datos ni documentos. Idempotente; no permite desactivar la cuenta propia. |
+| `PATCH /users/:id` | Edita datos personales, rol y local (no la contraseña). Valida la coherencia entre rol y local finales; si cambia el rol o el local, revoca sus refresh tokens. No permite cambiar el rol propio (400). 404 si no existe; 409 si el correo o el RUT ya existen o la cuenta está anonimizada. |
+| `PATCH /users/:id/reactivate` | Reactiva una cuenta desactivada sin restaurar sus sesiones anteriores; exige rol activo y, en roles de local, un local activo (400). Idempotente: si ya está activa no tiene efecto ni se audita. 404 si no existe; 409 si está anonimizada. |
+| `PATCH /users/:id/password` | Restablece la contraseña (`newPassword`: entre 8 y 32 caracteres, sin superar 72 bytes) con hash bcrypt de costo 12 y revoca sus refresh tokens. No permite restablecer la cuenta propia (400). 404 si no existe; 409 si está anonimizada. Una cuenta desactivada sigue desactivada. |
 
 El access token ya emitido sigue vigente hasta su expiración (`JWT_EXPIRES_IN`).
 
@@ -164,6 +167,8 @@ Los endpoints marcados con `@Audited()` quedan registrados automáticamente (`Au
 | --- | --- |
 | `USER_LOGIN` / `USER_LOGIN_FAILED` | Inicio de sesión exitoso o rechazado (401). |
 | `USER_CREATED` / `USER_DEACTIVATED` | Creación y desactivación de usuarios. |
+| `USER_UPDATED` / `USER_REACTIVATED` | Edición de usuarios (detalle limitado a `roleCode` y `storeId`, sin datos personales) y reactivación efectiva de cuentas. |
+| `USER_PASSWORD_RESET` | Restablecimiento de contraseña por el administrador; el registro no incluye la contraseña ni su hash. |
 | `STORE_CREATED` / `STORE_UPDATED` | Creación y edición de locales (detalle limitado a los campos recibidos). |
 | `STORE_DEACTIVATED` / `STORE_REACTIVATED` | Desactivación y reactivación lógica de locales, con el local afectado asociado al evento. |
 | `DOCUMENT_UPLOADED` / `DOCUMENT_VERSION_ADDED` | Carga de un documento laboral o de una nueva versión (detalle: trabajador, tipo, versión y SHA-256). |
