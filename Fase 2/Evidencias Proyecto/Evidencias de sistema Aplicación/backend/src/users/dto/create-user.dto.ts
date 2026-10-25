@@ -14,6 +14,10 @@ import {
   type ValidatorConstraintInterface,
 } from 'class-validator';
 import { ROLE, type RoleCode } from '../../auth/constants/roles.constants.js';
+import {
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+} from '../constants/password-policy.constants.js';
 import { isValidRut, normalizeRut } from '../utils/rut.util.js';
 
 @ValidatorConstraint({ name: 'isRut' })
@@ -48,13 +52,12 @@ export class CreateUserDto {
     description:
       'Contraseña inicial (mínimo 8 caracteres); se guarda solo su hash bcrypt.',
     example: 'ClaveInicial123',
-    minLength: 8,
-    maxLength: 72,
+    minLength: PASSWORD_MIN_LENGTH,
+    maxLength: PASSWORD_MAX_LENGTH,
   })
   @IsString()
-  @MinLength(8)
-  // bcrypt solo considera los primeros 72 bytes.
-  @MaxLength(72)
+  @MinLength(PASSWORD_MIN_LENGTH)
+  @MaxLength(PASSWORD_MAX_LENGTH)
   password: string;
 
   @ApiProperty({ description: 'Nombre del usuario.', example: 'Juan' })
