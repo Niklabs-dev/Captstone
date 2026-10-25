@@ -4,6 +4,8 @@ import {
   isUserRole,
   needsStore,
   parseCreateUser,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
   ROLE_LABELS,
   USER_ROLES,
   type CreateUserInput,
@@ -102,15 +104,15 @@ export function CreateUserForm({
             name="password"
             type="password"
             required
-            minLength={8}
-            maxLength={72}
+            minLength={PASSWORD_MIN_LENGTH}
+            maxLength={PASSWORD_MAX_LENGTH}
             autoComplete="new-password"
             aria-describedby="password-help"
             className={inputClass}
           />
         </label>
         <p id="password-help" className="text-xs text-ink2">
-          Entre 8 y 72 caracteres. Entrégala al usuario por un medio seguro.
+          Entre 8 y 32 caracteres. Entrégala al usuario por un medio seguro.
         </p>
         <label className={`${labelClass} space-y-1.5`}>
           <span>Rol</span>

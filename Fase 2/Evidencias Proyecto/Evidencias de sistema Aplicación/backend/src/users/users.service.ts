@@ -344,7 +344,9 @@ export class UsersService {
 
   // Restablece la contraseña (SPRINT-3-T04). También aplica a cuentas
   // desactivadas (no cambia isActive), para dejarles una clave nueva antes
-  // de reactivarlas. Revoca las sesiones abiertas con la clave anterior.
+  // de reactivarlas. Revoca los refresh tokens emitidos con la clave anterior;
+  // los access tokens ya emitidos siguen vigentes hasta su expiración.
+  // La política de la clave (largo y bytes) la valida ResetPasswordDto.
   async resetPassword(
     id: string,
     dto: ResetPasswordDto,
@@ -367,7 +369,8 @@ export class UsersService {
         data: { passwordHash },
         include: USER_INCLUDE,
       }),
-      // Revoca las sesiones para que nadie renueve el acceso con la clave anterior.
+      // Revoca los refresh tokens para que nadie renueve el acceso con la
+      // clave anterior.
       this.prisma.refreshToken.updateMany({
         where: { userId: id, revokedAt: null },
         data: { revokedAt: new Date() },
