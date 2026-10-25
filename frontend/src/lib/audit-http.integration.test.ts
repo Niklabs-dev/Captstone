@@ -40,6 +40,22 @@ test('Auditoría HTTP: autorización, filtros, paginación, proyección segura y
       response.end(JSON.stringify({ ...user, role: roleMap[token] }));
       return;
     }
+    if (request.url === '/stores') {
+      response.end(
+        JSON.stringify([
+          {
+            ...store,
+            name: 'Local catálogo vigente',
+            city: 'Melipilla',
+            address: 'Av. Prueba 325',
+            isActive: false,
+            createdAt: '2026-10-24T12:00:00Z',
+            updatedAt: '2026-10-24T12:00:00Z',
+          },
+        ]),
+      );
+      return;
+    }
     if (request.url === '/users' || request.url?.startsWith('/users?')) {
       response.end(
         JSON.stringify(
@@ -126,7 +142,6 @@ test('Auditoría HTTP: autorización, filtros, paginación, proyección segura y
       env: {
         ...process.env,
         BACKEND_INTERNAL_URL: `http://127.0.0.1:${address.port}`,
-        AUDIT_STORES: '[]',
       },
       stdio: 'pipe',
     },
@@ -222,6 +237,17 @@ test('Auditoría HTTP: autorización, filtros, paginación, proyección segura y
     assert.ok(!html.includes('internal-secret'));
     assert.ok(!html.includes('private-audit-token'));
     assert.ok(html.includes('offset=2'));
+    // Comprueba el HTML servido, sin JavaScript ni hidratación: el catálogo
+    // debe ganar frente al local con nombre anterior incluido en los registros.
+    const initialStoreSelect = html.match(
+      /<select\b[^>]*\bid="audit-store"[^>]*>([\s\S]*?)<\/select>/,
+    )?.[1];
+    assert.ok(
+      initialStoreSelect,
+      'El selector debe existir en el HTML inicial',
+    );
+    assert.ok(initialStoreSelect.includes('Local catálogo vigente (inactivo)'));
+    assert.ok(!initialStoreSelect.includes('Local de prueba'));
     response = await fetch(
       origin + '/admin/auditoria?from=2026-10-06&to=2026-10-05',
       { headers },

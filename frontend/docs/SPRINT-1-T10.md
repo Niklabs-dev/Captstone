@@ -1,3 +1,5 @@
+> Actualización SPRINT-3-T02: el catálogo estático descrito en esta documentación histórica fue reemplazado por GET /stores. Consultar docs/SPRINT-3-T02.md.
+
 # SPRINT-1-T10 — Gestión de usuarios del frontend
 
 Rama: `feat/sprint-1-t10-gestion-usuarios`, creada desde `origin/main` (`500e679`).

@@ -3,7 +3,6 @@ $ErrorActionPreference = 'Stop'
 $frontendPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $applicationPath = [System.IO.Path]::GetFullPath((Join-Path $frontendPath '..'))
 $storeId = '10000000-0000-4000-8000-000000000010'
-$env:USER_MANAGEMENT_STORES = '[{"id":"10000000-0000-4000-8000-000000000010","name":"Local de prueba"}]'
 $env:TEST_USERS_STORE_ID = $storeId
 $env:TEST_USERS_FRONTEND_URL = 'http://localhost:3102'
 $env:TEST_USERS_BACKEND_URL = 'http://localhost:3103'

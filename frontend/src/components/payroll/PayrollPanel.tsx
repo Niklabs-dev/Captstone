@@ -1,4 +1,6 @@
 'use client';
+import type { StoreOption } from '@/lib/users';
+import { useStoreOptions } from '@/lib/use-store-options';
 import { formatCalendarDate, formatChileDate } from '@/lib/display-date';
 import {
   tableHeaderClass,
@@ -36,6 +38,7 @@ export function PayrollPanel({
 }: {
   canManage: boolean;
 }): ReactElement {
+  const { stores: catalog, catalogError } = useStoreOptions();
   const [state, setState] = useState<State>({ status: 'loading' });
   const [retry, setRetry] = useState(0);
   const [store, setStore] = useState('');
@@ -123,7 +126,7 @@ export function PayrollPanel({
       </section>
     );
   const { items, workers, policy } = state.data;
-  const stores = [
+  const stores: StoreOption[] = [
     ...new Map(
       [
         ...workers.map((worker) => worker.store),
@@ -195,13 +198,21 @@ export function PayrollPanel({
               className={`${inputClass} mt-2`}
             >
               <option value="">Todos los locales</option>
-              {stores.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
+              {(catalog.length || !catalogError ? catalog : stores).map(
+                (item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                    {item.isActive === false ? ' (inactivo)' : ''}
+                  </option>
+                ),
+              )}
             </select>
           </label>
+          {catalogError && (
+            <p role="alert" className="text-sm text-crit">
+              {catalogError}
+            </p>
+          )}
           <label className={labelClass}>
             Período
             <input

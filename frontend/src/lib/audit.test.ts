@@ -10,7 +10,6 @@ import {
   mergeAuditStores,
   parseAuditFilters,
   parseAuditPage,
-  parseConfiguredAuditStores,
   type AuditFilters,
 } from './audit';
 import { fetchAuditPage, verifyAuditAdministrator } from './audit-backend';
@@ -137,14 +136,11 @@ test('Rechaza contratos malformados y admite responsables o locales ausentes', (
     parseAuditPage({ ...valid, items: [{ ...entry, user: null, store }] }),
   );
 });
-test('El catálogo deduplica locales y rechaza configuración inválida', () => {
-  assert.deepEqual(mergeAuditStores([store], [store]), [store]);
-  assert.deepEqual(parseConfiguredAuditStores(undefined), []);
-  assert.deepEqual(parseConfiguredAuditStores(JSON.stringify([store])), [
-    store,
-  ]);
-  for (const value of ['{}', 'broken', '[{"id":"bad","name":"Local"}]'])
-    assert.equal(parseConfiguredAuditStores(value), null);
+test('Los locales históricos se deduplican sin reemplazar el nombre actual del catálogo', () => {
+  assert.deepEqual(
+    mergeAuditStores([store], [{ ...store, name: 'Nombre actual' }]),
+    [{ ...store, name: 'Nombre actual' }],
+  );
 });
 test('Muestra hora chilena tanto en verano como en invierno y conserva acciones desconocidas', () => {
   assert.ok(formatAuditDate('2026-10-05T02:30:00.000Z').includes('23:30:00'));

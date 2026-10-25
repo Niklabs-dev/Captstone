@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  collectStores,
   filterUsers,
   hasSameOrigin,
   parseCreateUser,
@@ -106,18 +105,6 @@ test('Valida las respuestas y elimina campos sensibles antes de exponerlas', () 
     assert.equal(parseManagedUser(value), null);
   assert.equal(parseUserList([user, null]), null);
   assert.equal(parseUserList({}), null);
-});
-test('Combina locales de cuentas y catálogo, deduplica y valida configuración', () => {
-  const localUser = parseManagedUser({
-    ...user,
-    store: { id: storeId, name: 'Local A' },
-  });
-  assert.ok(localUser);
-  assert.deepEqual(
-    collectStores([localUser], [{ id: storeId, name: ' Local B ' }]),
-    [{ id: storeId, name: 'Local B' }],
-  );
-  assert.throws(() => collectStores([], [{ id: 'bad', name: 'A' }]));
 });
 test('Combina búsqueda, rol, estado y local sin modificar los datos', () => {
   const admin = parseManagedUser(user);
