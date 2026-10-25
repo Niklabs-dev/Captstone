@@ -9,6 +9,8 @@ export const AUDIT_ACTION = {
   // Edición y reactivación de usuarios (SPRINT-3-T03).
   USER_UPDATED: 'USER_UPDATED',
   USER_REACTIVATED: 'USER_REACTIVATED',
+  // Restablecimiento de contraseña (SPRINT-3-T04).
+  USER_PASSWORD_RESET: 'USER_PASSWORD_RESET',
   // Administración de locales (SPRINT-3-T01).
   STORE_CREATED: 'STORE_CREATED',
   STORE_UPDATED: 'STORE_UPDATED',
