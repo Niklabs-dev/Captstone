@@ -379,4 +379,393 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
       await deactivate(adminId, token).expect(403);
     }
   });
+
+  // Edición completa y reactivación (SPRINT-3-T03). Usa un segundo local
+  // activo ("Subway Users Test B"), que el cleanup() general también borra.
+  describe('Edición y reactivación (SPRINT-3-T03)', () => {
+    let otherStoreId: string;
+
+    beforeAll(async () => {
+      const otherStore = await prisma.store.create({
+        data: {
+          name: 'Subway Users Test B',
+          city: 'Melipilla',
+          address: 'Calle de prueba 789',
+        },
+      });
+      otherStoreId = otherStore.id;
+    });
+
+    function updateUser(id: string, body: object, token = adminToken) {
+      return request(app.getHttpServer())
+        .patch(`/users/${id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+    }
+
+    function reactivate(id: string, token = adminToken) {
+      return request(app.getHttpServer())
+        .patch(`/users/${id}/reactivate`)
+        .set('Authorization', `Bearer ${token}`);
+    }
+
+    function refresh(refreshToken: string) {
+      return request(app.getHttpServer())
+        .post('/auth/refresh')
+        .send({ refreshToken });
+    }
+
+    async function createWorker(
+      suffix: string,
+      extra: object = {},
+    ): Promise<UserResponse> {
+      return (await createUser(worker(suffix, extra)).expect(201))
+        .body as UserResponse;
+    }
+
+    async function refreshTokenOf(suffix: string): Promise<string> {
+      const sesion = (await login(`${suffix}${DOMAIN}`).expect(200)).body as {
+        refreshToken: string;
+      };
+      return sesion.refreshToken;
+    }
+
+    // Crea un contrato asociado al usuario en el local indicado y devuelve su ID.
+    async function createContract(
+      subjectUserId: string,
+      docStoreId: string,
+    ): Promise<string> {
+      const docType = await prisma.documentType.upsert({
+        where: { code: 'CONTRATO' },
+        update: {},
+        create: { code: 'CONTRATO', name: 'Contrato de trabajo' },
+      });
+      const documento = await prisma.document.create({
+        data: {
+          title: 'Contrato de prueba',
+          documentTypeId: docType.id,
+          storeId: docStoreId,
+          subjectUserId,
+          createdById: adminId,
+          retainUntil: new Date('2031-10-08'),
+        },
+      });
+      return documento.id;
+    }
+
+    // El contrato está en su plazo de conservación (SPRINT-2-T07): se purga
+    // como mantenimiento, omitiendo los triggers.
+    async function purgeDocument(id: string): Promise<void> {
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
+        await tx.document.delete({ where: { id } });
+      });
+    }
+
+    it('edita los datos personales sin exponer el hash', async () => {
+      const creado = await createWorker('editar');
+
+      const respuesta = await updateUser(creado.id, {
+        email: `editado${DOMAIN}`,
+        firstName: 'Pedro',
+        lastName: 'Soto',
+        rut: '15.000.000-9',
+        phone: '+56987654321',
+        hiredAt: '2026-04-15',
+      }).expect(200);
+      const user = respuesta.body as UserResponse & { passwordHash?: string };
+
+      expect(user).toMatchObject({
+        id: creado.id,
+        email: `editado${DOMAIN}`,
+        firstName: 'Pedro',
+        lastName: 'Soto',
+        rut: '15000000-9',
+        phone: '+56987654321',
+        hiredAt: '2026-04-15',
+        role: { code: ROLE.TRABAJADOR },
+        store: { id: storeId },
+      });
+      expect(user.passwordHash).toBeUndefined();
+
+      // null borra los datos opcionales, pero no se admite en los obligatorios.
+      const borrado = (
+        await updateUser(creado.id, { phone: null, hiredAt: null }).expect(200)
+      ).body as UserResponse;
+      expect(borrado.phone).toBeNull();
+      expect(borrado.hiredAt).toBeNull();
+      for (const field of ['email', 'firstName', 'lastName', 'roleCode']) {
+        await updateUser(creado.id, { [field]: null }).expect(400);
+      }
+    });
+
+    it('cambiar el rol o el local revoca las sesiones abiertas', async () => {
+      const creado = await createWorker('revocar');
+
+      const antesDeLocal = await refreshTokenOf('revocar');
+      const cambioLocal = (
+        await updateUser(creado.id, { storeId: otherStoreId }).expect(200)
+      ).body as UserResponse;
+      expect(cambioLocal.store?.id).toBe(otherStoreId);
+      await refresh(antesDeLocal).expect(401);
+
+      const antesDeRol = await refreshTokenOf('revocar');
+      await updateUser(creado.id, { roleCode: ROLE.SUPERVISOR }).expect(200);
+      await refresh(antesDeRol).expect(401);
+
+      // El nuevo inicio de sesión ya lleva el local actualizado en sus claims.
+      const sesion = (await login(`revocar${DOMAIN}`).expect(200)).body as {
+        user: { storeId: string; role: string };
+      };
+      expect(sesion.user).toMatchObject({
+        storeId: otherStoreId,
+        role: ROLE.SUPERVISOR,
+      });
+    });
+
+    it('editar solo datos personales, o reenviar el mismo local, no revoca las sesiones', async () => {
+      const creado = await createWorker('sin-revocar');
+      const refreshToken = await refreshTokenOf('sin-revocar');
+
+      await updateUser(creado.id, { phone: '+56911112222' }).expect(200);
+      // Mismo rol y local que ya tenía: no hay cambio real de asignación.
+      await updateUser(creado.id, {
+        roleCode: ROLE.TRABAJADOR,
+        storeId,
+      }).expect(200);
+
+      await refresh(refreshToken).expect(200);
+    });
+
+    it('valida la coherencia entre el rol y el local finales', async () => {
+      const creado = await createWorker('incompatible');
+
+      // Rol de local sin local.
+      await updateUser(creado.id, { storeId: null }).expect(400);
+      // Rol global con local.
+      await updateUser(creado.id, {
+        roleCode: ROLE.ADMINISTRADOR,
+        storeId,
+      }).expect(400);
+      // Local inactivo o inexistente.
+      await updateUser(creado.id, { storeId: inactiveStoreId }).expect(400);
+      await updateUser(creado.id, {
+        storeId: '00000000-0000-4000-8000-000000000000',
+      }).expect(400);
+
+      // Pasar a un rol global sin enviar storeId deja el local en null.
+      const contador = (
+        await updateUser(creado.id, { roleCode: ROLE.CONTADOR }).expect(200)
+      ).body as UserResponse;
+      expect(contador.store).toBeNull();
+
+      // De un rol global a uno de local sin enviar storeId: 400.
+      const sinLocal = await updateUser(creado.id, {
+        roleCode: ROLE.SUPERVISOR,
+      }).expect(400);
+      expect((sinLocal.body as ErrorResponse).message).toBe(
+        'El rol SUPERVISOR requiere un local asignado',
+      );
+      const conLocal = (
+        await updateUser(creado.id, {
+          roleCode: ROLE.SUPERVISOR,
+          storeId,
+        }).expect(200)
+      ).body as UserResponse;
+      expect(conLocal.store?.id).toBe(storeId);
+    });
+
+    it('responde 409 si el correo o el RUT ya existen y 400 si el RUT es inválido', async () => {
+      await createWorker('dup-a', { rut: '16000000-7' });
+      const otro = await createWorker('dup-b');
+
+      const mismoCorreo = await updateUser(otro.id, {
+        email: `dup-a${DOMAIN}`,
+      }).expect(409);
+      expect((mismoCorreo.body as ErrorResponse).message).toBe(
+        'Ya existe un usuario con ese correo o RUT',
+      );
+      await updateUser(otro.id, { rut: '16.000.000-7' }).expect(409);
+      await updateUser(otro.id, { rut: '12345678-9' }).expect(400);
+    });
+
+    it('no permite editar ni reactivar una cuenta anonimizada', async () => {
+      const creado = await createWorker('anonimizada');
+      await prisma.user.update({
+        where: { id: creado.id },
+        data: { isActive: false, anonymizedAt: new Date() },
+      });
+
+      const edicion = await updateUser(creado.id, {
+        phone: '+56900000000',
+      }).expect(409);
+      expect((edicion.body as ErrorResponse).message).toBe(
+        'La cuenta está anonimizada y no se puede modificar',
+      );
+      await reactivate(creado.id).expect(409);
+    });
+
+    it('responde 404 si no existe y 400 ante id no UUID, body vacío o campos extra', async () => {
+      const inexistente = '00000000-0000-4000-8000-000000000000';
+      await updateUser(inexistente, { phone: '+56900000000' }).expect(404);
+      await reactivate(inexistente).expect(404);
+      await updateUser('no-uuid', { phone: '+56900000000' }).expect(400);
+      await reactivate('no-uuid').expect(400);
+
+      const vacio = await updateUser(adminId, {}).expect(400);
+      expect((vacio.body as ErrorResponse).message).toBe(
+        'No hay campos para actualizar',
+      );
+      // La contraseña no se edita aquí (SPRINT-3-T04).
+      await updateUser(adminId, { password: 'OtraClave123' }).expect(400);
+      await updateUser(adminId, { campoExtra: 'no permitido' }).expect(400);
+    });
+
+    it('el administrador no puede cambiar su propio rol', async () => {
+      const respuesta = await updateUser(adminId, {
+        roleCode: ROLE.CONTADOR,
+      }).expect(400);
+      expect((respuesta.body as ErrorResponse).message).toBe(
+        'No puedes cambiar tu propio rol',
+      );
+      // Sí puede editar sus datos personales.
+      await updateUser(adminId, { phone: '+56933334444' }).expect(200);
+    });
+
+    it('reactiva la cuenta sin restaurar las sesiones antiguas y es idempotente', async () => {
+      const creado = await createWorker('reactivar');
+      const refreshToken = await refreshTokenOf('reactivar');
+      await deactivate(creado.id).expect(200);
+
+      const respuesta = await reactivate(creado.id).expect(200);
+      expect((respuesta.body as UserResponse).isActive).toBe(true);
+
+      // La sesión anterior sigue revocada; debe iniciar sesión de nuevo.
+      await refresh(refreshToken).expect(401);
+      await login(`reactivar${DOMAIN}`).expect(200);
+
+      const otraVez = await reactivate(creado.id).expect(200);
+      expect((otraVez.body as UserResponse).isActive).toBe(true);
+    });
+
+    it('no reactiva si el local asignado está desactivado', async () => {
+      const store = await prisma.store.create({
+        data: {
+          name: 'Subway Users Test C',
+          city: 'Calera',
+          address: 'Calle de prueba 321',
+        },
+      });
+      const creado = await createWorker('reactivar-sin-local', {
+        storeId: store.id,
+      });
+      await deactivate(creado.id).expect(200);
+      await prisma.store.update({
+        where: { id: store.id },
+        data: { isActive: false },
+      });
+
+      await reactivate(creado.id).expect(400);
+      const usuario = await prisma.user.findUniqueOrThrow({
+        where: { id: creado.id },
+      });
+      expect(usuario.isActive).toBe(false);
+    });
+
+    it('reactivar una cuenta ya activa no tiene efecto ni revalida la asignación', async () => {
+      const store = await prisma.store.create({
+        data: {
+          name: 'Subway Users Test D',
+          city: 'Calera',
+          address: 'Calle de prueba 654',
+        },
+      });
+      const creado = await createWorker('activa-local-inactivo', {
+        storeId: store.id,
+      });
+      // Asignación inválida: el local se desactiva con la cuenta aún activa.
+      await prisma.store.update({
+        where: { id: store.id },
+        data: { isActive: false },
+      });
+
+      const respuesta = await reactivate(creado.id).expect(200);
+      expect(respuesta.body as UserResponse).toMatchObject({
+        id: creado.id,
+        isActive: true,
+        store: { id: store.id },
+      });
+      // Sin efecto no se audita; la asignación se corrige con PATCH /users/:id.
+      expect(
+        await prisma.auditLog.count({
+          where: { action: 'USER_REACTIVATED', entityId: creado.id },
+        }),
+      ).toBe(0);
+      await updateUser(creado.id, { storeId: otherStoreId }).expect(200);
+    });
+
+    it('restringe la edición y la reactivación al administrador', async () => {
+      await request(app.getHttpServer())
+        .patch(`/users/${adminId}`)
+        .send({ phone: '+56900000000' })
+        .expect(401);
+
+      for (const role of [ROLE.SUPERVISOR, ROLE.TRABAJADOR, ROLE.CONTADOR]) {
+        const token = await tokenFor(
+          adminId,
+          role,
+          role === ROLE.CONTADOR ? null : storeId,
+        );
+        await updateUser(adminId, { phone: '+56900000000' }, token).expect(403);
+        await reactivate(adminId, token).expect(403);
+      }
+    });
+
+    it('cambiar el local no altera los documentos existentes del trabajador', async () => {
+      const creado = await createWorker('documentos');
+      const documentoId = await createContract(creado.id, storeId);
+
+      await updateUser(creado.id, { storeId: otherStoreId }).expect(200);
+
+      const guardado = await prisma.document.findUniqueOrThrow({
+        where: { id: documentoId },
+      });
+      expect(guardado.storeId).toBe(storeId);
+      expect(guardado.subjectUserId).toBe(creado.id);
+
+      await purgeDocument(documentoId);
+    });
+
+    it('audita edición y reactivación sin datos personales en el detalle', async () => {
+      const creado = await createWorker('auditar');
+
+      await updateUser(creado.id, {
+        email: `auditado${DOMAIN}`,
+        rut: '17.000.000-5',
+        phone: '+56955556666',
+        firstName: 'Rosa',
+        roleCode: ROLE.SUPERVISOR,
+      }).expect(200);
+
+      const edicion = await prisma.auditLog.findFirstOrThrow({
+        where: { action: 'USER_UPDATED', entityId: creado.id },
+      });
+      expect(edicion).toMatchObject({ entityType: 'users', userId: adminId });
+      expect(edicion.detail).toEqual({ roleCode: ROLE.SUPERVISOR });
+      const detalle = JSON.stringify(edicion.detail);
+      for (const personal of ['auditado', '17000000', '+5695555', 'Rosa']) {
+        expect(detalle).not.toContain(personal);
+      }
+
+      // Solo la reactivación con efecto queda registrada.
+      await deactivate(creado.id).expect(200);
+      await reactivate(creado.id).expect(200);
+      await reactivate(creado.id).expect(200);
+      const reactivaciones = await prisma.auditLog.findMany({
+        where: { action: 'USER_REACTIVATED', entityId: creado.id },
+      });
+      expect(reactivaciones).toHaveLength(1);
+      expect(reactivaciones[0].userId).toBe(adminId);
+    });
+  });
 });
