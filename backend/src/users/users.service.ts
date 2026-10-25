@@ -359,9 +359,9 @@ export class UsersService {
     return user;
   }
 
-  // Regla pendiente de confirmar con el equipo: el administrador no puede
-  // cambiar su propio rol (evita quedarse sin acceso, igual que deactivate()).
-  // Para quitarla basta con eliminar este método y su única llamada en update().
+  // Regla confirmada por el equipo el 24-10 (SPRINT-3-T03): el administrador
+  // no puede cambiar su propio rol (evita quedarse sin acceso, igual que
+  // deactivate()).
   private assertNotChangingOwnRole(
     id: string,
     currentUser: AuthUser,

@@ -167,7 +167,7 @@ export class UsersController {
   })
   @ApiOkResponse({
     description:
-      'Cuenta reactivada; el usuario debe iniciar sesión de nuevo (idempotente si ya estaba activa).',
+      'Cuenta reactivada; el usuario debe iniciar sesión de nuevo. Si la cuenta ya está activa, la operación no tiene efecto: responde 200 sin revalidar la asignación y no se audita. Una asignación inválida se corrige con PATCH /users/:id.',
     type: UserResponseDto,
   })
   @ApiBadRequestResponse({

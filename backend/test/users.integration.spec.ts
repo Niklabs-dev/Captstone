@@ -672,6 +672,38 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
       expect(usuario.isActive).toBe(false);
     });
 
+    it('reactivar una cuenta ya activa no tiene efecto ni revalida la asignación', async () => {
+      const store = await prisma.store.create({
+        data: {
+          name: 'Subway Users Test D',
+          city: 'Calera',
+          address: 'Calle de prueba 654',
+        },
+      });
+      const creado = await createWorker('activa-local-inactivo', {
+        storeId: store.id,
+      });
+      // Asignación inválida: el local se desactiva con la cuenta aún activa.
+      await prisma.store.update({
+        where: { id: store.id },
+        data: { isActive: false },
+      });
+
+      const respuesta = await reactivate(creado.id).expect(200);
+      expect(respuesta.body as UserResponse).toMatchObject({
+        id: creado.id,
+        isActive: true,
+        store: { id: store.id },
+      });
+      // Sin efecto no se audita; la asignación se corrige con PATCH /users/:id.
+      expect(
+        await prisma.auditLog.count({
+          where: { action: 'USER_REACTIVATED', entityId: creado.id },
+        }),
+      ).toBe(0);
+      await updateUser(creado.id, { storeId: otherStoreId }).expect(200);
+    });
+
     it('restringe la edición y la reactivación al administrador', async () => {
       await request(app.getHttpServer())
         .patch(`/users/${adminId}`)
