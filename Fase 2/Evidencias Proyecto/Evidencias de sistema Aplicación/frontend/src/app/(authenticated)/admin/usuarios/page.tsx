@@ -5,7 +5,8 @@ import type { ReactElement } from 'react';
 import { UsersPanel } from '@/components/users/UsersPanel';
 import { getUsersSession } from '@/lib/users-session';
 import { listManagedUsers } from '@/lib/users-backend';
-import { collectStores, type StoreOption } from '@/lib/users';
+import { fetchStores } from '@/lib/stores-backend';
+import { storeOptions } from '@/lib/stores';
 import { buttonClass } from '@/components/ui/styles';
 export const metadata: Metadata = { title: 'Usuarios | MoiFood' };
 export default async function UsersPage(): Promise<ReactElement> {
@@ -29,17 +30,16 @@ export default async function UsersPage(): Promise<ReactElement> {
   if (!result.ok && result.status === 403)
     redirect('/dashboard?reason=forbidden');
   const users = result.ok ? result.data : [];
-  let stores: StoreOption[] = [];
-  let error = result.ok ? '' : result.message;
-  try {
-    stores = collectStores(
-      users,
-      JSON.parse(process.env.USER_MANAGEMENT_STORES ?? '[]') as unknown,
-    );
-  } catch {
-    error =
-      'No se pudo cargar el catálogo de locales. Intenta nuevamente más tarde.';
-  }
+  const catalog = await fetchStores(session.token);
+  if (!catalog.ok && catalog.status === 401) redirect('/session-expired');
+  if (!catalog.ok && catalog.status === 403)
+    redirect('/dashboard?reason=forbidden');
+  const stores = catalog.ok ? storeOptions(catalog.data) : [];
+  const error = !result.ok
+    ? result.message
+    : !catalog.ok
+      ? catalog.message
+      : '';
   return (
     <>
       <UsersPanel

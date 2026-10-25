@@ -14,6 +14,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 export interface StoreOption {
   id: string;
   name: string;
+  isActive?: boolean;
 }
 export interface ManagedUser {
   id: string;
@@ -169,32 +170,6 @@ export function parseFilters(params: URLSearchParams): InputResult<string> {
   if (store) result.set('storeId', store);
   if (active) result.set('isActive', active);
   return { ok: true, data: result.toString() };
-}
-export function collectStores(
-  users: ManagedUser[],
-  configured: unknown,
-): StoreOption[] {
-  if (
-    !Array.isArray(configured) ||
-    !configured.every(
-      (store: unknown) =>
-        isObject(store) &&
-        isUuid(store.id) &&
-        typeof store.name === 'string' &&
-        store.name.trim(),
-    )
-  )
-    throw new Error(
-      'USER_MANAGEMENT_STORES debe ser una lista de locales con id UUID y nombre.',
-    );
-  const stores = new Map<string, StoreOption>();
-  for (const user of users)
-    if (user.store) stores.set(user.store.id, user.store);
-  for (const store of configured as StoreOption[])
-    stores.set(store.id, { id: store.id, name: store.name.trim() });
-  return [...stores.values()].sort((a, b) =>
-    a.name.localeCompare(b.name, 'es'),
-  );
 }
 export function filterUsers(
   users: ManagedUser[],

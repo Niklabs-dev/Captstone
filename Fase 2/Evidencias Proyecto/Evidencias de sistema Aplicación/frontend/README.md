@@ -111,19 +111,7 @@ filtros/paginación y devuelve una proyección sin detalles arbitrarios, IP ni
 user-agent. Los otros métodos no se implementan.
 La autorización definitiva de `GET /audit-logs` permanece en NestJS.
 
-El backend no tiene un endpoint de catálogo de locales. El selector combina
-los locales asociados a usuarios (incluidos desactivados), los de los registros
-consultados y el catálogo opcional `AUDIT_STORES`. Para garantizar que aparezcan
-locales sin usuarios ni eventos en la página actual, configurar la lista completa
-con sus UUID y nombres reales:
-
-```dotenv
-AUDIT_STORES=[{"id":"<UUID real del local>","name":"<nombre del local>"}]
-```
-
-No es necesario configurar este catálogo si los locales ya están asociados a
-usuarios. La lista no se inventa y los UUID son comprobados antes de utilizarse.
-La variable se documenta en `.env.example` y Docker Compose la pasa al frontend.
+Los catálogos de locales se consultan desde `GET /stores`, incluidos los inactivos para el historial. No requieren variables de entorno ni un nuevo despliegue al crear o editar un local.
 
 ```powershell
 npm run test:audit
@@ -195,13 +183,7 @@ el origen del frontend y el backend conserva la auditoría de las operaciones.
 
 T10 se entrega sobre T11 (PR #19), que depende del login T09 (PR #16). El diff del PR contiene solo usuarios. Se integran #16, #19 y después #18; tras integrar T11 se cambia la base de #18 a main.
 
-Configuración del servidor: `BACKEND_INTERNAL_URL` y, opcionalmente,
-`USER_MANAGEMENT_STORES` (ver `.env.example`). Como el backend todavía no expone
-un catálogo de locales, se combinan los locales de usuarios existentes con los
-locales configurados. Los IDs deben corresponder a locales activos en PostgreSQL;
-el backend verifica su existencia. Sin locales disponibles solo se pueden crear
-administradores y contadores. No se inventan IDs ni se muestran campos técnicos
-para asignar un local.
+Configuración del servidor: `BACKEND_INTERNAL_URL` (ver `.env.example`). La API de locales proporciona el catálogo. En las nuevas asignaciones solo se ofrecen locales activos; los inactivos permanecen en filtros históricos.
 
 ```powershell
 npm ci
@@ -244,3 +226,9 @@ Panel, permisos y pruebas: [docs/SPRINT-2-T16.md](docs/SPRINT-2-T16.md). API de 
 ## Mis liquidaciones (SPRINT-2-T17)
 
 Panel, contrato y pruebas: [docs/SPRINT-2-T17.md](docs/SPRINT-2-T17.md). API de T15 conectada mediante BFF; contrato en Swagger (/api/docs).
+
+## Locales (SPRINT-3-T02)
+
+`/admin/locales` permite crear, editar, desactivar y reactivar locales como administrador. `GET /api/stores` expone el catálogo autenticado y las mutaciones del BFF conservan el token en servidor y validan origen, rol y datos. Usuarios, Auditoría, Documentos, Alertas DT y Liquidaciones consumen la API sin caché; los locales nuevos aparecen sin configurar variables ni redeplegar. Documentos incluye locales sin trabajadores e identifica los inactivos; Auditoría conserva esa identificación desde el HTML inicial.
+
+Calidad: `npm run test:stores`, `npm run lint`, `npm run format:check`, `npm run build`. Integración: `TEST_REAL_DISPOSABLE=true npx playwright test --config playwright.stores.config.ts` solo con backend/base/almacenamiento de pruebas y fixtures preparados mediante `scripts/prepare-real-api.mjs`. GitHub Actions ejecuta Docker y conserva evidencia; consultar `docs/SPRINT-3-T02.md`.

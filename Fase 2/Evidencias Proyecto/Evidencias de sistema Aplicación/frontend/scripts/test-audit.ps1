@@ -10,7 +10,6 @@ $env:TEST_AUDIT_OTHER_STORE_ID = '20000000-0000-4000-8000-000000000016'
 $env:TEST_AUDIT_FRONTEND_URL = 'http://localhost:3106'
 $env:TEST_AUDIT_BACKEND_URL = 'http://localhost:3107'
 $env:TEST_AUDIT_DISPOSABLE = 'true'
-$env:AUDIT_STORES = '[{"id":"10000000-0000-4000-8000-000000000016","name":"Local de prueba T16"},{"id":"20000000-0000-4000-8000-000000000016","name":"Otro local de prueba T16"}]'
 Push-Location $applicationPath
 try {
     $composeArgs = @('compose', '-p', 'capstone-sprint1-t16', '-f', 'docker-compose.yml', '-f', 'frontend/docs/docker-compose.audit-test.yml')

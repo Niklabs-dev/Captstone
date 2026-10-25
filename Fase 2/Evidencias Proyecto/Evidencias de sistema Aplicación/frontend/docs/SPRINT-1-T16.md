@@ -1,3 +1,5 @@
+> Actualización SPRINT-3-T02: el catálogo estático descrito en esta documentación histórica fue reemplazado por GET /stores. Consultar docs/SPRINT-3-T02.md.
+
 # SPRINT-1-T16 — Auditoría consultable con filtros
 
 ## Alcance
