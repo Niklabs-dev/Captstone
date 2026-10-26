@@ -7,11 +7,22 @@ import {
   DOCUMENT_TYPES,
   seedDatabase,
   type SeedOptions,
+  TIP_DEMO_AGREEMENT,
+  TIP_DEMO_ENTRIES,
+  TIP_DEMO_IDS,
+  TIP_DEMO_PERIOD,
+  TIP_DEMO_POOL,
+  TIP_DEMO_POOL_SOURCES,
+  TIP_DEMO_STORE,
+  TIP_DEMO_USERS,
+  TIP_DEMO_WORKER_PERIODS,
 } from '../prisma/seed.js';
 
-// Tests de integración del seed (SPRINT-1-T05) contra PostgreSQL real.
-// Se omiten si no se define TEST_DATABASE_URL y cada test corre dentro de
-// una transacción que se revierte, por lo que no dejan datos en la base.
+// Tests de integración del seed (SPRINT-1-T05) contra PostgreSQL real,
+// ampliados con las fixtures sintéticas del módulo de propinas
+// (SPRINT-3-T09). Se omiten si no se define TEST_DATABASE_URL y cada
+// test corre dentro de una transacción que se revierte, por lo que no
+// dejan datos en la base.
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 class Rollback extends Error {
@@ -30,6 +41,7 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
     adminFirstName: 'Admin',
     adminLastName: 'Seed',
   };
+  const opcionesDemo: SeedOptions = { ...opciones, includeDemoData: true };
 
   beforeAll(() => {
     prisma = new PrismaClient({
@@ -250,6 +262,200 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
       });
       expect(rol.name).toBe('Trabajador');
       expect(rol.isActive).toBe(true);
+    });
+  });
+
+  it('no siembra usuarios ni propinas demo cuando la opción está apagada', async () => {
+    await withinRollback(async (tx) => {
+      async function countDemoData(): Promise<number[]> {
+        return Promise.all([
+          tx.user.count({
+            where: { id: { in: TIP_DEMO_USERS.map((demo) => demo.id) } },
+          }),
+          tx.tipEntry.count({
+            where: { id: { in: TIP_DEMO_ENTRIES.map((entry) => entry.id) } },
+          }),
+          tx.tipAgreement.count({ where: { id: TIP_DEMO_AGREEMENT.id } }),
+          tx.workHoursRecord.count({
+            where: {
+              id: {
+                in: TIP_DEMO_WORKER_PERIODS.map((period) => period.hoursId),
+              },
+            },
+          }),
+          tx.tipPool.count({ where: { id: TIP_DEMO_POOL.id } }),
+          tx.tipPoolSource.count({
+            where: {
+              id: { in: TIP_DEMO_POOL_SOURCES.map((source) => source.id) },
+            },
+          }),
+        ]);
+      }
+
+      const before = await countDemoData();
+      await seedDatabase(tx, opciones);
+      expect(await countDemoData()).toEqual(before);
+    });
+  });
+
+  it('siembra las fixtures de propinas con sus relaciones completas (SPRINT-3-T09)', async () => {
+    await withinRollback(async (tx) => {
+      await seedDatabase(tx, opcionesDemo);
+
+      // Pacto demo vigente en el local demo, creado por el supervisor demo.
+      const pacto = await tx.tipAgreement.findUniqueOrThrow({
+        where: { id: TIP_DEMO_AGREEMENT.id },
+      });
+      expect(pacto.name).toBe(TIP_DEMO_AGREEMENT.name);
+      expect(pacto.rule).toBe('PROPORTIONAL_TO_HOURS');
+      expect(pacto.validFrom).toEqual(new Date('2026-01-01T00:00:00.000Z'));
+      expect(pacto.validTo).toEqual(new Date('2026-12-31T00:00:00.000Z'));
+      expect(pacto.storeId).toBe(TIP_DEMO_STORE.id);
+      expect(pacto.createdById).toBe(TIP_DEMO_IDS.supervisor);
+
+      // Entradas diarias con fecha, medio de pago, monto y responsable demo.
+      for (const esperada of TIP_DEMO_ENTRIES) {
+        const entrada = await tx.tipEntry.findUniqueOrThrow({
+          where: { id: esperada.id },
+        });
+        expect(entrada.businessDate).toEqual(esperada.businessDate);
+        expect(entrada.paymentMethod).toBe(esperada.paymentMethod);
+        expect(Number(entrada.amount)).toBe(esperada.amount);
+        expect(entrada.storeId).toBe(TIP_DEMO_STORE.id);
+        expect(entrada.responsibleId).toBe(TIP_DEMO_IDS.supervisor);
+      }
+
+      // Horas trabajadas por cada trabajador demo, registradas por el supervisor.
+      for (const esperada of TIP_DEMO_WORKER_PERIODS) {
+        const horas = await tx.workHoursRecord.findUniqueOrThrow({
+          where: { id: esperada.hoursId },
+        });
+        expect(horas.workerId).toBe(esperada.workerId);
+        expect(horas.recordedById).toBe(TIP_DEMO_IDS.supervisor);
+        expect(horas.periodStart).toEqual(TIP_DEMO_PERIOD.start);
+        expect(horas.periodEnd).toEqual(TIP_DEMO_PERIOD.end);
+        expect(Number(horas.hoursWorked)).toBe(esperada.hoursWorked);
+      }
+
+      // Reparto DRAFT: total, snapshot del pacto aplicado y vínculo al pacto.
+      const pool = await tx.tipPool.findUniqueOrThrow({
+        where: { id: TIP_DEMO_POOL.id },
+      });
+      expect(pool.status).toBe('DRAFT');
+      expect(Number(pool.totalAmount)).toBe(TIP_DEMO_POOL.totalAmount);
+      expect(pool.periodStart).toEqual(TIP_DEMO_PERIOD.start);
+      expect(pool.periodEnd).toEqual(TIP_DEMO_PERIOD.end);
+      expect(pool.storeId).toBe(TIP_DEMO_STORE.id);
+      expect(pool.calculatedById).toBe(TIP_DEMO_IDS.supervisor);
+      expect(pool.agreementId).toBe(TIP_DEMO_AGREEMENT.id);
+      expect(pool.agreementSnapshot).toEqual(TIP_DEMO_POOL.agreementSnapshot);
+
+      // Líneas: cada trabajador con su monto y su registro de horas fuente.
+      for (const esperada of TIP_DEMO_WORKER_PERIODS) {
+        const linea = await tx.tipPoolLine.findUniqueOrThrow({
+          where: { id: esperada.lineId },
+        });
+        expect(linea.poolId).toBe(TIP_DEMO_POOL.id);
+        expect(linea.userId).toBe(esperada.workerId);
+        expect(linea.workHoursRecordId).toBe(esperada.hoursId);
+        expect(Number(linea.hoursWorked)).toBe(esperada.hoursWorked);
+        expect(Number(linea.amount)).toBe(esperada.lineAmount);
+      }
+
+      // Fuentes: cada entrada diaria enlaza el pool con su registro diario.
+      for (const esperada of TIP_DEMO_POOL_SOURCES) {
+        const fuente = await tx.tipPoolSource.findUniqueOrThrow({
+          where: { id: esperada.id },
+        });
+        expect(fuente.poolId).toBe(TIP_DEMO_POOL.id);
+        expect(fuente.tipEntryId).toBe(esperada.entryId);
+        expect(Number(fuente.amount)).toBe(esperada.amount);
+      }
+    });
+  });
+
+  it('las fixtures de propinas usan solo datos sintéticos (SPRINT-3-T09)', async () => {
+    await withinRollback(async (tx) => {
+      await seedDatabase(tx, opcionesDemo);
+
+      for (const demo of TIP_DEMO_USERS) {
+        const usuario = await tx.user.findUniqueOrThrow({
+          where: { id: demo.id },
+        });
+        // Correo claramente demo: dominio .invalid reservado (RFC 2606).
+        expect(usuario.email).toBe(demo.email);
+        expect(usuario.email.endsWith('.invalid')).toBe(true);
+        expect(`${usuario.firstName} ${usuario.lastName}`).toContain('Demo');
+        // Sin RUT ni teléfono de personas reales; asignados al local demo.
+        expect(usuario.rut).toBeNull();
+        expect(usuario.phone).toBeNull();
+        expect(usuario.storeId).toBe(TIP_DEMO_STORE.id);
+        expect(usuario.isActive).toBe(true);
+        // Contraseña aleatoria solo al crear: hash bcrypt, nunca en claro.
+        expect(usuario.passwordHash).toMatch(/^\$2[ab]\$\d{2}\$/);
+      }
+
+      // Ningún correo fixture pertenece al dominio real de la empresa.
+      const usuariosDemo = await tx.user.findMany({
+        where: { id: { in: TIP_DEMO_USERS.map((u) => u.id) } },
+      });
+      expect(usuariosDemo).toHaveLength(TIP_DEMO_USERS.length);
+      for (const usuario of usuariosDemo) {
+        expect(usuario.email.endsWith('@moi-food.invalid')).toBe(true);
+      }
+    });
+  });
+
+  it('las fixtures de propinas son idempotentes y respetan cambios administrados (SPRINT-3-T09)', async () => {
+    await withinRollback(async (tx) => {
+      await seedDatabase(tx, opcionesDemo);
+
+      // Cambio administrado vía API sobre una entrada fixture.
+      const montoCorregido = 77777;
+      await tx.tipEntry.update({
+        where: { id: TIP_DEMO_IDS.entryCash },
+        data: { amount: montoCorregido },
+      });
+
+      await seedDatabase(tx, opcionesDemo);
+
+      // Mismos conteos de las filas propias del seed: nada se duplica al
+      // repetirlo (se cuentan por UUID fijo para no mezclar datos ajenos
+      // que ya existan en la base).
+      const [pactos, entradas, horas, pools, lineas, fuentes, usuariosDemo] =
+        await Promise.all([
+          tx.tipAgreement.count({
+            where: { id: TIP_DEMO_AGREEMENT.id },
+          }),
+          tx.tipEntry.count({
+            where: { id: { in: TIP_DEMO_ENTRIES.map((e) => e.id) } },
+          }),
+          tx.workHoursRecord.count({
+            where: {
+              id: { in: TIP_DEMO_WORKER_PERIODS.map((r) => r.hoursId) },
+            },
+          }),
+          tx.tipPool.count({ where: { id: TIP_DEMO_POOL.id } }),
+          tx.tipPoolLine.count({ where: { poolId: TIP_DEMO_POOL.id } }),
+          tx.tipPoolSource.count({ where: { poolId: TIP_DEMO_POOL.id } }),
+          tx.user.count({
+            where: { id: { in: TIP_DEMO_USERS.map((u) => u.id) } },
+          }),
+        ]);
+      expect(pactos).toBe(1);
+      expect(entradas).toBe(TIP_DEMO_ENTRIES.length);
+      expect(horas).toBe(TIP_DEMO_WORKER_PERIODS.length);
+      expect(pools).toBe(1);
+      expect(lineas).toBe(TIP_DEMO_WORKER_PERIODS.length);
+      expect(fuentes).toBe(TIP_DEMO_POOL_SOURCES.length);
+      expect(usuariosDemo).toBe(TIP_DEMO_USERS.length);
+
+      // El ID sigue siendo el fijo y el cambio administrado no se sobrescribe.
+      const entrada = await tx.tipEntry.findUniqueOrThrow({
+        where: { id: TIP_DEMO_IDS.entryCash },
+      });
+      expect(entrada.id).toBe(TIP_DEMO_IDS.entryCash);
+      expect(Number(entrada.amount)).toBe(montoCorregido);
     });
   });
 });

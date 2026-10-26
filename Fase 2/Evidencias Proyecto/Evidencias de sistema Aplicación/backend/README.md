@@ -34,7 +34,7 @@ $ cp .env.example .env   # completar valores por ambiente (nunca commitear .env)
 
 ## Base de datos (Prisma + PostgreSQL)
 
-El modelo de datos completo (6 módulos, 17 tablas) está documentado en
+El modelo de datos completo (6 módulos, 23 tablas) está documentado en
 [`docs/modelo-datos.md`](docs/modelo-datos.md), incluidos los diagramas
 (Mermaid y DBML para dbdiagram.io) y el cumplimiento de la Ley N°21.719 y el
 Código del Trabajo.
@@ -49,8 +49,13 @@ $ npm run prisma:migrate:deploy   # producción/CI (solo aplica)
 
 # datos base: roles (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR),
 # tipos de documento laboral, tres locales iniciales y administrador inicial.
-# Idempotente; no revierte los cambios administrativos de los locales.
+# Idempotente; no revierte los cambios administrativos de los locales ni carga
+# datos demo en producción (SEED_DEMO_DATA=false por defecto).
 $ npm run prisma:seed
+
+# opcional, solo desarrollo/pruebas: agrega usuarios, pacto, horas, entradas
+# y un reparto completamente sintéticos del módulo de propinas.
+$ SEED_DEMO_DATA=true npm run prisma:seed
 
 # regenerar el cliente (corre solo en npm install vía postinstall)
 $ npm run prisma:generate

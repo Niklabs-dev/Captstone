@@ -36,7 +36,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(output).toContain('is valid');
   });
 
-  it('las migraciones crean las 19 tablas del modelo', () => {
+  it('las migraciones crean las 23 tablas del modelo', () => {
     const sql = readMigrations();
     const tablasEsperadas = [
       'stores',
@@ -48,8 +48,12 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'documents',
       'document_versions',
       'payslips',
+      'tip_entries',
+      'tip_agreements',
+      'work_hours_records',
       'tip_pools',
       'tip_pool_lines',
+      'tip_pool_sources',
       'sales',
       'cash_closings',
       'cash_closing_lines',
@@ -62,6 +66,40 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     for (const tabla of tablasEsperadas) {
       expect(sql).toContain(`CREATE TABLE "${tabla}"`);
     }
+  });
+
+  it('modela propinas diarias, pacto, horas y fuentes sin doble contabilización (SPRINT-3-T09)', () => {
+    const sql = readMigration('propinas_diarias_pacto_horas');
+    expect(sql).toContain(
+      'CREATE TYPE "TipAgreementRule" AS ENUM (\'PROPORTIONAL_TO_HOURS\')',
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "tip_entries_store_id_business_date_payment_method_key"',
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "tip_pool_sources_tip_entry_id_key"',
+    );
+    expect(sql).toContain(
+      'ADD CONSTRAINT "sales_tip_entry_id_fkey" FOREIGN KEY ("tip_entry_id")',
+    );
+    expect(sql).toContain('"agreement_snapshot" JSONB');
+    expect(sql).toContain('"work_hours_record_id" UUID');
+    expect(sql).toContain('"tip_entries_amount_nonnegative" CHECK');
+    expect(sql).toContain('"work_hours_records_hours_nonnegative" CHECK');
+    expect(sql).toContain('WITH aggregated_sales AS');
+    expect(sql).toContain('WITH nonoverlapping_hours AS');
+    expect(sql).toContain('), inserted_hours AS (');
+    expect(sql).toContain('), evaluated AS (');
+    expect(sql).toContain('MAX("pool_matches") OVER (PARTITION BY "pool_id")');
+    expect(sql).toContain('CREATE EXTENSION IF NOT EXISTS btree_gist');
+    expect(sql).toContain('ADD CONSTRAINT "tip_agreements_no_overlap" EXCLUDE');
+    expect(sql).toContain(
+      'ADD CONSTRAINT "work_hours_records_no_overlap" EXCLUDE',
+    );
+    expect(sql).toContain('CREATE TRIGGER "sales_tip_entry_consistency"');
+    expect(sql).toContain(
+      'CREATE TRIGGER "tip_pool_sources_entry_consistency"',
+    );
   });
 
   it('garantiza la trazabilidad del gestor documental', () => {

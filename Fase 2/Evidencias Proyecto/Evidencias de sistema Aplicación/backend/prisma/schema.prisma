@@ -45,6 +45,9 @@ model Store {
   auditLogs          AuditLog[]
   documents          Document[]
   tipPools           TipPool[]
+  tipEntries         TipEntry[]
+  tipAgreements      TipAgreement[]
+  workHoursRecords   WorkHoursRecord[]
   sales              Sale[]
   cashClosings       CashClosing[]
   inventoryMovements InventoryMovement[]
@@ -105,6 +108,10 @@ model User {
   calculatedTipPools        TipPool[]            @relation("CalculatedTipPools")
   confirmedTipPools          TipPool[]            @relation("ConfirmedTipPools")
   tipPoolLines               TipPoolLine[]        @relation("TipPoolLines")
+  responsibleTipEntries      TipEntry[]           @relation("ResponsibleTipEntries")
+  createdTipAgreements       TipAgreement[]       @relation("CreatedTipAgreements")
+  workedHours                WorkHoursRecord[]    @relation("WorkerWorkHours")
+  recordedWorkHours          WorkHoursRecord[]    @relation("RecordedWorkHours")
   registeredSales            Sale[]               @relation("RegisteredSales")
   responsibleCashClosings    CashClosing[]        @relation("ResponsibleCashClosings")
   inventoryMovements         InventoryMovement[]  @relation("CreatedInventoryMovements")
@@ -314,8 +321,8 @@ model Payslip {
 }
 
 // -------------------------------------------------------------
-// MÓDULO PROPINAS: reparto proporcional a horas trabajadas con
-// registro escrito por trabajador (art. 64 del Código del Trabajo).
+// MÓDULO PROPINAS: registro diario, pacto vigente, horas trabajadas
+// y reparto con snapshots (art. 64 del Código del Trabajo).
 // -------------------------------------------------------------
 
 enum TipPoolStatus {
@@ -324,45 +331,139 @@ enum TipPoolStatus {
   PAID
 }
 
-/// Reparto de propinas de un local para un período. El total proviene de las
-/// propinas registradas en las ventas del período (sales.tip_amount).
-model TipPool {
+enum TipAgreementRule {
+  PROPORTIONAL_TO_HOURS
+}
+
+/// Registro diario agregado por local y medio de pago. Es la única fuente que
+/// alimenta los repartos: sales.tip_amount se reconcilia con este registro y
+/// nunca se vuelve a sumar como una fuente independiente.
+model TipEntry {
   id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  periodStart   DateTime      @map("period_start") @db.Date
-  periodEnd     DateTime      @map("period_end") @db.Date
-  totalAmount   Decimal       @map("total_amount") @db.Decimal(12, 2)
-  status        TipPoolStatus @default(DRAFT)
-  notes         String?       @db.VarChar(255)
-  confirmedAt   DateTime?     @map("confirmed_at") @db.Timestamptz(6)
+  businessDate  DateTime      @map("business_date") @db.Date
+  paymentMethod PaymentMethod @map("payment_method")
+  amount        Decimal       @db.Decimal(12, 2)
   createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  store          Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  storeId        String        @map("store_id") @db.Uuid
-  calculatedBy   User          @relation("CalculatedTipPools", fields: [calculatedById], references: [id], onDelete: Restrict)
-  calculatedById String        @map("calculated_by_id") @db.Uuid
-  confirmedBy    User?         @relation("ConfirmedTipPools", fields: [confirmedById], references: [id], onDelete: Restrict)
-  confirmedById  String?       @map("confirmed_by_id") @db.Uuid
+  store         Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId       String         @map("store_id") @db.Uuid
+  responsible   User           @relation("ResponsibleTipEntries", fields: [responsibleId], references: [id], onDelete: Restrict)
+  responsibleId String         @map("responsible_id") @db.Uuid
+  sales         Sale[]
+  poolSource    TipPoolSource?
+
+  @@unique([storeId, businessDate, paymentMethod])
+  @@index([storeId, businessDate])
+  @@map("tip_entries")
+}
+
+/// Pacto de reparto vigente en un local. La regla inicial es proporcional a
+/// las horas; el reparto conserva una copia para que sus cambios no lo alteren.
+model TipAgreement {
+  id        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String           @db.VarChar(160)
+  rule      TipAgreementRule
+  validFrom DateTime         @map("valid_from") @db.Date
+  validTo   DateTime?        @map("valid_to") @db.Date
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store       Store     @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId     String    @map("store_id") @db.Uuid
+  createdBy   User      @relation("CreatedTipAgreements", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById String    @map("created_by_id") @db.Uuid
+  pools       TipPool[]
+
+  @@unique([storeId, validFrom])
+  @@index([storeId, validTo])
+  @@map("tip_agreements")
+}
+
+/// Horas trabajadas por una persona en el período y local de un reparto.
+model WorkHoursRecord {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  periodStart DateTime @map("period_start") @db.Date
+  periodEnd   DateTime @map("period_end") @db.Date
+  hoursWorked Decimal  @map("hours_worked") @db.Decimal(6, 2)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store        Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId      String        @map("store_id") @db.Uuid
+  worker       User          @relation("WorkerWorkHours", fields: [workerId], references: [id], onDelete: Restrict)
+  workerId     String        @map("worker_id") @db.Uuid
+  recordedBy   User          @relation("RecordedWorkHours", fields: [recordedById], references: [id], onDelete: Restrict)
+  recordedById String        @map("recorded_by_id") @db.Uuid
+  lines        TipPoolLine[]
+
+  @@unique([storeId, workerId, periodStart, periodEnd])
+  @@index([storeId, periodStart, periodEnd])
+  @@map("work_hours_records")
+}
+
+/// Reparto de propinas de un local para un período. El total se calcula desde
+/// tip_entries y conserva el pacto aplicado como snapshot JSON.
+model TipPool {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  periodStart       DateTime      @map("period_start") @db.Date
+  periodEnd         DateTime      @map("period_end") @db.Date
+  totalAmount       Decimal       @map("total_amount") @db.Decimal(12, 2)
+  status            TipPoolStatus @default(DRAFT)
+  notes             String?       @db.VarChar(255)
+  agreementSnapshot Json?         @map("agreement_snapshot") @db.JsonB
+  confirmedAt       DateTime?     @map("confirmed_at") @db.Timestamptz(6)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store          Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId        String          @map("store_id") @db.Uuid
+  calculatedBy   User            @relation("CalculatedTipPools", fields: [calculatedById], references: [id], onDelete: Restrict)
+  calculatedById String          @map("calculated_by_id") @db.Uuid
+  confirmedBy    User?           @relation("ConfirmedTipPools", fields: [confirmedById], references: [id], onDelete: Restrict)
+  confirmedById  String?         @map("confirmed_by_id") @db.Uuid
+  agreement      TipAgreement?   @relation(fields: [agreementId], references: [id], onDelete: Restrict)
+  agreementId    String?         @map("agreement_id") @db.Uuid
   lines          TipPoolLine[]
+  sources        TipPoolSource[]
 
   @@unique([storeId, periodStart, periodEnd])
+  @@index([agreementId])
   @@map("tip_pools")
 }
 
-/// Detalle del reparto por trabajador: horas trabajadas (base del cálculo
-/// proporcional del art. 64) y monto asignado. Es el registro escrito del reparto.
+/// Detalle del reparto por trabajador. hoursWorked es el snapshot usado en el
+/// cálculo y workHoursRecord mantiene la referencia a su registro fuente.
 model TipPoolLine {
   id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   hoursWorked Decimal @map("hours_worked") @db.Decimal(6, 2)
   amount      Decimal @db.Decimal(12, 2)
 
-  pool   TipPool @relation(fields: [poolId], references: [id], onDelete: Cascade)
-  poolId String  @map("pool_id") @db.Uuid
-  user   User    @relation("TipPoolLines", fields: [userId], references: [id], onDelete: Restrict)
-  userId String  @map("user_id") @db.Uuid
+  pool              TipPool          @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  poolId            String           @map("pool_id") @db.Uuid
+  user              User             @relation("TipPoolLines", fields: [userId], references: [id], onDelete: Restrict)
+  userId            String           @map("user_id") @db.Uuid
+  workHoursRecord   WorkHoursRecord? @relation(fields: [workHoursRecordId], references: [id], onDelete: Restrict)
+  workHoursRecordId String?          @map("work_hours_record_id") @db.Uuid
 
   @@unique([poolId, userId])
+  @@index([workHoursRecordId])
   @@map("tip_pool_lines")
+}
+
+/// Fuente de un reparto: el registro solo puede usarse una vez y amount
+/// conserva el monto aplicado aunque después se corrija el registro diario.
+model TipPoolSource {
+  id     String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  amount Decimal @db.Decimal(12, 2)
+
+  pool       TipPool  @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  poolId     String   @map("pool_id") @db.Uuid
+  tipEntry   TipEntry @relation(fields: [tipEntryId], references: [id], onDelete: Restrict)
+  tipEntryId String   @unique @map("tip_entry_id") @db.Uuid
+
+  @@index([poolId])
+  @@map("tip_pool_sources")
 }
 
 // -------------------------------------------------------------
@@ -382,8 +483,8 @@ enum SaleChannel {
   DELIVERY
 }
 
-/// Venta registrada en un local. tip_amount alimenta el fondo de propinas del
-/// período; cash_closing_id la amarra al cierre de caja correspondiente.
+/// Venta registrada en un local. tip_amount detalla la propina de la venta y
+/// se reconcilia con una sola tip_entry; no es una segunda fuente del reparto.
 model Sale {
   id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   soldAt        DateTime      @map("sold_at") @db.Timestamptz(6)
@@ -393,15 +494,18 @@ model Sale {
   tipAmount     Decimal       @default(0) @map("tip_amount") @db.Decimal(12, 2)
   createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  store          Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  storeId        String        @map("store_id") @db.Uuid
-  cashClosing    CashClosing?  @relation(fields: [cashClosingId], references: [id], onDelete: Restrict)
-  cashClosingId  String?       @map("cash_closing_id") @db.Uuid
-  registeredBy   User          @relation("RegisteredSales", fields: [registeredById], references: [id], onDelete: Restrict)
-  registeredById String        @map("registered_by_id") @db.Uuid
+  store          Store        @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId        String       @map("store_id") @db.Uuid
+  cashClosing    CashClosing? @relation(fields: [cashClosingId], references: [id], onDelete: Restrict)
+  cashClosingId  String?      @map("cash_closing_id") @db.Uuid
+  registeredBy   User         @relation("RegisteredSales", fields: [registeredById], references: [id], onDelete: Restrict)
+  registeredById String       @map("registered_by_id") @db.Uuid
+  tipEntry       TipEntry?    @relation(fields: [tipEntryId], references: [id], onDelete: Restrict)
+  tipEntryId     String?      @map("tip_entry_id") @db.Uuid
 
   @@index([storeId, soldAt])
   @@index([cashClosingId])
+  @@index([tipEntryId])
   @@map("sales")
 }
 
