@@ -7,12 +7,16 @@ import {
   parseFilters,
   parseManagedUser,
   parseUserList,
+  parseUpdateUser,
+  parsePasswordReset,
 } from './users';
 import {
   callUsersBackend,
   listManagedUsers,
   mutateManagedUser,
   verifyAdministrator,
+  updateManagedUser,
+  resetManagedUserPassword,
 } from './users-backend';
 const id = '10000000-0000-4000-8000-000000000001';
 const storeId = '10000000-0000-4000-8000-000000000002';
@@ -109,7 +113,7 @@ test('Valida las respuestas y elimina campos sensibles antes de exponerlas', () 
       refreshToken: 'secret',
       rut: 'personal',
     }),
-    user,
+    { ...user, rut: 'personal' },
   );
   for (const value of [
     { ...user, role: { code: 'OWNER', name: 'Dueño' } },
@@ -120,6 +124,112 @@ test('Valida las respuestas y elimina campos sensibles antes de exponerlas', () 
     assert.equal(parseManagedUser(value), null);
   assert.equal(parseUserList([user, null]), null);
   assert.equal(parseUserList({}), null);
+});
+test('Edición normaliza datos, permite borrar opcionales y conserva la asignación si no cambia', () => {
+  assert.deepEqual(
+    parseUpdateUser({
+      firstName: ' Ana ',
+      email: ' ANA@example.test ',
+      rut: '12.345.678-5',
+      phone: '',
+      hiredAt: null,
+    }),
+    {
+      ok: true,
+      data: {
+        firstName: 'Ana',
+        email: 'ana@example.test',
+        rut: '12345678-5',
+        phone: null,
+        hiredAt: null,
+      },
+    },
+  );
+  assert.deepEqual(parseUpdateUser({ roleCode: 'CONTADOR', storeId: null }), {
+    ok: true,
+    data: { roleCode: 'CONTADOR', storeId: null },
+  });
+  assert.equal(parseUpdateUser({ roleCode: 'TRABAJADOR', storeId }).ok, true);
+  for (const invalid of [
+    null,
+    {},
+    { password: 'secret123' },
+    { isActive: true },
+    { roleCode: 'OWNER' },
+    { firstName: null },
+    { email: 'bad' },
+    { rut: '12345678-0' },
+    { phone: 'abc' },
+    { hiredAt: '2026-02-30' },
+    { hiredAt: 'bad' },
+    { roleCode: 'CONTADOR', storeId },
+    { roleCode: 'TRABAJADOR', storeId: null },
+  ])
+    assert.equal(parseUpdateUser(invalid).ok, false);
+});
+test('Edición y reactivación rechazan identidades cambiadas y proyectan datos sin secretos', async () => {
+  await updateManagedUser(
+    'token',
+    id,
+    { email: 'ana@example.test' },
+    async (url, init) => {
+      assert.ok(String(url).endsWith(`/users/${id}`));
+      assert.equal(init?.method, 'PATCH');
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        email: 'ana@example.test',
+      });
+      return Response.json(user);
+    },
+  );
+  assert.equal(
+    (
+      await updateManagedUser(
+        'token',
+        id,
+        null,
+        responding({ ...user, passwordHash: 'secret' }),
+      )
+    ).ok,
+    true,
+  );
+  for (const response of [
+    { ...user, id: storeId },
+    { ...user, isActive: false },
+  ])
+    assert.equal(
+      (await updateManagedUser('token', id, null, responding(response))).ok,
+      false,
+    );
+});
+test('Restablecimiento usa la política real, conserva espacios y no acepta otros campos', async () => {
+  assert.deepEqual(parsePasswordReset({ newPassword: ' ClaveNueva123 ' }), {
+    ok: true,
+    data: { newPassword: ' ClaveNueva123 ' },
+  });
+  assert.equal(parsePasswordReset({ newPassword: '😀'.repeat(18) }).ok, true);
+  for (const data of [
+    null,
+    {},
+    { newPassword: 'short' },
+    { newPassword: 'x'.repeat(33) },
+    { newPassword: '😀'.repeat(19) },
+    { newPassword: 'ClaveNueva123', passwordHash: 'secret' },
+  ])
+    assert.equal(parsePasswordReset(data).ok, false);
+  const result = await resetManagedUserPassword(
+    'token',
+    id,
+    { newPassword: 'ClaveNueva123' },
+    async (url, init) => {
+      assert.ok(String(url).endsWith(`/users/${id}/password`));
+      assert.equal(init?.method, 'PATCH');
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        newPassword: 'ClaveNueva123',
+      });
+      return Response.json({ ...user, passwordHash: 'secret' });
+    },
+  );
+  assert.deepEqual(result, { ok: true, data: user });
 });
 test('Combina búsqueda, rol, estado y local sin modificar los datos', () => {
   const admin = parseManagedUser(user);

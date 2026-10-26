@@ -12,8 +12,11 @@ import {
   type CreateUserInput,
   type ManagedUser,
   type StoreOption,
+  type UpdateUserInput,
 } from '@/lib/users';
 import { CreateUserForm } from './CreateUserForm';
+import { EditUserForm } from './EditUserForm';
+import { ResetPasswordForm } from './ResetPasswordForm';
 import { UserDialog } from './UserDialog';
 import {
   primaryButtonClass,
@@ -57,6 +60,9 @@ export function UsersPanel({
   const [storeId, setStoreId] = useState('');
   const [creating, setCreating] = useState(false);
   const [target, setTarget] = useState<ManagedUser | null>(null);
+  const [editing, setEditing] = useState<ManagedUser | null>(null);
+  const [reactivating, setReactivating] = useState<ManagedUser | null>(null);
+  const [resetting, setResetting] = useState<ManagedUser | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(initialError);
   const [dialogError, setDialogError] = useState('');
@@ -158,6 +164,73 @@ export function UsersPanel({
       );
       setTarget(null);
       setNotice('Usuario desactivado. No podrá iniciar ni renovar sesión.');
+    } catch (failure) {
+      setDialogError(
+        failure instanceof Error ? failure.message : 'No se pudo conectar.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function resetPassword(input: {
+    newPassword: string;
+  }): Promise<undefined> {
+    if (busy || !resetting) return;
+    setBusy(true);
+    setDialogError('');
+    setNotice('');
+    try {
+      const result = parseManagedUser(
+        await request(`/api/users/${resetting.id}/password`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        }),
+      );
+      if (!result || result.id !== resetting.id)
+        throw new Error('Actualiza la lista antes de repetir la operación.');
+      setResetting(null);
+      setNotice(
+        'Contraseña restablecida. El usuario debe iniciar sesión con la nueva clave.',
+      );
+    } catch (failure) {
+      setDialogError(
+        failure instanceof Error ? failure.message : 'No se pudo conectar.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function update(input: UpdateUserInput | null): Promise<undefined> {
+    const user = input === null ? reactivating : editing;
+    if (busy || !user) return;
+    setBusy(true);
+    setDialogError('');
+    setNotice('');
+    try {
+      const result = parseManagedUser(
+        await request(
+          `/api/users/${user.id}${input === null ? '/reactivate' : ''}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            ...(input === null ? {} : { body: JSON.stringify(input) }),
+          },
+        ),
+      );
+      if (!result || result.id !== user.id)
+        throw new Error('Actualiza la lista antes de repetir la operación.');
+      setUsers((previous) =>
+        previous.map((item) => (item.id === result.id ? result : item)),
+      );
+      setEditing(null);
+      setReactivating(null);
+      setNotice(
+        input === null
+          ? 'Usuario reactivado. Debe iniciar sesión nuevamente.'
+          : 'Usuario actualizado correctamente.',
+      );
+      window.dispatchEvent(new Event('stores-updated'));
     } catch (failure) {
       setDialogError(
         failure instanceof Error ? failure.message : 'No se pudo conectar.',
@@ -340,23 +413,59 @@ export function UsersPanel({
                     </span>
                   </td>
                   <td className={tableCellClass}>
-                    {user.id === currentUserId ? (
-                      <span className="text-xs text-ink2">Tu cuenta</span>
-                    ) : user.isActive ? (
+                    <div className="flex flex-wrap gap-2">
                       <button
                         className={buttonClass}
                         disabled={busy}
-                        aria-label={`Desactivar a ${user.firstName} ${user.lastName}`}
+                        aria-label={`Editar a ${user.firstName} ${user.lastName}`}
                         onClick={() => {
-                          setTarget(user);
+                          setEditing(user);
                           setDialogError('');
                         }}
                       >
-                        Desactivar
+                        Editar
                       </button>
-                    ) : (
-                      <span className="text-muted">—</span>
-                    )}
+                      {user.id !== currentUserId && (
+                        <button
+                          className={buttonClass}
+                          disabled={busy}
+                          aria-label={`Restablecer contraseña de ${user.firstName} ${user.lastName}`}
+                          onClick={() => {
+                            setResetting(user);
+                            setDialogError('');
+                          }}
+                        >
+                          Restablecer contraseña
+                        </button>
+                      )}
+                      {user.id === currentUserId ? (
+                        <span className="text-xs text-ink2">Tu cuenta</span>
+                      ) : user.isActive ? (
+                        <button
+                          className={buttonClass}
+                          disabled={busy}
+                          aria-label={`Desactivar a ${user.firstName} ${user.lastName}`}
+                          onClick={() => {
+                            setTarget(user);
+                            setDialogError('');
+                          }}
+                        >
+                          Desactivar
+                        </button>
+                      ) : (
+                        <button
+                          className={buttonClass}
+                          disabled={busy}
+                          aria-label={`Reactivar a ${user.firstName} ${user.lastName}`}
+                          onClick={() => {
+                            setReactivating(user);
+                            setDialogError('');
+                          }}
+                        >
+                          Reactivar
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -408,7 +517,7 @@ export function UsersPanel({
               {target.firstName} {target.lastName}
             </strong>{' '}
             no podrá iniciar ni renovar sesión. Sus datos y documentos se
-            conservarán. La cuenta no podrá reactivarse desde esta pantalla.
+            conservarán. Podrás reactivar la cuenta desde esta pantalla.
           </p>
           <p className="mt-3 text-sm leading-6 text-ink2">
             Las sesiones ya abiertas pueden seguir vigentes hasta que venzan.
@@ -435,6 +544,91 @@ export function UsersPanel({
               className={dangerButtonClass}
             >
               {busy ? 'Desactivando…' : 'Confirmar desactivación'}
+            </button>
+          </div>
+        </UserDialog>
+      )}
+      {resetting && (
+        <UserDialog
+          title="Restablecer contraseña"
+          busy={busy}
+          onDismiss={() => {
+            if (!busy) setResetting(null);
+          }}
+        >
+          <p className="mb-4 text-sm text-ink2">
+            Cuenta: {resetting.firstName} {resetting.lastName} (
+            {resetting.email}).
+          </p>
+          <ResetPasswordForm
+            busy={busy}
+            error={dialogError}
+            onSubmit={resetPassword}
+            onCancel={() => {
+              if (!busy) setResetting(null);
+            }}
+          />
+        </UserDialog>
+      )}
+      {editing && (
+        <UserDialog
+          title="Editar usuario"
+          busy={busy}
+          onDismiss={() => {
+            if (!busy) setEditing(null);
+          }}
+        >
+          <EditUserForm
+            user={editing}
+            stores={stores}
+            busy={busy}
+            error={dialogError}
+            ownAccount={editing.id === currentUserId}
+            onSubmit={update}
+            onCancel={() => {
+              if (!busy) setEditing(null);
+            }}
+          />
+        </UserDialog>
+      )}
+      {reactivating && (
+        <UserDialog
+          title="Reactivar usuario"
+          busy={busy}
+          onDismiss={() => {
+            if (!busy) setReactivating(null);
+          }}
+        >
+          <p className="text-sm leading-6 text-ink2">
+            <strong>
+              {reactivating.firstName} {reactivating.lastName}
+            </strong>{' '}
+            podrá iniciar sesión nuevamente. Las sesiones revocadas no se
+            recuperan. Para los roles de local, debe tener un local activo;
+            puedes corregirlo con Editar.
+          </p>
+          {dialogError && (
+            <p
+              role="alert"
+              className="mt-4 rounded-lg bg-crit-bg p-3 text-sm text-crit"
+            >
+              {dialogError}
+            </p>
+          )}
+          <div className="mt-6 flex flex-wrap justify-end gap-2.5">
+            <button
+              disabled={busy}
+              onClick={() => setReactivating(null)}
+              className={buttonClass}
+            >
+              Cancelar
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => update(null)}
+              className={primaryButtonClass}
+            >
+              {busy ? 'Reactivando…' : 'Confirmar reactivación'}
             </button>
           </div>
         </UserDialog>
