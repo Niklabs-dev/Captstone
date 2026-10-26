@@ -7,7 +7,7 @@ export const PAYMENT_METHODS = [
 
 export type PaymentMethodCode = (typeof PAYMENT_METHODS)[number];
 
-export const MAX_TIP_AMOUNT = 9_999_999_999.99;
+export const MAX_TIP_AMOUNT = 9_999_999_999;
 
 export interface TipEntryResponse {
   id: string;

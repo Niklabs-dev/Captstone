@@ -272,12 +272,14 @@ el body no acepta `responsibleId` ni datos personales del trabajador.
 | `DELETE /tips/:id` | `SUPERVISOR`, `ADMINISTRADOR` | Elimina un registro no vinculado y responde 204. |
 
 Solo existe un registro por `(storeId, businessDate, paymentMethod)`. Los montos
-aceptan cero, hasta dos decimales y el máximo de `DECIMAL(12,2)`; los negativos,
-fechas inexistentes y campos obligatorios vacíos responden 400 identificando el
-campo. `SUPERVISOR` solo opera en su local asignado; `CONTADOR` es de solo
-lectura y los roles globales pueden operar en cualquier local según la tabla.
-Editar o eliminar un registro ya vinculado a ventas o repartos responde 409 para
-proteger la trazabilidad.
+son enteros en CLP (se acepta cero y el máximo de `DECIMAL(12,2)`); los valores
+negativos o con centavos, fechas inexistentes y campos obligatorios vacíos
+responden 400 identificando el campo. `SUPERVISOR` solo opera en su local
+asignado; `CONTADOR` es de solo lectura y los roles globales pueden operar en
+cualquier local según la tabla. Editar o eliminar un registro ya vinculado a
+ventas o repartos responde 409 para proteger la trazabilidad. `PATCH` y `DELETE`
+también exigen un local activo y bloquean la fila durante la mutación para evitar
+que una venta o reparto se vincule entre la validación y la escritura.
 
 Las mutaciones generan `TIP_ENTRY_CREATED`, `TIP_ENTRY_UPDATED` y
 `TIP_ENTRY_DELETED` en auditoría. El detalle se limita a local, responsable,

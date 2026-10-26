@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsIn, IsNumber, IsUUID, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsUUID, Max, Min } from 'class-validator';
 import {
   MAX_TIP_AMOUNT,
   PAYMENT_METHODS,
@@ -40,16 +40,13 @@ export class CreateTipEntryDto {
   paymentMethod: PaymentMethodCode;
 
   @ApiProperty({
-    description: 'Monto de propinas en CLP, sin valores negativos.',
+    description: 'Monto entero de propinas en CLP, sin centavos ni negativos.',
     example: 12500,
     minimum: 0,
     maximum: MAX_TIP_AMOUNT,
   })
   @Transform(toNumber)
-  @IsNumber(
-    { maxDecimalPlaces: 2 },
-    { message: 'amount debe ser un número con a lo más 2 decimales' },
-  )
+  @IsInt({ message: 'amount debe ser un número entero en CLP, sin centavos' })
   @Min(0, { message: 'amount no puede ser negativo' })
   @Max(MAX_TIP_AMOUNT, {
     message: `amount no puede superar ${MAX_TIP_AMOUNT}`,

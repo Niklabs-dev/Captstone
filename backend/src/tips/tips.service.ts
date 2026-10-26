@@ -137,31 +137,37 @@ export class TipsService {
     currentUser: AuthUser,
   ): Promise<TipEntryResponse> {
     this.assertAmount(dto.amount);
-    await this.findUnlinked(id, currentUser);
-    const entry = await this.prisma.tipEntry.update({
-      where: { id },
-      data: { amount: new Prisma.Decimal(dto.amount) },
-      select: TIP_ENTRY_SELECT,
-    });
-    return toTipEntryResponse(entry);
-  }
-
-  async remove(id: string, currentUser: AuthUser): Promise<TipEntryResponse> {
-    await this.findUnlinked(id, currentUser);
-    try {
-      const entry = await this.prisma.tipEntry.delete({
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM tip_entries WHERE id = ${id}::uuid FOR UPDATE`;
+      await this.findUnlinked(id, currentUser, tx);
+      const entry = await tx.tipEntry.update({
         where: { id },
+        data: { amount: new Prisma.Decimal(dto.amount) },
         select: TIP_ENTRY_SELECT,
       });
       return toTipEntryResponse(entry);
-    } catch (error) {
-      if (isPrismaError(error, 'P2003')) {
-        throw new ConflictException(
-          'No se puede eliminar un registro vinculado a ventas o repartos',
-        );
+    });
+  }
+
+  async remove(id: string, currentUser: AuthUser): Promise<TipEntryResponse> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM tip_entries WHERE id = ${id}::uuid FOR UPDATE`;
+      await this.findUnlinked(id, currentUser, tx);
+      try {
+        const entry = await tx.tipEntry.delete({
+          where: { id },
+          select: TIP_ENTRY_SELECT,
+        });
+        return toTipEntryResponse(entry);
+      } catch (error) {
+        if (isPrismaError(error, 'P2003')) {
+          throw new ConflictException(
+            'No se puede eliminar un registro vinculado a ventas o repartos',
+          );
+        }
+        throw error;
       }
-      throw error;
-    }
+    });
   }
 
   private async findByNaturalKey(
@@ -197,8 +203,9 @@ export class TipsService {
   private async findUnlinked(
     id: string,
     currentUser: AuthUser,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
   ): Promise<TipEntryRecord> {
-    const entry = await this.prisma.tipEntry.findUnique({
+    const entry = await client.tipEntry.findUnique({
       where: { id },
       select: {
         ...TIP_ENTRY_SELECT,
@@ -209,6 +216,7 @@ export class TipsService {
     if (!entry)
       throw new NotFoundException('Registro de propinas no encontrado');
     this.assertStoreAccess(entry.store.id, currentUser);
+    await this.stores.assertActive(entry.store.id);
     if (entry.poolSource || entry.sales.length > 0) {
       throw new ConflictException(
         'No se puede modificar o eliminar un registro vinculado a ventas o repartos',
@@ -224,9 +232,9 @@ export class TipsService {
   }
 
   private assertAmount(amount: number): void {
-    if (!Number.isFinite(amount) || amount < 0 || amount > MAX_TIP_AMOUNT) {
+    if (!Number.isInteger(amount) || amount < 0 || amount > MAX_TIP_AMOUNT) {
       throw new BadRequestException(
-        `amount debe estar entre 0 y ${MAX_TIP_AMOUNT}`,
+        `amount debe ser un entero entre 0 y ${MAX_TIP_AMOUNT} CLP`,
       );
     }
   }

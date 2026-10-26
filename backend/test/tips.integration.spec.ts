@@ -293,12 +293,11 @@ describe.skipIf(!databaseUrl)(
         .body as TipEntryResponse;
       expect(found).toMatchObject({ id: created.id, amount: 12500 });
 
-      const patched = (
-        await patchTip(created.id, { amount: 999.5 }).expect(200)
-      ).body as TipEntryResponse;
+      const patched = (await patchTip(created.id, { amount: 999 }).expect(200))
+        .body as TipEntryResponse;
       expect(patched).toMatchObject({
         id: created.id,
-        amount: 999.5,
+        amount: 999,
         businessDate: '2026-10-20',
         paymentMethod: 'DEBIT_CARD',
         store: { id: storeId },
@@ -386,12 +385,12 @@ describe.skipIf(!databaseUrl)(
         'amount no puede ser negativo',
       );
 
-      // Más de dos decimales.
-      const decimals = await createTip(tipPayload({ amount: 12.345 })).expect(
+      // CLP no admite centavos, incluso si son solo dos cifras decimales.
+      const decimals = await createTip(tipPayload({ amount: 12.5 })).expect(
         400,
       );
       expect(messagesOf(decimals.body).join(' ')).toContain(
-        'a lo más 2 decimales',
+        'amount debe ser un número entero en CLP',
       );
 
       // Fecha inexistente y formato incorrecto.
@@ -669,6 +668,35 @@ describe.skipIf(!databaseUrl)(
         ).toContain('vinculado a ventas o repartos');
       }
       await getTip(poolLinked.id).expect(200);
+    });
+
+    it('rechaza mutaciones en local inactivo pero mantiene la lectura histórica', async () => {
+      const entry = (
+        await createTip(
+          tipPayload({ businessDate: '2026-11-02', paymentMethod: 'CASH' }),
+        ).expect(201)
+      ).body as TipEntryResponse;
+      await prisma.store.update({
+        where: { id: storeId },
+        data: { isActive: false },
+      });
+
+      try {
+        const patched = await patchTip(entry.id, { amount: 13000 }).expect(400);
+        expect(messagesOf(patched.body).join(' ')).toContain('inactivo');
+        const removed = await deleteTip(entry.id).expect(400);
+        expect(messagesOf(removed.body).join(' ')).toContain('inactivo');
+
+        await getTip(entry.id).expect(200);
+        await listTips(`?storeId=${storeId}&businessDate=2026-11-02`).expect(
+          200,
+        );
+      } finally {
+        await prisma.store.update({
+          where: { id: storeId },
+          data: { isActive: true },
+        });
+      }
     });
 
     it('audita crear, editar y eliminar con listas blancas y actor correcto', async () => {
