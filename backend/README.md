@@ -48,11 +48,14 @@ $ npm run prisma:migrate          # desarrollo (también crea migraciones nuevas
 $ npm run prisma:migrate:deploy   # producción/CI (solo aplica)
 
 # datos base: roles (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR),
-# tipos de documento laboral, tres locales iniciales, administrador inicial y
-# datos sintéticos de propinas (tip_entries, work_hours_records y repartos de
-# ejemplo) para facilitar las pruebas locales del módulo de propinas.
-# Idempotente; no revierte los cambios administrativos de los locales.
+# tipos de documento laboral, tres locales iniciales y administrador inicial.
+# Idempotente; no revierte los cambios administrativos de los locales ni carga
+# datos demo en producción (SEED_DEMO_DATA=false por defecto).
 $ npm run prisma:seed
+
+# opcional, solo desarrollo/pruebas: agrega usuarios, pacto, horas, entradas
+# y un reparto completamente sintéticos del módulo de propinas.
+$ SEED_DEMO_DATA=true npm run prisma:seed
 
 # regenerar el cliente (corre solo en npm install vía postinstall)
 $ npm run prisma:generate
