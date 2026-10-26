@@ -183,6 +183,7 @@ Los endpoints marcados con `@Audited()` quedan registrados automáticamente (`Au
 | `PAYSLIP_UPLOADED` | Carga de una liquidación por el contador (detalle: trabajador, período, SHA-256 y estado), con el local de la liquidación. |
 | `PAYSLIP_PUBLISHED` | Publicación de una liquidación (detalle: trabajador, período, fecha de firma, fecha de publicación y SHA-256); el responsable es el usuario del evento. |
 | `PAYSLIP_DOWNLOADED` | Descarga de una liquidación propia por el trabajador (detalle: versión y resultado de integridad `VALID`/`ALTERED`). |
+| `TIP_ENTRY_CREATED` / `TIP_ENTRY_UPDATED` / `TIP_ENTRY_DELETED` | Creación, corrección y eliminación de propinas diarias (detalle: local, responsable, fecha, medio y monto). |
 
 El detalle se arma solo con campos declarados (listas blancas): nunca incluye contraseñas ni el contenido de los archivos.
 
@@ -254,6 +255,35 @@ eliminarla mientras no venza la conservación de su documento, `TRUNCATE` sobre
 `payslips`, y agregar versiones o modificar el documento de su archivo. Igual
 que en la auditoría, solo se omiten con `session_replication_role = replica`
 (superusuario).
+
+## Registro diario de propinas
+
+El CRUD de propinas diarias usa `tip_entries` como única fuente de los repartos.
+`sales.tipAmount` se reconcilia con un registro mediante `sales.tipEntryId` y no
+se suma como una segunda fuente. El responsable se obtiene siempre del JWT;
+el body no acepta `responsibleId` ni datos personales del trabajador.
+
+| Endpoint | Roles | Descripción |
+| --- | --- | --- |
+| `POST /tips` | `SUPERVISOR`, `ADMINISTRADOR` | Crea con `storeId`, `businessDate` (`YYYY-MM-DD`), `paymentMethod` y `amount`. 201 al crear; un reintento idéntico responde 200 con el mismo registro y no duplica fila ni auditoría. Una clave igual con otro monto o responsable responde 409. |
+| `GET /tips?storeId=<uuid>&businessDate=<fecha>` | `SUPERVISOR`, `ADMINISTRADOR`, `CONTADOR` | Lista los registros del local y día, ordenados por medio de pago. |
+| `GET /tips/:id` | `SUPERVISOR`, `ADMINISTRADOR`, `CONTADOR` | Obtiene un registro por UUID. |
+| `PATCH /tips/:id` | `SUPERVISOR`, `ADMINISTRADOR` | Corrige `amount`, conservando local, fecha, medio y responsable. |
+| `DELETE /tips/:id` | `SUPERVISOR`, `ADMINISTRADOR` | Elimina un registro no vinculado y responde 204. |
+
+Solo existe un registro por `(storeId, businessDate, paymentMethod)`. Los montos
+son enteros en CLP (se acepta cero y el máximo de `DECIMAL(12,2)`); los valores
+negativos o con centavos, fechas inexistentes y campos obligatorios vacíos
+responden 400 identificando el campo. `SUPERVISOR` solo opera en su local
+asignado; `CONTADOR` es de solo lectura y los roles globales pueden operar en
+cualquier local según la tabla. Editar o eliminar un registro ya vinculado a
+ventas o repartos responde 409 para proteger la trazabilidad. `PATCH` y `DELETE`
+también exigen un local activo y bloquean la fila durante la mutación para evitar
+que una venta o reparto se vincule entre la validación y la escritura.
+
+Las mutaciones generan `TIP_ENTRY_CREATED`, `TIP_ENTRY_UPDATED` y
+`TIP_ENTRY_DELETED` en auditoría. El detalle se limita a local, responsable,
+fecha, medio y monto, sin correo, nombre, RUT ni contraseña.
 
 ## Documentación interactiva (Swagger / OpenAPI)
 
