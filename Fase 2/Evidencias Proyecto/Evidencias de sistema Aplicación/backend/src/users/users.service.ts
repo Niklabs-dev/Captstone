@@ -11,6 +11,7 @@ import { isGlobalRole } from '../auth/policies/store-access.policy.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import type { CreateUserDto } from './dto/create-user.dto.js';
 import type { ListUsersQueryDto } from './dto/list-users-query.dto.js';
+import type { ResetPasswordDto } from './dto/reset-password.dto.js';
 import type { UpdateUserDto } from './dto/update-user.dto.js';
 import type { UserResponse, UserStateChange } from './types/users.types.js';
 import { resolveFinalStoreId } from './utils/user-assignment.util.js';
@@ -341,8 +342,45 @@ export class UsersService {
     return { user: toUserResponse(user), changed: true };
   }
 
+  // Restablece la contraseña (SPRINT-3-T04). También aplica a cuentas
+  // desactivadas (no cambia isActive), para dejarles una clave nueva antes
+  // de reactivarlas. Revoca los refresh tokens emitidos con la clave anterior;
+  // los access tokens ya emitidos siguen vigentes hasta su expiración.
+  // La política de la clave (largo y bytes) la valida ResetPasswordDto.
+  async resetPassword(
+    id: string,
+    dto: ResetPasswordDto,
+    currentUser: AuthUser,
+  ): Promise<UserResponse> {
+    // La clave propia se cambiaría en otro flujo, que pide la contraseña actual.
+    if (id === currentUser.id) {
+      throw new BadRequestException(
+        'No puedes restablecer tu propia contraseña desde la administración de usuarios',
+      );
+    }
+    await this.findEditableUser(id);
+
+    // El hash (costoso) se calcula fuera de la transacción.
+    const passwordHash = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);
+
+    const [user] = await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id },
+        data: { passwordHash },
+        include: USER_INCLUDE,
+      }),
+      // Revoca los refresh tokens para que nadie renueve el acceso con la
+      // clave anterior.
+      this.prisma.refreshToken.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+    return toUserResponse(user);
+  }
+
   // Usuario existente y no anonimizado: una cuenta anonimizada (Ley N°21.719)
-  // ya no se puede editar ni reactivar.
+  // ya no se puede editar, reactivar ni restablecer su contraseña.
   private async findEditableUser(id: string): Promise<UserWithAssignment> {
     const user = await this.prisma.user.findUnique({
       where: { id },

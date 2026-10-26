@@ -251,6 +251,9 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
     for (const extra of [
       { email: 'no-es-correo' },
       { password: 'corta' },
+      // Política de contraseña: máximo 32 caracteres y 72 bytes UTF-8.
+      { password: 'a'.repeat(33) },
+      { password: 'あ'.repeat(25) },
       { roleCode: 'SUPERUSUARIO' },
       { rut: '12345678-9' },
       { hiredAt: '2026-02-30' },
@@ -263,6 +266,17 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
       where: { email: `invalido${DOMAIN}` },
     });
     expect(count).toBe(0);
+  });
+
+  it('acepta contraseñas en el límite de 32 caracteres y 72 bytes', async () => {
+    // 'a' ocupa 1 byte y 'あ' 3 bytes: 24 caracteres = 72 bytes.
+    for (const [suffix, password] of [
+      ['limite-ascii', 'a'.repeat(32)],
+      ['limite-bytes', 'あ'.repeat(24)],
+    ]) {
+      await createUser(worker(suffix, { password })).expect(201);
+      await login(`${suffix}${DOMAIN}`, password).expect(200);
+    }
   });
 
   it('responde 409 si el correo o el RUT ya existen', async () => {
@@ -766,6 +780,192 @@ describe.skipIf(!databaseUrl)('Gestión de usuarios (SPRINT-1-T08)', () => {
       });
       expect(reactivaciones).toHaveLength(1);
       expect(reactivaciones[0].userId).toBe(adminId);
+    });
+  });
+
+  // Restablecimiento de contraseña por el administrador (SPRINT-3-T04).
+  describe('Restablecer contraseña (SPRINT-3-T04)', () => {
+    const NEW_PASSWORD = 'ClaveNueva456';
+
+    function resetPassword(id: string, body: object, token = adminToken) {
+      return request(app.getHttpServer())
+        .patch(`/users/${id}/password`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+    }
+
+    function refresh(refreshToken: string) {
+      return request(app.getHttpServer())
+        .post('/auth/refresh')
+        .send({ refreshToken });
+    }
+
+    async function createWorker(suffix: string): Promise<UserResponse> {
+      return (await createUser(worker(suffix)).expect(201))
+        .body as UserResponse;
+    }
+
+    function countResets(entityId: string): Promise<number> {
+      return prisma.auditLog.count({
+        where: { action: 'USER_PASSWORD_RESET', entityId },
+      });
+    }
+
+    it('restablece la contraseña sin exponerla ni exponer el hash', async () => {
+      const creado = await createWorker('reset');
+
+      const respuesta = await resetPassword(creado.id, {
+        newPassword: NEW_PASSWORD,
+      }).expect(200);
+
+      const body = respuesta.body as Record<string, unknown>;
+      expect(body).toMatchObject({ id: creado.id, isActive: true });
+      expect(body).not.toHaveProperty('password');
+      expect(body).not.toHaveProperty('passwordHash');
+      expect(body).not.toHaveProperty('newPassword');
+    });
+
+    it('la clave nueva permite iniciar sesión, la anterior no, y las sesiones previas quedan revocadas', async () => {
+      await createWorker('reset-sesion');
+      const sesion = (await login(`reset-sesion${DOMAIN}`).expect(200))
+        .body as { refreshToken: string; user: { id: string } };
+
+      await resetPassword(sesion.user.id, {
+        newPassword: NEW_PASSWORD,
+      }).expect(200);
+
+      await login(`reset-sesion${DOMAIN}`, PASSWORD).expect(401);
+      await refresh(sesion.refreshToken).expect(401);
+      await login(`reset-sesion${DOMAIN}`, NEW_PASSWORD).expect(200);
+    });
+
+    it('restablece la contraseña de una cuenta desactivada sin reactivarla', async () => {
+      const creado = await createWorker('reset-inactivo');
+      await deactivate(creado.id).expect(200);
+
+      const respuesta = await resetPassword(creado.id, {
+        newPassword: NEW_PASSWORD,
+      }).expect(200);
+      expect((respuesta.body as UserResponse).isActive).toBe(false);
+
+      const usuario = await prisma.user.findUniqueOrThrow({
+        where: { id: creado.id },
+      });
+      expect(usuario.isActive).toBe(false);
+      expect(await bcrypt.compare(NEW_PASSWORD, usuario.passwordHash)).toBe(
+        true,
+      );
+      expect(bcrypt.getRounds(usuario.passwordHash)).toBe(12);
+      // Sigue sin acceso hasta que se reactive.
+      await login(`reset-inactivo${DOMAIN}`, NEW_PASSWORD).expect(401);
+    });
+
+    it('aplica la misma política de contraseña que el alta (400)', async () => {
+      const creado = await createWorker('reset-politica');
+
+      await resetPassword(creado.id, { newPassword: 'a'.repeat(7) }).expect(
+        400,
+      );
+      await resetPassword(creado.id, { newPassword: 'a'.repeat(33) }).expect(
+        400,
+      );
+      // 25 caracteres de 3 bytes = 75 bytes: supera el límite de bcrypt.
+      await resetPassword(creado.id, {
+        newPassword: 'あ'.repeat(25),
+      }).expect(400);
+      await resetPassword(creado.id, {}).expect(400);
+      await resetPassword(creado.id, { newPassword: 12345678 }).expect(400);
+
+      // La contraseña original sigue vigente.
+      await login(`reset-politica${DOMAIN}`).expect(200);
+      expect(await countResets(creado.id)).toBe(0);
+    });
+
+    it('acepta claves nuevas en el límite de 32 caracteres y 72 bytes', async () => {
+      const creado = await createWorker('reset-limite');
+
+      for (const newPassword of ['a'.repeat(32), 'あ'.repeat(24)]) {
+        await resetPassword(creado.id, { newPassword }).expect(200);
+        await login(`reset-limite${DOMAIN}`, newPassword).expect(200);
+      }
+    });
+
+    it('no permite restablecer la contraseña propia', async () => {
+      const respuesta = await resetPassword(adminId, {
+        newPassword: NEW_PASSWORD,
+      }).expect(400);
+      expect((respuesta.body as ErrorResponse).message).toBe(
+        'No puedes restablecer tu propia contraseña desde la administración de usuarios',
+      );
+      await login(ADMIN_EMAIL).expect(200);
+      expect(await countResets(adminId)).toBe(0);
+    });
+
+    it('responde 404 si no existe y 400 ante id no UUID', async () => {
+      const inexistente = '00000000-0000-4000-8000-000000000000';
+      await resetPassword(inexistente, { newPassword: NEW_PASSWORD }).expect(
+        404,
+      );
+      await resetPassword('no-uuid', { newPassword: NEW_PASSWORD }).expect(400);
+      expect(await countResets(inexistente)).toBe(0);
+    });
+
+    it('no permite restablecer la contraseña de una cuenta anonimizada (409)', async () => {
+      const creado = await createWorker('reset-anonimizada');
+      await prisma.user.update({
+        where: { id: creado.id },
+        data: { isActive: false, anonymizedAt: new Date() },
+      });
+
+      await resetPassword(creado.id, { newPassword: NEW_PASSWORD }).expect(409);
+      expect(await countResets(creado.id)).toBe(0);
+    });
+
+    it('restringe el restablecimiento al administrador', async () => {
+      const creado = await createWorker('reset-permiso');
+      await request(app.getHttpServer())
+        .patch(`/users/${creado.id}/password`)
+        .send({ newPassword: NEW_PASSWORD })
+        .expect(401);
+
+      for (const role of [ROLE.SUPERVISOR, ROLE.TRABAJADOR, ROLE.CONTADOR]) {
+        const token = await tokenFor(
+          adminId,
+          role,
+          role === ROLE.CONTADOR ? null : storeId,
+        );
+        await resetPassword(
+          creado.id,
+          { newPassword: NEW_PASSWORD },
+          token,
+        ).expect(403);
+      }
+      await login(`reset-permiso${DOMAIN}`).expect(200);
+    });
+
+    it('audita el restablecimiento sin la contraseña ni su hash', async () => {
+      const creado = await createWorker('reset-auditar');
+
+      await resetPassword(creado.id, { newPassword: NEW_PASSWORD }).expect(200);
+
+      const eventos = await prisma.auditLog.findMany({
+        where: { action: 'USER_PASSWORD_RESET', entityId: creado.id },
+      });
+      expect(eventos).toHaveLength(1);
+      expect(eventos[0]).toMatchObject({
+        entityType: 'users',
+        userId: adminId,
+      });
+
+      const { passwordHash } = await prisma.user.findUniqueOrThrow({
+        where: { id: creado.id },
+      });
+      // Registro completo (id BIGSERIAL como texto para poder serializarlo).
+      const registro = JSON.stringify(eventos[0], (_key, value: unknown) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      );
+      expect(registro).not.toContain(NEW_PASSWORD);
+      expect(registro).not.toContain(passwordHash);
     });
   });
 });

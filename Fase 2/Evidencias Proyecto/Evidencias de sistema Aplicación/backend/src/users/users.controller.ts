@@ -32,6 +32,7 @@ import { Audited } from '../audit/decorators/audited.decorator.js';
 import { setAuditContext } from '../audit/utils/audit-context.util.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { ListUsersQueryDto } from './dto/list-users-query.dto.js';
+import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
 import { UserResponseDto } from './dto/user-response.dto.js';
 import type { UserResponse } from './types/users.types.js';
@@ -189,5 +190,43 @@ export class UsersController {
     // Una reactivación sin efecto (ya estaba activa) no se audita.
     setAuditContext(res, { skipAudit: !result.changed });
     return result.user;
+  }
+
+  // Restablecimiento de contraseña (SPRINT-3-T04).
+  @Patch(':id/password')
+  @HttpCode(200)
+  @Audited({
+    action: AUDIT_ACTION.USER_PASSWORD_RESET,
+    entityType: 'users',
+    entityIdFrom: 'params.id',
+    // Sin detailFromBody: la contraseña nunca se audita.
+  })
+  @ApiOperation({
+    summary:
+      'Restablece la contraseña de un usuario y revoca sus refresh tokens',
+  })
+  @ApiOkResponse({
+    description:
+      'Contraseña restablecida y refresh tokens revocados: el usuario debe iniciar sesión con la clave nueva para obtener sesiones nuevas. Los access tokens ya emitidos siguen vigentes hasta su expiración (JWT_EXPIRES_IN). Una cuenta desactivada sigue desactivada.',
+    type: UserResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'ID no es un UUID, la contraseña no cumple la política (8 a 32 caracteres, sin superar 72 bytes) o se intenta restablecer la cuenta propia.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Solo ADMINISTRADOR puede restablecer contraseñas.',
+  })
+  @ApiNotFoundResponse({ description: 'Usuario no encontrado.' })
+  @ApiConflictResponse({
+    description:
+      'La cuenta está anonimizada y no se puede restablecer su contraseña.',
+  })
+  resetPassword(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: ResetPasswordDto,
+    @CurrentUser() currentUser: AuthUser,
+  ): Promise<UserResponse> {
+    return this.usersService.resetPassword(id, dto, currentUser);
   }
 }
