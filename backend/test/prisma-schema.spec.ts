@@ -87,7 +87,15 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(sql).toContain('"tip_entries_amount_nonnegative" CHECK');
     expect(sql).toContain('"work_hours_records_hours_nonnegative" CHECK');
     expect(sql).toContain('WITH aggregated_sales AS');
-    expect(sql).toContain('WITH inserted_hours AS');
+    expect(sql).toContain('WITH nonoverlapping_hours AS');
+    expect(sql).toContain('), inserted_hours AS (');
+    expect(sql).toContain('), evaluated AS (');
+    expect(sql).toContain('MAX("pool_matches") OVER (PARTITION BY "pool_id")');
+    expect(sql).toContain('CREATE EXTENSION IF NOT EXISTS btree_gist');
+    expect(sql).toContain('ADD CONSTRAINT "tip_agreements_no_overlap" EXCLUDE');
+    expect(sql).toContain(
+      'ADD CONSTRAINT "work_hours_records_no_overlap" EXCLUDE',
+    );
     expect(sql).toContain('CREATE TRIGGER "sales_tip_entry_consistency"');
     expect(sql).toContain(
       'CREATE TRIGGER "tip_pool_sources_entry_consistency"',
