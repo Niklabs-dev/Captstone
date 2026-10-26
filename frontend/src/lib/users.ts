@@ -28,6 +28,140 @@ export interface ManagedUser {
   isActive: boolean;
   role: { code: UserRole; name: string };
   store: StoreOption | null;
+  rut?: string | null;
+  phone?: string | null;
+  hiredAt?: string | null;
+}
+export interface UpdateUserInput {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  roleCode?: UserRole;
+  storeId?: string | null;
+  rut?: string | null;
+  phone?: string | null;
+  hiredAt?: string | null;
+}
+export function parsePasswordReset(
+  value: unknown,
+): InputResult<{ newPassword: string }> {
+  if (
+    !isObject(value) ||
+    Object.keys(value).some((key) => key !== 'newPassword') ||
+    typeof value.newPassword !== 'string' ||
+    Array.from(value.newPassword).length < PASSWORD_MIN_LENGTH ||
+    Array.from(value.newPassword).length > PASSWORD_MAX_LENGTH ||
+    new TextEncoder().encode(value.newPassword).length > PASSWORD_MAX_BYTES
+  )
+    return {
+      ok: false,
+      message:
+        'La contraseña debe tener entre 8 y 32 caracteres y no superar 72 bytes.',
+    };
+  return { ok: true, data: { newPassword: value.newPassword } };
+}
+export function parseUpdateUser(value: unknown): InputResult<UpdateUserInput> {
+  if (!isObject(value))
+    return { ok: false, message: 'Revisa los datos del usuario.' };
+  const allowed = [
+    'firstName',
+    'lastName',
+    'email',
+    'roleCode',
+    'storeId',
+    'rut',
+    'phone',
+    'hiredAt',
+  ];
+  if (
+    !Object.keys(value).length ||
+    Object.keys(value).some((key) => !allowed.includes(key))
+  )
+    return { ok: false, message: 'La edición contiene campos no permitidos.' };
+  const data: UpdateUserInput = {};
+  for (const key of ['firstName', 'lastName'] as const) {
+    const field = value[key];
+    if (field === undefined) continue;
+    if (typeof field !== 'string' || !field.trim() || field.trim().length > 80)
+      return {
+        ok: false,
+        message:
+          'Nombre y apellido son obligatorios y admiten hasta 80 caracteres.',
+      };
+    data[key] = field.trim();
+  }
+  if (value.email !== undefined) {
+    if (
+      typeof value.email !== 'string' ||
+      value.email.trim().length > 160 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email.trim())
+    )
+      return {
+        ok: false,
+        message:
+          'Ingresa un correo electrónico válido (máximo 160 caracteres).',
+      };
+    data.email = value.email.trim().toLowerCase();
+  }
+  if (value.roleCode !== undefined) {
+    if (!isUserRole(value.roleCode))
+      return { ok: false, message: 'Selecciona un rol válido.' };
+    data.roleCode = value.roleCode;
+  }
+  if (value.storeId !== undefined) {
+    if (value.storeId !== null && !isUuid(value.storeId))
+      return { ok: false, message: 'Selecciona un local válido.' };
+    data.storeId = value.storeId;
+  }
+  if (
+    data.roleCode &&
+    ((needsStore(data.roleCode) && data.storeId === null) ||
+      (!needsStore(data.roleCode) && typeof data.storeId === 'string'))
+  )
+    return { ok: false, message: 'El local debe ser compatible con el rol.' };
+  for (const key of ['rut', 'phone', 'hiredAt'] as const) {
+    const field = value[key];
+    if (field === undefined) continue;
+    if (field === null || field === '') {
+      data[key] = null;
+      continue;
+    }
+    if (typeof field !== 'string')
+      return { ok: false, message: 'Revisa los datos personales.' };
+    const text =
+      key === 'rut' ? field.replace(/[.\s]/g, '').toUpperCase() : field.trim();
+    if (key === 'rut') {
+      const match = /^(\d{7,8})-([\dK])$/.exec(text);
+      let sum = 0;
+      let factor = 2;
+      for (const digit of (match?.[1] ?? '').split('').reverse()) {
+        sum += Number(digit) * factor;
+        factor = factor === 7 ? 2 : factor + 1;
+      }
+      const remainder = 11 - (sum % 11);
+      const check =
+        remainder === 11 ? '0' : remainder === 10 ? 'K' : String(remainder);
+      if (!match || match[2] !== check)
+        return { ok: false, message: 'Ingresa un RUT chileno válido.' };
+    }
+    if (key === 'phone' && !/^\+?[\d\s-]{8,20}$/.test(text))
+      return {
+        ok: false,
+        message: 'Ingresa un teléfono válido de 8 a 20 caracteres.',
+      };
+    if (
+      key === 'hiredAt' &&
+      (!/^\d{4}-\d{2}-\d{2}$/.test(text) ||
+        !Number.isFinite(Date.parse(text)) ||
+        new Date(text).toISOString().slice(0, 10) !== text)
+    )
+      return {
+        ok: false,
+        message: 'Ingresa una fecha de contratación válida.',
+      };
+    data[key] = text;
+  }
+  return { ok: true, data };
 }
 export interface CreateUserInput {
   firstName: string;
@@ -132,6 +266,12 @@ export function parseManagedUser(value: unknown): ManagedUser | null {
     !isObject(value.role) ||
     !isUserRole(value.role.code) ||
     typeof value.role.name !== 'string' ||
+    ['rut', 'phone', 'hiredAt'].some(
+      (key) =>
+        value[key] !== undefined &&
+        value[key] !== null &&
+        typeof value[key] !== 'string',
+    ) ||
     (value.store !== null &&
       (!isObject(value.store) ||
         !isUuid(value.store.id) ||
@@ -149,6 +289,15 @@ export function parseManagedUser(value: unknown): ManagedUser | null {
       value.store === null
         ? null
         : { id: value.store.id as string, name: value.store.name as string },
+    ...(value.rut === null || typeof value.rut === 'string'
+      ? { rut: value.rut }
+      : {}),
+    ...(value.phone === null || typeof value.phone === 'string'
+      ? { phone: value.phone }
+      : {}),
+    ...(value.hiredAt === null || typeof value.hiredAt === 'string'
+      ? { hiredAt: value.hiredAt }
+      : {}),
   };
 }
 export function parseUserList(value: unknown): ManagedUser[] | null {
