@@ -22,19 +22,24 @@ export class DocumentServiceError extends Error {
   }
 }
 type Fetcher = typeof fetch;
+export type DocumentScope = 'managed' | 'own';
 async function request(
   path: string,
   init: RequestInit,
   fetcher: Fetcher,
+  scope: DocumentScope = 'managed',
 ): Promise<Response> {
   try {
-    const response = await fetcher('/api/documents' + path, {
-      ...init,
-      cache: 'no-store',
-      credentials: 'same-origin',
-      redirect: 'error',
-      signal: init.signal ?? AbortSignal.timeout(15000),
-    });
+    const response = await fetcher(
+      (scope === 'own' ? '/api/my-documents' : '/api/documents') + path,
+      {
+        ...init,
+        cache: 'no-store',
+        credentials: 'same-origin',
+        redirect: 'error',
+        signal: init.signal ?? AbortSignal.timeout(15000),
+      },
+    );
     if (!response.ok) {
       const error: unknown = await response.json().catch(() => null);
       const code =
@@ -48,6 +53,7 @@ async function request(
       const messages: Record<number, string> = {
         401: 'Tu sesión venció. Vuelve a iniciar sesión.',
         403: 'No tienes permiso para consultar esta carpeta.',
+        404: 'El archivo o documento no está disponible; informa al administrador.',
         409: conflict,
         413: 'El archivo supera el tamaño permitido.',
         422: 'El archivo no cumple los requisitos. Revisa su tipo y tamaño.',
@@ -85,11 +91,13 @@ export async function loadDocuments(
   workerId: string,
   signal?: AbortSignal,
   fetcher: Fetcher = fetch,
+  scope: DocumentScope = 'managed',
 ): Promise<DocumentCollection> {
   const response = await request(
-    '?workerId=' + encodeURIComponent(workerId),
+    scope === 'own' ? '' : '?workerId=' + encodeURIComponent(workerId),
     { signal },
     fetcher,
+    scope,
   );
   return (
     parseDocumentCollection(await json(response), workerId) ?? invalidContract()
@@ -99,11 +107,13 @@ export async function loadDocumentVersions(
   document: WorkerDocument,
   signal?: AbortSignal,
   fetcher: Fetcher = fetch,
+  scope: DocumentScope = 'managed',
 ): Promise<VersionHistory> {
   const response = await request(
     '/' + encodeURIComponent(document.id) + '/versions',
     { signal },
     fetcher,
+    scope,
   );
   return (
     parseVersionHistory(await json(response), document) ?? invalidContract()
@@ -112,11 +122,13 @@ export async function loadDocumentVersions(
 export async function checkDocumentIntegrity(
   version: DocumentVersion,
   fetcher: Fetcher = fetch,
+  scope: DocumentScope = 'managed',
 ): Promise<IntegrityResult> {
   const response = await request(
     '/versions/' + encodeURIComponent(version.id) + '/integrity',
     {},
     fetcher,
+    scope,
   );
   const result =
     parseIntegrity(await json(response), version) ?? invalidContract();
@@ -153,8 +165,9 @@ export async function uploadDocument(
 export async function downloadDocument(
   version: DocumentVersion,
   fetcher: Fetcher = fetch,
+  scope: DocumentScope = 'managed',
 ): Promise<{ blob: Blob; fileName: string }> {
-  const integrity = await checkDocumentIntegrity(version, fetcher);
+  const integrity = await checkDocumentIntegrity(version, fetcher, scope);
   if (!integrity.valid)
     throw new DocumentServiceError(
       'La integridad no coincide: el archivo pudo ser alterado. Se bloqueó la descarga.',
@@ -164,6 +177,7 @@ export async function downloadDocument(
     '/versions/' + encodeURIComponent(version.id) + '/download',
     {},
     fetcher,
+    scope,
   );
   const type = response.headers.get('content-type')?.split(';')[0].trim();
   const length = response.headers.get('content-length');
@@ -205,6 +219,26 @@ export async function downloadDocument(
       response.headers.get('Content-Disposition'),
       version.fileName,
     ),
+  };
+}
+// El portal reutiliza la misma validación de contratos, stream y SHA-256 del gestor.
+export function documentReader(scope: DocumentScope): {
+  load: (workerId: string, signal?: AbortSignal) => Promise<DocumentCollection>;
+  history: (
+    document: WorkerDocument,
+    signal?: AbortSignal,
+  ) => Promise<VersionHistory>;
+  integrity: (version: DocumentVersion) => Promise<IntegrityResult>;
+  download: (
+    version: DocumentVersion,
+  ) => Promise<{ blob: Blob; fileName: string }>;
+} {
+  return {
+    load: (workerId, signal) => loadDocuments(workerId, signal, fetch, scope),
+    history: (document, signal) =>
+      loadDocumentVersions(document, signal, fetch, scope),
+    integrity: (version) => checkDocumentIntegrity(version, fetch, scope),
+    download: (version) => downloadDocument(version, fetch, scope),
   };
 }
 
