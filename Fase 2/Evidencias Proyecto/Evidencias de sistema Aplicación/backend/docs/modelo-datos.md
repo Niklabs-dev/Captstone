@@ -1,6 +1,6 @@
 # Modelo de datos — Sistema de Gestión Interna "Moi-food" (Subway)
 
-> Tarea: **SPRINT-1-T04** · Fuente de verdad: `prisma/schema.prisma` · Motor: PostgreSQL 16 · ORM: Prisma 7
+> Tarea: **SPRINT-3-T09** · Fuente de verdad: `prisma/schema.prisma` · Motor: PostgreSQL 16 · ORM: Prisma 7
 >
 > Este documento describe el modelo de datos completo del sistema (los 6 módulos),
 > sus decisiones de diseño, el cumplimiento normativo (Código del Trabajo y
@@ -12,12 +12,12 @@
 | --- | --- | --- |
 | Núcleo | `stores`, `roles`, `users`, `refresh_tokens`, `audit_logs` | Locales, control de acceso por rol y local, autenticación JWT y auditoría inmutable |
 | Gestor Documental | `document_types`, `documents`, `document_versions`, `payslips` | Documentación laboral con hash SHA-256, versionado y conservación por 5 años; liquidaciones de sueldo con estado de publicación |
-| Propinas | `tip_pools`, `tip_pool_lines` | Reparto proporcional a horas trabajadas con registro escrito (art. 64 CT) |
+| Propinas | `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources` | Registro diario de propinas, pacto de reparto vigente, horas trabajadas y reparto con snapshots (art. 64 CT) |
 | Ventas y Caja | `sales`, `cash_closings`, `cash_closing_lines` | Ventas por local y cierre de caja diario con responsable, desglosado por medio de pago (esperado vs. contado con diferencia por línea) |
 | Inventario | `products`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Stock por libro mayor de movimientos y conteos físicos que detectan mermas |
 | Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
 
-**19 tablas y 11 enums.** El Portal del Trabajador no agrega tablas: es una vista
+**23 tablas y 12 enums.** El Portal del Trabajador no agrega tablas: es una vista
 de solo lectura sobre `users`, `documents`, `tip_pool_lines` y `sales`, con
 aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 
@@ -29,20 +29,48 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 - **Sin borrado físico**: todas las FK usan `ON DELETE RESTRICT` por defecto
   (protege la trazabilidad), `SET NULL` en auditoría (el registro sobrevive a la
   anonimización del usuario) y `CASCADE` solo en datos estrictamente hijos
-  (tokens de sesión, líneas de reparto/cierre/conteo).
+  (tokens de sesión, líneas de reparto/cierre/conteo, fuentes de reparto).
 - **Dinero en `DECIMAL(12,2)`** (CLP) y cantidades en `DECIMAL(12,3)`: nunca
   `float`, para evitar errores de redondeo en propinas, ventas e inventario.
 - **`date` para fechas de negocio** (períodos de reparto, día de cierre) y
   **`timestamptz` para marcas de tiempo** (Chile tiene horario de verano).
 - **Restricciones de negocio en la BD**: un cierre de caja por local y día
   (`UNIQUE(store_id, business_date)`), una línea por medio de pago por cierre
-  (`UNIQUE(closing_id, payment_method)`), un reparto por local y período, una
-  línea por trabajador por reparto, hash SHA-256 único por versión de documento.
+  (`UNIQUE(closing_id, payment_method)`), un reparto por local y período
+  (`UNIQUE(store_id, period_start, period_end)`), una línea por trabajador por
+  reparto (`UNIQUE(pool_id, user_id)`), hash SHA-256 único por versión de
+  documento, un registro de propinas por local, fecha y medio de pago
+  (`UNIQUE(store_id, business_date, payment_method)`), una fuente por registro
+  diario (`UNIQUE(tip_entry_id)` en `tip_pool_sources`) y un pacto vigente por
+  local y fecha de inicio (`UNIQUE(store_id, valid_from)`).
 - **Inmutabilidad**: `audit_logs` y `document_versions` no tienen `updated_at`;
   la aplicación solo permite `INSERT`/`SELECT` sobre ellas.
 - **Convenciones**: tablas y columnas en `snake_case`, modelos Prisma en
   inglés `PascalCase`, enums en inglés (los literales de negocio —roles, tipos
   de documento— viven como datos en `roles` y `document_types`, seed en T05).
+
+### Propinas (SPRINT-3-T09)
+
+- **`tip_entries` es la única fuente de los repartos**: agrupa por local, día de
+  negocio y medio de pago el monto disponible para repartir. Los repartos se
+  calculan **solo desde `tip_entries`**; `sales.tip_amount` se reconcilia con
+  una única entrada mediante `sales.tip_entry_id` y **nunca se suma como segunda
+  fuente**.
+- **Unicidad diaria y por fuente**: no puede existir más de un `tip_entries` para
+  el mismo local, fecha y medio de pago; un registro diario solo puede usarse en
+  un reparto (`tip_pool_sources.tip_entry_id` es único).
+- **Snapshots inmutables del cálculo**: `tip_pools` conserva el pacto aplicado en
+  `agreement_snapshot` (`agreement_id` + `agreement_snapshot`), cada línea
+  guarda las horas usadas en `hours_worked` y la fuente guarda el monto aplicado
+  en `tip_pool_sources.amount`. Si cambian el pacto, las horas o el registro
+  diario posteriormente, el reparto ya confirmado no se altera.
+- **`work_hours_records`** descompone las horas trabajadas por trabajador y
+  período, permitiendo reutilizarlas en futuros repartos y mantener la
+  referencia fuente en cada línea (`tip_pool_lines.work_hours_record_id`).
+- **Reglas de consistencia en la BD**: triggers garantizan que una venta solo se
+  reconcilie con un registro del mismo local, medio y día de negocio, y que una
+  fuente de reparto pertenezca al mismo local y esté dentro del período del
+  reparto.
 
 ## Cumplimiento de la Ley N°21.719 (protección de datos personales)
 
@@ -62,10 +90,14 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 - **Art. 9 bis (conservación de documentación laboral)**: `documents` +
   `document_versions` conservan contratos, anexos, finiquitos y liquidaciones
   con integridad verificable, versionado y conservación por 5 años.
-- **Art. 64 (reparto de propinas)**: `tip_pools` define el fondo y período por
-  local; `tip_pool_lines.hours_worked` es la base del reparto proporcional y
-  `amount` el registro escrito por trabajador; `calculated_by`/`confirmed_by`/
-  `confirmed_at` dejan trazabilidad del cálculo validado por el contador.
+- **Art. 64 (reparto de propinas)**: `tip_entries` registra diariamente el monto
+  por local y medio de pago; `tip_pools` define el fondo y período por local;
+  `tip_pool_lines.hours_worked` es la base del reparto proporcional y `amount`
+  el registro escrito por trabajador; `calculated_by`/`confirmed_by`/
+  `confirmed_at` dejan trazabilidad del cálculo validado por el contador. El
+  pacto vigente (`tip_agreements`) y las horas trabajadas
+  (`work_hours_records`) se fotografían en el reparto para que modificaciones
+  posteriores no alteren un cálculo ya confirmado.
 - **Cierre de caja con responsable y desglose por medio de pago**:
   `cash_closings.responsible_id` (obligatorio) y `opening_cash` (fondo de caja)
   en la cabecera; `cash_closing_lines` registra **una línea por medio de pago**
@@ -123,6 +155,29 @@ agregar versiones o modificar el documento de su archivo. Mientras está
 pendiente, el trabajador, el período, el documento y quién la cargó tampoco
 cambian; el único cambio de estado posible es a `PUBLISHED`.
 
+## Reparto de propinas (SPRINT-3-T09)
+
+| Tabla | Rol |
+| --- | --- |
+| `tip_entries` | Registro diario agregado por local, día de negocio y medio de pago. Es la **única fuente** que alimenta los repartos; `sales.tip_amount` se reconcilia con ella mediante `sales.tip_entry_id`. |
+| `tip_agreements` | Pacto de reparto vigente en un local (regla, vigencia, creador). `tip_pools` guarda una copia en `agreement_snapshot` para inmutabilidad. |
+| `work_hours_records` | Horas trabajadas por trabajador y período; `tip_pool_lines` referencia su registro fuente y fotografía las horas usadas. |
+| `tip_pools` | Reparto de un local para un período. Contiene el monto total (desde `tip_entries`), el estado, el pacto aplicado y las trazabilidades de cálculo y confirmación. |
+| `tip_pool_lines` | Línea del reparto por trabajador: horas fotografiadas, monto asignado, trabajador y referencia al registro de horas. |
+| `tip_pool_sources` | Fuente del reparto: vincula un `tip_pool` con el `tip_entry` usado y guarda el monto aplicado. Un registro diario solo puede usarse una vez. |
+
+Reglas clave:
+
+- Un `tip_entries` por `(store_id, business_date, payment_method)`.
+- Un `tip_pool_sources` por `tip_entry_id` (la fuente no se reutiliza en otro reparto).
+- El total de `tip_pools` se calcula sumando los `tip_entries` del período; las
+  ventas aportan su `tip_amount` a través de la reconciliación con un único
+  `tip_entry`, sin sumar dos veces.
+- Los repartos históricos se mantienen intactos porque cada entidad relevante
+  conserva una copia del momento del cálculo: pacto (`agreement_snapshot`),
+  horas (`tip_pool_lines.hours_worked`) y monto fuente
+  (`tip_pool_sources.amount`).
+
 ## Cómo ver el modelo de forma visual
 
 Hay cuatro opciones; las dos primeras están listas en este archivo:
@@ -163,9 +218,20 @@ erDiagram
   DOCUMENTS ||--o| PAYSLIPS : "archivo de la liquidación"
   USERS ||--o{ PAYSLIPS : "recibe / carga / publica"
 
+  STORES ||--o{ TIP_ENTRIES : "registra propinas diarias"
+  USERS ||--o{ TIP_ENTRIES : "responsable"
+  TIP_ENTRIES ||--o{ SALES : "reconcilia"
+  TIP_ENTRIES ||--o| TIP_POOL_SOURCES : "usado como fuente"
+  STORES ||--o{ TIP_AGREEMENTS : "tiene pacto"
+  USERS ||--o{ TIP_AGREEMENTS : "crea"
+  TIP_AGREEMENTS |o--o{ TIP_POOLS : "aplica"
+  STORES ||--o{ WORK_HOURS_RECORDS : "registra horas"
+  USERS ||--o{ WORK_HOURS_RECORDS : "trabajador / registrador"
+  WORK_HOURS_RECORDS |o--o{ TIP_POOL_LINES : "fuente de horas"
   STORES ||--o{ TIP_POOLS : "reparte"
   USERS ||--o{ TIP_POOLS : "calcula / confirma"
   TIP_POOLS ||--o{ TIP_POOL_LINES : "detalla"
+  TIP_POOLS ||--o{ TIP_POOL_SOURCES : "compone"
   USERS ||--o{ TIP_POOL_LINES : "recibe"
 
   STORES ||--o{ SALES : "vende"
@@ -193,7 +259,7 @@ erDiagram
 ```dbml
 Project moi_food_gestion {
   database_type: 'PostgreSQL'
-  Note: 'Sistema de gestión interna Subway "Moi-food" — Capstone Duoc UC (SPRINT-1-T04)'
+  Note: 'Sistema de gestión interna Subway "Moi-food" — Capstone Duoc UC (SPRINT-3-T09)'
 }
 
 enum DocumentStatus {
@@ -211,6 +277,10 @@ enum TipPoolStatus {
   DRAFT
   CONFIRMED
   PAID
+}
+
+enum TipAgreementRule {
+  PROPORTIONAL_TO_HOURS
 }
 
 enum PaymentMethod {
@@ -425,34 +495,100 @@ Table payslips {
   }
 }
 
+Table tip_entries {
+  id uuid [pk, default: `gen_random_uuid()`]
+  business_date date [not null]
+  payment_method PaymentMethod [not null]
+  amount decimal(12,2) [not null, note: 'Monto disponible para repartir']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+  store_id uuid [not null, ref: > stores.id]
+  responsible_id uuid [not null, ref: > users.id, note: 'Quién registró la entrada']
+
+  indexes {
+    (store_id, business_date)
+    (store_id, business_date, payment_method) [unique, note: 'Un registro diario por local, fecha y medio de pago']
+  }
+}
+
+Table tip_agreements {
+  id uuid [pk, default: `gen_random_uuid()`]
+  name varchar(160) [not null]
+  rule TipAgreementRule [not null, note: 'PROPORTIONAL_TO_HOURS']
+  valid_from date [not null]
+  valid_to date [note: 'NULL = vigente']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+  store_id uuid [not null, ref: > stores.id]
+  created_by_id uuid [not null, ref: > users.id]
+
+  indexes {
+    (store_id, valid_from) [unique, note: 'Un pacto por local y fecha de inicio']
+    (store_id, valid_to)
+  }
+}
+
+Table work_hours_records {
+  id uuid [pk, default: `gen_random_uuid()`]
+  period_start date [not null]
+  period_end date [not null]
+  hours_worked decimal(6,2) [not null, note: 'Horas trabajadas en el período']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+  store_id uuid [not null, ref: > stores.id]
+  worker_id uuid [not null, ref: > users.id]
+  recorded_by_id uuid [not null, ref: > users.id]
+
+  indexes {
+    (store_id, period_start, period_end)
+    (store_id, worker_id, period_start, period_end) [unique, note: 'Un registro de horas por trabajador y período']
+  }
+}
+
 Table tip_pools {
   id uuid [pk, default: `gen_random_uuid()`]
   period_start date [not null]
   period_end date [not null]
-  total_amount decimal(12,2) [not null, note: 'Suma de sales.tip_amount del período']
+  total_amount decimal(12,2) [not null, note: 'Suma de tip_entries del período']
   status TipPoolStatus [not null, default: 'DRAFT']
   notes varchar(255)
+  agreement_snapshot jsonb [note: 'Copia del pacto aplicado al momento del cálculo']
   confirmed_at timestamptz
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null]
   store_id uuid [not null, ref: > stores.id]
   calculated_by_id uuid [not null, ref: > users.id]
   confirmed_by_id uuid [ref: > users.id]
+  agreement_id uuid [ref: > tip_agreements.id, note: 'Pacto vigente al calcular']
 
   indexes {
     (store_id, period_start, period_end) [unique]
+    agreement_id
   }
 }
 
 Table tip_pool_lines {
   id uuid [pk, default: `gen_random_uuid()`]
-  hours_worked decimal(6,2) [not null, note: 'Base del reparto proporcional (art. 64 CT)']
+  hours_worked decimal(6,2) [not null, note: 'Snapshot de horas usadas en el cálculo (art. 64 CT)']
   amount decimal(12,2) [not null, note: 'Registro escrito del reparto']
   pool_id uuid [not null, ref: > tip_pools.id]
   user_id uuid [not null, ref: > users.id]
+  work_hours_record_id uuid [ref: > work_hours_records.id, note: 'Registro fuente de las horas']
 
   indexes {
     (pool_id, user_id) [unique]
+    work_hours_record_id
+  }
+}
+
+Table tip_pool_sources {
+  id uuid [pk, default: `gen_random_uuid()`]
+  amount decimal(12,2) [not null, note: 'Monto de la fuente aplicado al reparto (snapshot)']
+  pool_id uuid [not null, ref: > tip_pools.id]
+  tip_entry_id uuid [not null, unique, ref: > tip_entries.id, note: 'Registro diario usado una sola vez']
+
+  indexes {
+    pool_id
   }
 }
 
@@ -462,15 +598,17 @@ Table sales {
   payment_method PaymentMethod [not null]
   channel SaleChannel [not null, default: 'IN_STORE']
   gross_amount decimal(12,2) [not null]
-  tip_amount decimal(12,2) [not null, default: 0, note: 'Alimenta el fondo de propinas']
+  tip_amount decimal(12,2) [not null, default: 0, note: 'Se reconcilia con un único tip_entry; no es fuente del reparto']
   created_at timestamptz [not null, default: `now()`]
   store_id uuid [not null, ref: > stores.id]
   cash_closing_id uuid [ref: > cash_closings.id]
   registered_by_id uuid [not null, ref: > users.id]
+  tip_entry_id uuid [ref: > tip_entries.id, note: 'Reconciliación con el registro diario']
 
   indexes {
     (store_id, sold_at)
     cash_closing_id
+    tip_entry_id
   }
 }
 
