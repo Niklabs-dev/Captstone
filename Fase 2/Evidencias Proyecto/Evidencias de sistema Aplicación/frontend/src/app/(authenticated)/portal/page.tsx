@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import type { ReactElement } from 'react';
 import { getPageRedirect } from '@/lib/navigation';
 import { getSession } from '@/lib/session';
+import Link from 'next/link';
+import { buttonClass } from '@/components/ui/styles';
 
 export default async function WorkerPortalPage({
   searchParams,
@@ -54,9 +56,24 @@ export default async function WorkerPortalPage({
             Mi información laboral
           </h2>
           <p className="mt-2 text-sm leading-6 text-ink2">
-            La consulta de documentos, liquidaciones y constancias de propinas
-            estará disponible cuando se habiliten esas funciones.
+            Consulta tus documentos laborales y tus liquidaciones publicadas.
           </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link
+              href="/portal/documentos"
+              prefetch={false}
+              className={buttonClass}
+            >
+              Mis documentos
+            </Link>
+            <Link
+              href="/portal/liquidaciones"
+              prefetch={false}
+              className={buttonClass}
+            >
+              Mis liquidaciones
+            </Link>
+          </div>
         </section>
       </div>
     </>

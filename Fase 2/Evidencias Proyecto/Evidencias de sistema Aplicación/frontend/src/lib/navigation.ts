@@ -11,7 +11,8 @@ export interface NavigationItem {
     | '/admin/documentos'
     | '/admin/alertas-dt'
     | '/liquidaciones'
-    | '/portal/liquidaciones';
+    | '/portal/liquidaciones'
+    | '/portal/documentos';
   label: string;
 }
 
@@ -20,6 +21,7 @@ export function getNavigationView(pathname: string): {
   title: string;
 } {
   const views = [
+    { href: '/portal/documentos', title: 'Mis documentos' },
     { href: '/portal/liquidaciones', title: 'Mis liquidaciones' },
     { href: '/admin/documentos', title: 'Gestor documental' },
     { href: '/admin/alertas-dt', title: 'Alertas de registro en la DT' },
@@ -44,12 +46,14 @@ export function getNavigationItems(
   if (role === 'TRABAJADOR')
     return [
       { href: '/portal', label: 'Inicio' },
+      { href: '/portal/documentos', label: 'Mis documentos' },
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
     ];
   const home: NavigationItem = { href: '/dashboard', label: 'Inicio' };
   if (role === 'SUPERVISOR')
     return [
       home,
+      { href: '/portal/documentos', label: 'Mis documentos' },
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
     ];
   return role === 'ADMINISTRADOR'
@@ -76,8 +80,9 @@ export function getPageRedirect(role: Role, pathname: string): string | null {
   const inPortal = pathname === '/portal' || pathname.startsWith('/portal/');
   if (
     role === 'SUPERVISOR' &&
-    (pathname === '/portal/liquidaciones' ||
-      pathname.startsWith('/portal/liquidaciones/'))
+    ['/portal/documentos', '/portal/liquidaciones'].some(
+      (path) => pathname === path || pathname.startsWith(path + '/'),
+    )
   )
     return null;
   if (role === 'TRABAJADOR')

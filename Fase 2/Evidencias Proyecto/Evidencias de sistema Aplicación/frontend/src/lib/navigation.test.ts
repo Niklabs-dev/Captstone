@@ -103,7 +103,7 @@ test('El portal es exclusivo del trabajador y no produce ciclos de redirección'
       );
       assert.equal(
         getPageRedirect(role, '/portal/documentos'),
-        '/dashboard?reason=forbidden',
+        role === 'SUPERVISOR' ? null : '/dashboard?reason=forbidden',
       );
     }
   }
@@ -203,5 +203,28 @@ test('El módulo de SPRINT-2-T17 usa la navegación común y respeta los roles',
       getPageRedirect(role, '/portal/liquidaciones') === null,
       allowed,
     );
+  }
+});
+test('Mis documentos y Mis liquidaciones permanecen separados para trabajadores y supervisores', () => {
+  assert.deepEqual(getNavigationView('/portal/documentos'), {
+    href: '/portal/documentos',
+    title: 'Mis documentos',
+  });
+  for (const role of ROLES) {
+    const allowed = role === 'TRABAJADOR' || role === 'SUPERVISOR';
+    assert.equal(
+      getNavigationItems(role).some(
+        (item) => item.href === '/portal/documentos',
+      ),
+      allowed,
+    );
+    assert.equal(getPageRedirect(role, '/portal/documentos') === null, allowed);
+    if (allowed)
+      assert.equal(
+        getNavigationItems(role).some(
+          (item) => item.href === '/portal/liquidaciones',
+        ),
+        true,
+      );
   }
 });
