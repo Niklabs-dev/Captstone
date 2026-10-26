@@ -41,8 +41,10 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
   reparto (`UNIQUE(pool_id, user_id)`), hash SHA-256 único por versión de
   documento, un registro de propinas por local, fecha y medio de pago
   (`UNIQUE(store_id, business_date, payment_method)`), una fuente por registro
-  diario (`UNIQUE(tip_entry_id)` en `tip_pool_sources`) y un pacto vigente por
-  local y fecha de inicio (`UNIQUE(store_id, valid_from)`).
+  diario (`UNIQUE(tip_entry_id)` en `tip_pool_sources`), un pacto por local e
+  inicio (`UNIQUE(store_id, valid_from)`) y restricciones de exclusión que impiden
+  vigencias de pactos o períodos de horas solapados (`tip_agreements_no_overlap`
+  y `work_hours_records_no_overlap`).
 - **Inmutabilidad**: `audit_logs` y `document_versions` no tienen `updated_at`;
   la aplicación solo permite `INSERT`/`SELECT` sobre ellas.
 - **Convenciones**: tablas y columnas en `snake_case`, modelos Prisma en
@@ -67,10 +69,15 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 - **`work_hours_records`** descompone las horas trabajadas por trabajador y
   período, permitiendo reutilizarlas en futuros repartos y mantener la
   referencia fuente en cada línea (`tip_pool_lines.work_hours_record_id`).
+- **Vigencias sin ambigüedad**: restricciones de exclusión con rangos inclusivos
+  impiden dos pactos solapados en un local o dos registros de horas solapados
+  para un trabajador; un pacto sin `valid_to` queda abierto.
 - **Reglas de consistencia en la BD**: triggers garantizan que una venta solo se
   reconcilie con un registro del mismo local, medio y día de negocio, y que una
   fuente de reparto pertenezca al mismo local y esté dentro del período del
-  reparto.
+  reparto. El backfill solo vincula un reparto si todas sus entradas son
+  inequívocas y concilian con su total; las horas históricas solapadas conservan
+  su snapshot sin crear una referencia ambigua.
 
 ## Cumplimiento de la Ley N°21.719 (protección de datos personales)
 
@@ -526,6 +533,8 @@ Table tip_agreements {
     (store_id, valid_from) [unique, note: 'Un pacto por local y fecha de inicio']
     (store_id, valid_to)
   }
+
+  Note: 'tip_agreements_no_overlap impide vigencias solapadas por local; rangos inclusivos'
 }
 
 Table work_hours_records {
@@ -543,6 +552,8 @@ Table work_hours_records {
     (store_id, period_start, period_end)
     (store_id, worker_id, period_start, period_end) [unique, note: 'Un registro de horas por trabajador y período']
   }
+
+  Note: 'work_hours_records_no_overlap impide períodos solapados para un trabajador'
 }
 
 Table tip_pools {

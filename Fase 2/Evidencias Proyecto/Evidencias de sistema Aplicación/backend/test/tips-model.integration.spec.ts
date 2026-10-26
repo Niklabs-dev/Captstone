@@ -397,4 +397,58 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
       ).rejects.toThrow('work_hours_records_valid_period');
     });
   });
+
+  it('impide pactos y horas solapadas aunque cambie la fecha de inicio', async () => {
+    await withinRollback(async (tx) => {
+      const { store, supervisor } = await createBase(tx);
+      await tx.tipAgreement.create({
+        data: {
+          name: 'Pacto inicial',
+          rule: TipAgreementRule.PROPORTIONAL_TO_HOURS,
+          validFrom: new Date('2026-01-01'),
+          validTo: new Date('2026-06-30'),
+          storeId: store.id,
+          createdById: supervisor.id,
+        },
+      });
+      await expect(
+        tx.tipAgreement.create({
+          data: {
+            name: 'Pacto solapado',
+            rule: TipAgreementRule.PROPORTIONAL_TO_HOURS,
+            validFrom: new Date('2026-02-01'),
+            validTo: new Date('2026-07-31'),
+            storeId: store.id,
+            createdById: supervisor.id,
+          },
+        }),
+      ).rejects.toThrow('tip_agreements_no_overlap');
+    });
+
+    await withinRollback(async (tx) => {
+      const { store, supervisor, worker } = await createBase(tx);
+      await tx.workHoursRecord.create({
+        data: {
+          periodStart: new Date('2026-01-01'),
+          periodEnd: new Date('2026-01-31'),
+          hoursWorked: 40,
+          storeId: store.id,
+          workerId: worker.id,
+          recordedById: supervisor.id,
+        },
+      });
+      await expect(
+        tx.workHoursRecord.create({
+          data: {
+            periodStart: new Date('2026-01-15'),
+            periodEnd: new Date('2026-02-15'),
+            hoursWorked: 20,
+            storeId: store.id,
+            workerId: worker.id,
+            recordedById: supervisor.id,
+          },
+        }),
+      ).rejects.toThrow('work_hours_records_no_overlap');
+    });
+  });
 });

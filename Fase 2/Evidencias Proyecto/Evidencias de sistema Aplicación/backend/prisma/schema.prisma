@@ -78,46 +78,46 @@ model Role {
 /// que exige el art. 9 bis del Código del Trabajo.
 /// store_id es NULL para usuarios globales (dueño, administrador, contador).
 model User {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email        String    @unique @db.VarChar(160)
-  passwordHash String    @map("password_hash") @db.VarChar(255)
-  firstName    String    @map("first_name") @db.VarChar(80)
-  lastName     String    @map("last_name") @db.VarChar(80)
-  rut          String?   @unique @db.VarChar(12)
-  phone        String?   @db.VarChar(20)
-  hiredAt      DateTime? @map("hired_at") @db.Date
-  isActive     Boolean   @default(true) @map("is_active")
-  anonymizedAt DateTime? @map("anonymized_at") @db.Timestamptz(6)
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String    @unique @db.VarChar(160)
+  passwordHash  String    @map("password_hash") @db.VarChar(255)
+  firstName     String    @map("first_name") @db.VarChar(80)
+  lastName      String    @map("last_name") @db.VarChar(80)
+  rut           String?   @unique @db.VarChar(12)
+  phone         String?   @db.VarChar(20)
+  hiredAt       DateTime? @map("hired_at") @db.Date
+  isActive      Boolean   @default(true) @map("is_active")
+  anonymizedAt  DateTime? @map("anonymized_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  role    Role    @relation(fields: [roleId], references: [id], onDelete: Restrict)
-  roleId  String  @map("role_id") @db.Uuid
-  store   Store?  @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  role    Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  roleId  String @map("role_id") @db.Uuid
+  store   Store? @relation(fields: [storeId], references: [id], onDelete: Restrict)
   storeId String? @map("store_id") @db.Uuid
 
   refreshTokens              RefreshToken[]
   auditLogs                  AuditLog[]
-  subjectDocuments           Document[]          @relation("SubjectDocuments")
-  createdDocuments           Document[]          @relation("CreatedDocuments")
-  dtRegisteredDocuments      Document[]          @relation("DtRegisteredDocuments")
-  uploadedVersions           DocumentVersion[]   @relation("UploadedVersions")
-  payslips                   Payslip[]           @relation("WorkerPayslips")
-  createdPayslips            Payslip[]           @relation("CreatedPayslips")
-  publishedPayslips          Payslip[]           @relation("PublishedPayslips")
-  calculatedTipPools         TipPool[]           @relation("CalculatedTipPools")
-  confirmedTipPools          TipPool[]           @relation("ConfirmedTipPools")
-  tipPoolLines               TipPoolLine[]       @relation("TipPoolLines")
-  responsibleTipEntries      TipEntry[]          @relation("ResponsibleTipEntries")
-  createdTipAgreements       TipAgreement[]      @relation("CreatedTipAgreements")
-  workedHours                WorkHoursRecord[]   @relation("WorkerWorkHours")
-  recordedWorkHours          WorkHoursRecord[]   @relation("RecordedWorkHours")
-  registeredSales            Sale[]              @relation("RegisteredSales")
-  responsibleCashClosings    CashClosing[]       @relation("ResponsibleCashClosings")
-  inventoryMovements         InventoryMovement[] @relation("CreatedInventoryMovements")
-  inventoryCounts            InventoryCount[]    @relation("CreatedInventoryCounts")
-  ownDataRightsRequests      DataRightsRequest[] @relation("OwnDataRightsRequests")
-  resolvedDataRightsRequests DataRightsRequest[] @relation("ResolvedDataRightsRequests")
+  subjectDocuments           Document[]           @relation("SubjectDocuments")
+  createdDocuments           Document[]           @relation("CreatedDocuments")
+  dtRegisteredDocuments      Document[]           @relation("DtRegisteredDocuments")
+  uploadedVersions           DocumentVersion[]    @relation("UploadedVersions")
+  payslips                   Payslip[]            @relation("WorkerPayslips")
+  createdPayslips            Payslip[]            @relation("CreatedPayslips")
+  publishedPayslips          Payslip[]            @relation("PublishedPayslips")
+  calculatedTipPools        TipPool[]            @relation("CalculatedTipPools")
+  confirmedTipPools          TipPool[]            @relation("ConfirmedTipPools")
+  tipPoolLines               TipPoolLine[]        @relation("TipPoolLines")
+  responsibleTipEntries      TipEntry[]           @relation("ResponsibleTipEntries")
+  createdTipAgreements       TipAgreement[]       @relation("CreatedTipAgreements")
+  workedHours                WorkHoursRecord[]    @relation("WorkerWorkHours")
+  recordedWorkHours          WorkHoursRecord[]    @relation("RecordedWorkHours")
+  registeredSales            Sale[]               @relation("RegisteredSales")
+  responsibleCashClosings    CashClosing[]        @relation("ResponsibleCashClosings")
+  inventoryMovements         InventoryMovement[]  @relation("CreatedInventoryMovements")
+  inventoryCounts            InventoryCount[]     @relation("CreatedInventoryCounts")
+  ownDataRightsRequests      DataRightsRequest[]  @relation("OwnDataRightsRequests")
+  resolvedDataRightsRequests DataRightsRequest[]  @relation("ResolvedDataRightsRequests")
 
   @@index([storeId])
   @@map("users")
@@ -157,10 +157,10 @@ model AuditLog {
   // Restrict: el registro es inmutable (SPRINT-1-T15, triggers en la migración
   // auditoria_inmutable), por lo que un usuario o local con historial no se
   // borra; la Ley N°21.719 se cumple anonimizando (anonymizedAt), que conserva la fila.
-  user    User?   @relation(fields: [userId], references: [id], onDelete: Restrict)
-  userId  String? @map("user_id") @db.Uuid
-  store   Store?  @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  storeId String? @map("store_id") @db.Uuid
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userId     String?  @map("user_id") @db.Uuid
+  store      Store?   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId    String?  @map("store_id") @db.Uuid
 
   @@index([storeId, createdAt])
   @@index([userId, createdAt])
@@ -229,18 +229,18 @@ model Document {
   createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  store            Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  storeId          String            @map("store_id") @db.Uuid
-  subjectUser      User?             @relation("SubjectDocuments", fields: [subjectUserId], references: [id], onDelete: Restrict)
-  subjectUserId    String?           @map("subject_user_id") @db.Uuid
-  documentType     DocumentType      @relation(fields: [documentTypeId], references: [id], onDelete: Restrict)
-  documentTypeId   String            @map("document_type_id") @db.Uuid
-  createdBy        User              @relation("CreatedDocuments", fields: [createdById], references: [id], onDelete: Restrict)
-  createdById      String            @map("created_by_id") @db.Uuid
-  dtRegisteredBy   User?             @relation("DtRegisteredDocuments", fields: [dtRegisteredById], references: [id], onDelete: Restrict)
-  dtRegisteredById String?           @map("dt_registered_by_id") @db.Uuid
-  currentVersion   DocumentVersion?  @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
-  currentVersionId String?           @unique @map("current_version_id") @db.Uuid
+  store            Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId          String         @map("store_id") @db.Uuid
+  subjectUser      User?          @relation("SubjectDocuments", fields: [subjectUserId], references: [id], onDelete: Restrict)
+  subjectUserId    String?        @map("subject_user_id") @db.Uuid
+  documentType     DocumentType   @relation(fields: [documentTypeId], references: [id], onDelete: Restrict)
+  documentTypeId   String         @map("document_type_id") @db.Uuid
+  createdBy        User           @relation("CreatedDocuments", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById      String         @map("created_by_id") @db.Uuid
+  dtRegisteredBy   User?          @relation("DtRegisteredDocuments", fields: [dtRegisteredById], references: [id], onDelete: Restrict)
+  dtRegisteredById String?        @map("dt_registered_by_id") @db.Uuid
+  currentVersion   DocumentVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  currentVersionId String?          @unique @map("current_version_id") @db.Uuid
   versions         DocumentVersion[] @relation("DocumentVersions")
   // Liquidación de sueldo asociada, si el documento es de tipo LIQUIDACION.
   payslip          Payslip?
@@ -602,13 +602,13 @@ enum InventoryMovementType {
 /// tipo define el signo (PURCHASE suma; CONSUMPTION y WASTE restan; ADJUSTMENT
 /// corrige). El stock de un producto es la suma firmada de sus movimientos.
 model InventoryMovement {
-  id         BigInt                @id @default(autoincrement())
-  type       InventoryMovementType
-  quantity   Decimal               @db.Decimal(12, 3)
-  reason     String?               @db.VarChar(255)
-  reference  String?               @db.VarChar(60)
-  occurredAt DateTime              @default(now()) @map("occurred_at") @db.Timestamptz(6)
-  createdAt  DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  id          BigInt                @id @default(autoincrement())
+  type        InventoryMovementType
+  quantity    Decimal               @db.Decimal(12, 3)
+  reason      String?               @db.VarChar(255)
+  reference   String?               @db.VarChar(60)
+  occurredAt  DateTime              @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
 
   store       Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
   storeId     String  @map("store_id") @db.Uuid
