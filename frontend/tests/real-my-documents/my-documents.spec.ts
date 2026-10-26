@@ -305,7 +305,9 @@ for (const role of ['TRABAJADOR', 'SUPERVISOR'] as const)
     try {
       await writeFile(storage, Buffer.from('Archivo alterado para prueba'));
       await row.getByRole('button', { name: 'Descargar', exact: true }).click();
-      await expect(page.getByRole('alert')).toContainText('alterado');
+      await expect(page.locator('main').getByRole('alert')).toContainText(
+        'alterado',
+      );
       await page.screenshot({ path: info.outputPath('archivo-alterado.png') });
     } finally {
       await writeFile(storage, current.bytes);
@@ -315,7 +317,7 @@ for (const role of ['TRABAJADOR', 'SUPERVISOR'] as const)
       await row
         .getByRole('button', { name: 'Verificar integridad', exact: true })
         .click();
-      await expect(page.getByRole('alert')).toContainText(
+      await expect(page.locator('main').getByRole('alert')).toContainText(
         'El archivo no está disponible; informa al administrador',
       );
       await page.screenshot({ path: info.outputPath('archivo-ausente.png') });
@@ -328,12 +330,10 @@ for (const role of ['TRABAJADOR', 'SUPERVISOR'] as const)
     await filter.selectOption('');
     await expect(page.locator('tbody tr')).toHaveCount(4);
     await expect(
-      page
-        .locator('main')
-        .getByRole('link', {
-          name: 'Consultar mis liquidaciones',
-          exact: true,
-        }),
+      page.locator('main').getByRole('link', {
+        name: 'Consultar mis liquidaciones',
+        exact: true,
+      }),
     ).toBeVisible();
     expect(
       (
