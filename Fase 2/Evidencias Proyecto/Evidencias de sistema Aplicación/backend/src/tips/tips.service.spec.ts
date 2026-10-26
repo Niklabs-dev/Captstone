@@ -44,6 +44,8 @@ const CREATE_DTO: CreateTipEntryDto = {
 
 function createService() {
   const prisma = {
+    $transaction: vi.fn(),
+    $queryRaw: vi.fn().mockResolvedValue([]),
     tipEntry: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -52,6 +54,9 @@ function createService() {
       delete: vi.fn(),
     },
   };
+  prisma.$transaction.mockImplementation(
+    (callback: (client: unknown) => Promise<unknown>) => callback(prisma),
+  );
   const stores = { assertActive: vi.fn().mockResolvedValue({}) };
   return {
     service: new TipsService(
@@ -127,7 +132,7 @@ describe('TipsService', () => {
     expect(prisma.tipEntry.findUnique).toHaveBeenCalledTimes(2);
   });
 
-  it('rechaza fecha inválida y monto negativo antes de escribir', async () => {
+  it('rechaza fecha inválida y montos negativos o con centavos antes de escribir', async () => {
     const { service, prisma } = createService();
 
     await expect(
@@ -136,7 +141,14 @@ describe('TipsService', () => {
     await expect(
       service.create({ ...CREATE_DTO, amount: -1 }, USER),
     ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create({ ...CREATE_DTO, amount: 12.5 }, USER),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.update(ENTRY.id, { amount: 12.5 }, USER),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.tipEntry.create).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('bloquea la consulta de un local no asignado', async () => {
@@ -149,6 +161,47 @@ describe('TipsService', () => {
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.tipEntry.findMany).not.toHaveBeenCalled();
+  });
+
+  it('actualiza un monto entero dentro de una transacción con bloqueo de fila', async () => {
+    const { service, prisma, stores } = createService();
+    prisma.tipEntry.findUnique.mockResolvedValue({
+      ...ENTRY,
+      poolSource: null,
+      sales: [],
+    });
+    prisma.tipEntry.update.mockResolvedValue({
+      ...ENTRY,
+      amount: new Prisma.Decimal(13000),
+    });
+
+    const result = await service.update(ENTRY.id, { amount: 13000 }, USER);
+
+    expect(result.amount).toBe(13000);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(stores.assertActive).toHaveBeenCalledWith(ENTRY.store.id);
+  });
+
+  it('rechaza editar o eliminar cuando el local está inactivo', async () => {
+    const { service, prisma, stores } = createService();
+    prisma.tipEntry.findUnique.mockResolvedValue({
+      ...ENTRY,
+      poolSource: null,
+      sales: [],
+    });
+    stores.assertActive.mockRejectedValue(
+      new BadRequestException('Local inactivo'),
+    );
+
+    await expect(
+      service.update(ENTRY.id, { amount: 13000 }, USER),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.remove(ENTRY.id, USER)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.tipEntry.update).not.toHaveBeenCalled();
+    expect(prisma.tipEntry.delete).not.toHaveBeenCalled();
   });
 
   it('bloquea edición y eliminación de registros ya vinculados', async () => {
