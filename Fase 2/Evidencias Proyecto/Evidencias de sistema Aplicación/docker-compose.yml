@@ -79,7 +79,8 @@ services:
 
   # Carga los datos base (roles y usuario administrador) tras las migraciones.
   # El seed es idempotente: no duplica roles ni sobrescribe la contraseña del
-  # administrador si ya existe.
+  # administrador si ya existe. Las fixtures demo de propinas son opt-in y
+  # permanecen apagadas por defecto para no cargarlas en producción.
   seed:
     build:
       context: ./backend
@@ -91,6 +92,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin-cambiar-en-produccion}
       ADMIN_FIRST_NAME: ${ADMIN_FIRST_NAME:-Administrador}
       ADMIN_LAST_NAME: ${ADMIN_LAST_NAME:-Moi-food}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
     depends_on:
       migrate:
         condition: service_completed_successfully

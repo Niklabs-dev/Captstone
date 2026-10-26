@@ -41,6 +41,7 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
     adminFirstName: 'Admin',
     adminLastName: 'Seed',
   };
+  const opcionesDemo: SeedOptions = { ...opciones, includeDemoData: true };
 
   beforeAll(() => {
     prisma = new PrismaClient({
@@ -264,9 +265,42 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
     });
   });
 
+  it('no siembra usuarios ni propinas demo cuando la opción está apagada', async () => {
+    await withinRollback(async (tx) => {
+      async function countDemoData(): Promise<number[]> {
+        return Promise.all([
+          tx.user.count({
+            where: { id: { in: TIP_DEMO_USERS.map((demo) => demo.id) } },
+          }),
+          tx.tipEntry.count({
+            where: { id: { in: TIP_DEMO_ENTRIES.map((entry) => entry.id) } },
+          }),
+          tx.tipAgreement.count({ where: { id: TIP_DEMO_AGREEMENT.id } }),
+          tx.workHoursRecord.count({
+            where: {
+              id: {
+                in: TIP_DEMO_WORKER_PERIODS.map((period) => period.hoursId),
+              },
+            },
+          }),
+          tx.tipPool.count({ where: { id: TIP_DEMO_POOL.id } }),
+          tx.tipPoolSource.count({
+            where: {
+              id: { in: TIP_DEMO_POOL_SOURCES.map((source) => source.id) },
+            },
+          }),
+        ]);
+      }
+
+      const before = await countDemoData();
+      await seedDatabase(tx, opciones);
+      expect(await countDemoData()).toEqual(before);
+    });
+  });
+
   it('siembra las fixtures de propinas con sus relaciones completas (SPRINT-3-T09)', async () => {
     await withinRollback(async (tx) => {
-      await seedDatabase(tx, opciones);
+      await seedDatabase(tx, opcionesDemo);
 
       // Pacto demo vigente en el local demo, creado por el supervisor demo.
       const pacto = await tx.tipAgreement.findUniqueOrThrow({
@@ -342,7 +376,7 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
 
   it('las fixtures de propinas usan solo datos sintéticos (SPRINT-3-T09)', async () => {
     await withinRollback(async (tx) => {
-      await seedDatabase(tx, opciones);
+      await seedDatabase(tx, opcionesDemo);
 
       for (const demo of TIP_DEMO_USERS) {
         const usuario = await tx.user.findUniqueOrThrow({
@@ -374,7 +408,7 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
 
   it('las fixtures de propinas son idempotentes y respetan cambios administrados (SPRINT-3-T09)', async () => {
     await withinRollback(async (tx) => {
-      await seedDatabase(tx, opciones);
+      await seedDatabase(tx, opcionesDemo);
 
       // Cambio administrado vía API sobre una entrada fixture.
       const montoCorregido = 77777;
@@ -383,7 +417,7 @@ describe.skipIf(!databaseUrl)('Seed de datos base (SPRINT-1-T05)', () => {
         data: { amount: montoCorregido },
       });
 
-      await seedDatabase(tx, opciones);
+      await seedDatabase(tx, opcionesDemo);
 
       // Mismos conteos de las filas propias del seed: nada se duplica al
       // repetirlo (se cuentan por UUID fijo para no mezclar datos ajenos

@@ -12,9 +12,9 @@
 // por su UUID fijo con `update: {}` (no revierten cambios
 // administrados por la API); el administrador solo se crea si el
 // correo no existe, sin sobrescribir la contraseña de un usuario
-// ya registrado. Las fixtures de propinas se siembran siempre,
-// aunque el administrador ya exista, y usan solo datos sintéticos
-// (correos .invalid y contraseñas aleatorias no divulgadas).
+// ya registrado. Las fixtures de propinas se siembran solo con
+// SEED_DEMO_DATA=true y usan datos sintéticos (correos .invalid y
+// contraseñas aleatorias no divulgadas); en producción quedan apagadas.
 // =============================================================
 import 'dotenv/config';
 import { randomBytes } from 'node:crypto';
@@ -280,6 +280,7 @@ export interface SeedOptions {
   adminPassword: string;
   adminFirstName: string;
   adminLastName: string;
+  includeDemoData?: boolean;
 }
 
 export interface SeedResult {
@@ -339,10 +340,11 @@ export async function seedDatabase(
     storeIds.push(guardado.id);
   }
 
-  // Fixtures sintéticas del módulo de propinas (SPRINT-3-T09): se siembran
-  // SIEMPRE, aunque el administrador ya exista (antes el seed retornaba
-  // temprano y se las saltaba).
-  await seedTipDemoFixtures(db, roleIds);
+  // Los datos demo son opt-in para no introducir usuarios, pactos ni
+  // propinas artificiales en despliegues productivos.
+  if (options.includeDemoData === true) {
+    await seedTipDemoFixtures(db, roleIds);
+  }
 
   const existente = await db.user.findUnique({
     where: { email: options.adminEmail },
@@ -510,6 +512,7 @@ async function main(): Promise<void> {
     adminPassword: process.env.ADMIN_PASSWORD ?? 'admin-cambiar-en-produccion',
     adminFirstName: process.env.ADMIN_FIRST_NAME ?? 'Administrador',
     adminLastName: process.env.ADMIN_LAST_NAME ?? 'Moi-food',
+    includeDemoData: process.env.SEED_DEMO_DATA === 'true',
   };
 
   const prisma = new PrismaClient({
@@ -529,12 +532,16 @@ async function main(): Promise<void> {
     console.log(
       `Locales sincronizados: ${BASE_STORES.map((s) => s.name).join(', ')}.`,
     );
-    console.log(
-      `Fixtures demo de propinas sincronizadas (SPRINT-3-T09) en ` +
-        `${TIP_DEMO_STORE.name}: pacto, ${TIP_DEMO_ENTRIES.length} entradas, ` +
-        `${TIP_DEMO_WORKER_PERIODS.length} registros de horas y reparto ` +
-        `${TIP_DEMO_POOL.status} de ${TIP_DEMO_POOL.totalAmount} CLP (datos sintéticos).`,
-    );
+    if (options.includeDemoData === true) {
+      console.log(
+        `Fixtures demo de propinas sincronizadas (SPRINT-3-T09) en ` +
+          `${TIP_DEMO_STORE.name}: pacto, ${TIP_DEMO_ENTRIES.length} entradas, ` +
+          `${TIP_DEMO_WORKER_PERIODS.length} registros de horas y reparto ` +
+          `${TIP_DEMO_POOL.status} de ${TIP_DEMO_POOL.totalAmount} CLP (datos sintéticos).`,
+      );
+    } else {
+      console.log('Fixtures demo desactivadas: SEED_DEMO_DATA no es true.');
+    }
     console.log(
       result.adminCreated
         ? `Usuario administrador creado: ${options.adminEmail}`

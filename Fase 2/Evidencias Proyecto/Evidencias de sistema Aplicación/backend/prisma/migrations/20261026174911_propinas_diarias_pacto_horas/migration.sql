@@ -183,19 +183,34 @@ WHERE s."store_id" = e."store_id"
   AND (s."sold_at" AT TIME ZONE 'America/Santiago')::date = e."business_date"
   AND s."tip_amount" > 0;
 
--- Conserva las horas que ya existían en las líneas y enlaza cada línea con su
--- nuevo registro fuente. hours_worked permanece también como snapshot.
-WITH inserted_hours AS (
+-- Conserva las horas históricas solo cuando no existen períodos solapados para
+-- el mismo trabajador. Los casos ambiguos mantienen hours_worked como snapshot,
+-- sin crear una referencia que infringa la nueva regla de no solapamiento.
+WITH nonoverlapping_hours AS (
+  SELECT
+    l."id" AS "line_id", p."store_id", l."user_id", p."period_start",
+    p."period_end", l."hours_worked", p."calculated_by_id"
+  FROM "tip_pool_lines" AS l
+  INNER JOIN "tip_pools" AS p ON p."id" = l."pool_id"
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM "tip_pool_lines" AS other
+    INNER JOIN "tip_pools" AS other_pool ON other_pool."id" = other."pool_id"
+    WHERE other."id" <> l."id"
+      AND other."user_id" = l."user_id"
+      AND daterange(other_pool."period_start", other_pool."period_end", '[]')
+        && daterange(p."period_start", p."period_end", '[]')
+  )
+), inserted_hours AS (
   INSERT INTO "work_hours_records" (
     "id", "period_start", "period_end", "hours_worked", "created_at",
     "updated_at", "store_id", "worker_id", "recorded_by_id"
   )
   SELECT
-    gen_random_uuid(), p."period_start", p."period_end", l."hours_worked",
-    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, p."store_id", l."user_id",
-    p."calculated_by_id"
-  FROM "tip_pool_lines" AS l
-  INNER JOIN "tip_pools" AS p ON p."id" = l."pool_id"
+    gen_random_uuid(), "period_start", "period_end", "hours_worked",
+    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, "store_id", "user_id",
+    "calculated_by_id"
+  FROM nonoverlapping_hours
   RETURNING "id", "store_id", "worker_id", "period_start", "period_end"
 )
 UPDATE "tip_pool_lines" AS l
@@ -207,27 +222,48 @@ WHERE l."pool_id" = p."id"
   AND p."period_end" = w."period_end"
   AND l."user_id" = w."worker_id";
 
--- Vincula repartos históricos solo si cada registro tiene un único reparto
--- candidato y la suma de fuentes concilia exactamente con su total. Los casos
--- ambiguos se preservan sin una asociación inventada.
+-- Vincula un reparto histórico solo si TODOS sus registros son inequívocos y
+-- la suma concilia exactamente. Si uno cabe en varios repartos, ninguno de sus
+-- registros se asocia parcialmente: se preserva el total sin inventar fuentes.
 WITH candidates AS (
   SELECT
     p."id" AS "pool_id",
     e."id" AS "tip_entry_id",
     e."amount",
-    COUNT(*) OVER (PARTITION BY e."id") AS "pool_matches",
-    SUM(e."amount") OVER (PARTITION BY p."id") AS "sources_total",
-    p."total_amount"
+    p."total_amount",
+    COUNT(*) OVER (PARTITION BY e."id") AS "pool_matches"
   FROM "tip_entries" AS e
   INNER JOIN "tip_pools" AS p
     ON p."store_id" = e."store_id"
     AND e."business_date" BETWEEN p."period_start" AND p."period_end"
+), evaluated AS (
+  SELECT
+    candidates.*,
+    MAX("pool_matches") OVER (PARTITION BY "pool_id") AS "max_pool_matches",
+    SUM("amount") OVER (PARTITION BY "pool_id") AS "sources_total"
+  FROM candidates
 )
 INSERT INTO "tip_pool_sources" ("id", "amount", "pool_id", "tip_entry_id")
 SELECT gen_random_uuid(), "amount", "pool_id", "tip_entry_id"
-FROM candidates
-WHERE "pool_matches" = 1
+FROM evaluated
+WHERE "max_pool_matches" = 1
   AND "sources_total" = "total_amount";
+
+-- Impide que el pacto vigente o las horas de un trabajador sean ambiguos.
+-- Los rangos incluyen ambos extremos y un pacto sin término queda abierto.
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+ALTER TABLE "tip_agreements"
+  ADD CONSTRAINT "tip_agreements_no_overlap" EXCLUDE USING gist (
+    "store_id" WITH =,
+    daterange("valid_from", COALESCE("valid_to", 'infinity'::date), '[]') WITH &&
+  );
+
+ALTER TABLE "work_hours_records"
+  ADD CONSTRAINT "work_hours_records_no_overlap" EXCLUDE USING gist (
+    "worker_id" WITH =,
+    daterange("period_start", "period_end", '[]') WITH &&
+  );
 
 -- Una venta solo puede reconciliarse con un registro del mismo local, medio y
 -- día de negocio. La FK ya impide que una venta apunte a más de un registro.
