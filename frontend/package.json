@@ -32,7 +32,10 @@
     "test:my-payslips": "tsc -p tsconfig.test.json && node --test .test-build/my-payslips.test.js",
     "test:my-payslips:e2e": "playwright test --config playwright.my-payslips.config.ts",
     "test:stores": "tsc -p tsconfig.test.json && node --test .test-build/stores.test.js .test-build/navigation.test.js",
-    "test:stores:e2e": "playwright test --config playwright.stores.config.ts"
+    "test:stores:e2e": "playwright test --config playwright.stores.config.ts",
+    "test:tips": "tsc -p tsconfig.test.json && node --test .test-build/tips.test.js .test-build/navigation.test.js",
+    "test:tips:integration": "npm run build && tsc -p tsconfig.test.json && node --test .test-build/tips-http.integration.test.js",
+    "test:tips:real": "playwright test --config playwright.tips.config.ts"
   },
   "dependencies": {
     "next": "16.3.6",

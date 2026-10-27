@@ -36,6 +36,13 @@ export default async function DashboardPage({
         {session.data.role === 'SUPERVISOR' && (
           <div className="flex flex-wrap gap-3">
             <Link
+              href="/propinas/diarias"
+              prefetch={false}
+              className={buttonClass}
+            >
+              Registrar propinas
+            </Link>
+            <Link
               href="/portal/documentos"
               prefetch={false}
               className={buttonClass}
