@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { setTimeout } from 'node:timers/promises';
 import { test } from 'node:test';
-import { tipErrorMessage } from './tips';
+import { TIP_INACTIVE_STORE_MESSAGE, tipErrorMessage } from './tips';
 
 test(
   'HTTP propinas: permisos, origen, identidad de sesión, reintentos, respuestas no confiables y errores privados',
@@ -65,6 +65,18 @@ test(
         method: request.method ?? '',
         body: raw ? (JSON.parse(raw) as unknown) : null,
       });
+      if (mode === 'inactive' || mode === 'bad-request') {
+        response.writeHead(400);
+        response.end(
+          JSON.stringify({
+            message:
+              mode === 'inactive'
+                ? 'El local indicado no existe o está inactivo'
+                : 'SQL passwordHash /private/secret',
+          }),
+        );
+        return;
+      }
       if (mode === 'private-error' || mode === 'conflict') {
         response.writeHead(mode === 'conflict' ? 409 : 500);
         response.end(
@@ -227,6 +239,17 @@ test(
       assert.deepEqual(calls.at(-1)?.body, { ...input, storeId });
       mode = 'replay';
       assert.equal((await send({ method: 'POST' })).status, 200);
+      mode = 'inactive';
+      result = await send({ method: 'POST' });
+      assert.equal(result.status, 400);
+      assert.deepEqual(await result.json(), {
+        code: 'STORE_INACTIVE',
+        message: TIP_INACTIVE_STORE_MESSAGE,
+      });
+      mode = 'bad-request';
+      result = await send({ method: 'POST' });
+      assert.equal(result.status, 400);
+      assert.deepEqual(await result.json(), { message: tipErrorMessage(400) });
       mode = 'conflict';
       result = await send({ method: 'POST' });
       assert.equal(result.status, 409);

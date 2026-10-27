@@ -280,7 +280,7 @@ export function DocumentWorkspace({
                 Tipo de documento
                 <select
                   aria-label="Tipo de documento"
-                  className={'mt-2 min-w-44 ' + inputClass}
+                  className={'mt-2 ' + inputClass}
                   value={filter}
                   onChange={(event) => setFilter(event.target.value)}
                 >
@@ -338,8 +338,11 @@ export function DocumentWorkspace({
                 role="region"
                 aria-label="Documentos del trabajador"
                 tabIndex={0}
-                className="overflow-x-auto rounded-lg border border-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink"
+                className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain rounded-lg border border-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink"
               >
+                <p className="border-b border-line px-4 py-3 text-xs text-ink2 lg:hidden">
+                  Desliza la tabla para ver todas las columnas y acciones.
+                </p>
                 <table className={`${tableClass} min-w-[680px]`}>
                   <caption className="sr-only">
                     Documentos del trabajador

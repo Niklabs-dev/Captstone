@@ -1,5 +1,9 @@
 # Frontend Moi-food
 
+Responsive de las vistas autenticadas (SPRINT-3-T07): menú móvil desplegable,
+diálogos adaptados y tablas accesibles. Alcance y verificación:
+[SPRINT-3-T07](docs/SPRINT-3-T07.md).
+
 Registro diario de propinas para supervisor (SPRINT-3-T11):
 [`/propinas/diarias`, contrato y pruebas](docs/SPRINT-3-T11.md).
 

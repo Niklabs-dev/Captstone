@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  TIP_INACTIVE_STORE_MESSAGE,
   TIP_METHODS,
   MAX_TIP_AMOUNT,
   isTipDate,
@@ -251,5 +252,35 @@ test('El cliente rechaza respuestas ajenas y no muestra mensajes internos del se
       error instanceof TipRequestError &&
       error.status === 409 &&
       !error.message.includes('secret'),
+  );
+});
+
+test('El cliente distingue local inactivo sin mostrar mensajes externos ni confundir otros errores 400', async (context) => {
+  let code: unknown = 'STORE_INACTIVE';
+  let status = 400;
+  context.mock.method(globalThis, 'fetch', async () =>
+    Response.json({ code, message: 'SQL passwordHash secret' }, { status }),
+  );
+  await assert.rejects(
+    createTip(storeId, input),
+    (error: unknown) =>
+      error instanceof TipRequestError &&
+      error.status === 400 &&
+      error.message === TIP_INACTIVE_STORE_MESSAGE,
+  );
+  code = 'UNKNOWN';
+  await assert.rejects(
+    createTip(storeId, input),
+    (error: unknown) =>
+      error instanceof TipRequestError &&
+      error.message === tipErrorMessage(400),
+  );
+  code = 'STORE_INACTIVE';
+  status = 403;
+  await assert.rejects(
+    createTip(storeId, input),
+    (error: unknown) =>
+      error instanceof TipRequestError &&
+      error.message === tipErrorMessage(403),
   );
 });

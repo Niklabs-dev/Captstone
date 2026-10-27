@@ -12,6 +12,7 @@ import {
 } from '@/lib/users';
 import {
   buttonClass,
+  dialogActionsClass,
   primaryButtonClass,
   inputClass,
   labelClass,
@@ -201,7 +202,7 @@ export function EditUserForm({
           vuelva a iniciar sesión con sus nuevos permisos.
         </p>
       </fieldset>
-      <div className="flex flex-wrap justify-end gap-2.5 pt-2">
+      <div className={dialogActionsClass}>
         <button
           type="button"
           disabled={busy}

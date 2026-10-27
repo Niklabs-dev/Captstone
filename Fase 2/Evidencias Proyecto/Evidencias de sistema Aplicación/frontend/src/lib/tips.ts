@@ -14,6 +14,8 @@ export const TIP_LABELS: Record<TipMethod, string> = {
   CREDIT_CARD: 'Tarjeta de crédito',
   TRANSFER: 'Transferencia',
 };
+export const TIP_INACTIVE_STORE_MESSAGE =
+  'Tu local está inactivo. Consulta con el administrador para volver a registrar propinas. Puedes seguir consultando el historial.';
 export const MAX_TIP_AMOUNT = 9_999_999_999;
 export interface TipInput {
   businessDate: string;
