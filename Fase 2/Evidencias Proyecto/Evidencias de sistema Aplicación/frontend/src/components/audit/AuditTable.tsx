@@ -141,7 +141,7 @@ export function AuditTable({
             <Link
               href={auditPageHref(filters, 0)}
               prefetch={false}
-              className="mt-4 inline-block text-sm font-semibold text-salmon-ink underline"
+              className={`${buttonClass} mt-4`}
             >
               Volver a la primera página
             </Link>

@@ -195,11 +195,6 @@ Otras reglas de componentes:
 
 Desvíos existentes que deben corregirse cuando se toque el archivo:
 
-- `ApplicationShell.tsx`: el `<summary>` de «Mi sesión» repite a mano las clases
-  del botón secundario; debería usar `buttonClass`. El panel no se cierra con
-  Escape ni con un clic fuera.
-- `ApplicationNavigation.tsx`: los enlaces del menú usan `rounded-[9px]`; el radio
-  estándar es `rounded-lg`.
 - `portal/page.tsx`: el eyebrow «Bienvenido a MoiFood» usa `text-[9.5px]`; debe
   usar `text-[10px]`, como `brandCaptionClass`.
 - `SessionUnavailable.tsx`: muestra la marca sin el logo, a diferencia del login

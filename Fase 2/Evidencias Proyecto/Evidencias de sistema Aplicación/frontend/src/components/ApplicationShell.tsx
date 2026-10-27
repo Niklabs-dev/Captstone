@@ -6,7 +6,7 @@ import {
   ApplicationNavigation,
   ApplicationHeading,
 } from './ApplicationNavigation';
-import { SessionActions } from './SessionActions';
+import { SessionMenu } from './SessionMenu';
 
 const roleLabels: Record<Role, string> = {
   ADMINISTRADOR: 'Administrador',
@@ -58,14 +58,7 @@ export function ApplicationShell({
       <div className="min-w-0">
         <header className="flex min-h-16 items-center justify-between gap-3 border-b border-line bg-bg px-4 py-3 sm:px-5 lg:px-7">
           <ApplicationHeading />
-          <details className="relative max-w-full shrink-0">
-            <summary className="min-h-11 cursor-pointer rounded-lg border border-line2 px-3 py-2.5 text-sm font-semibold text-salmon-ink hover:bg-tint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink">
-              Mi sesión
-            </summary>
-            <div className="absolute top-full right-0 z-30 mt-2 w-80 max-w-[calc(100vw-2.5rem)] rounded-xl border border-line bg-bg p-4 shadow-lg">
-              <SessionActions />
-            </div>
-          </details>
+          <SessionMenu />
         </header>
         <main
           id="application-content"
