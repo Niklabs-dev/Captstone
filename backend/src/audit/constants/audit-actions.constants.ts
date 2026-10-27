@@ -31,6 +31,10 @@ export const AUDIT_ACTION = {
   TIP_ENTRY_CREATED: 'TIP_ENTRY_CREATED',
   TIP_ENTRY_UPDATED: 'TIP_ENTRY_UPDATED',
   TIP_ENTRY_DELETED: 'TIP_ENTRY_DELETED',
+  // Cálculo del reparto de propinas (SPRINT-3-T12): primer cálculo del
+  // período y recálculo de su borrador.
+  TIP_POOL_CALCULATED: 'TIP_POOL_CALCULATED',
+  TIP_POOL_RECALCULATED: 'TIP_POOL_RECALCULATED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];
