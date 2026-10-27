@@ -13,7 +13,7 @@ import {
   inputClass,
   primaryButtonClass,
 } from '@/components/ui/styles';
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import {
   DOCUMENT_TYPES,
   DOCUMENT_LABELS,
@@ -23,12 +23,7 @@ import {
   type VersionHistory,
   type WorkerDocument,
 } from '@/lib/documents';
-import {
-  checkDocumentIntegrity,
-  downloadDocument,
-  loadDocuments,
-  loadDocumentVersions,
-} from '@/lib/documents-client';
+import { documentReader } from '@/lib/documents-client';
 import { DocumentUpload } from './DocumentUpload';
 
 type FolderState =
@@ -39,11 +34,17 @@ export function DocumentWorkspace({
   workerId,
   workerName,
   onBusy,
+  personal = false,
 }: {
   workerId: string;
   workerName: string;
   onBusy: (busy: boolean) => void;
+  personal?: boolean;
 }): ReactElement {
+  const reader = useMemo(
+    () => documentReader(personal ? 'own' : 'managed'),
+    [personal],
+  );
   const [folder, setFolder] = useState<FolderState>({ status: 'loading' });
   const [retry, setRetry] = useState(0);
   const [filter, setFilter] = useState('');
@@ -60,7 +61,7 @@ export function DocumentWorkspace({
   const [verified, setVerified] = useState<Record<string, boolean>>({});
   useEffect(() => {
     const controller = new AbortController();
-    loadDocuments(workerId, controller.signal).then(
+    reader.load(workerId, controller.signal).then(
       (data) => setFolder({ status: 'ready', data }),
       (error: unknown) => {
         if (!controller.signal.aborted)
@@ -74,11 +75,11 @@ export function DocumentWorkspace({
       },
     );
     return () => controller.abort();
-  }, [workerId, retry]);
+  }, [workerId, retry, reader]);
   useEffect(() => {
     if (!selected) return;
     const controller = new AbortController();
-    loadDocumentVersions(selected, controller.signal).then(
+    reader.history(selected, controller.signal).then(
       (data) => {
         setHistory(data);
         setHistoryBusy(false);
@@ -95,7 +96,7 @@ export function DocumentWorkspace({
       },
     );
     return () => controller.abort();
-  }, [selected]);
+  }, [selected, reader]);
   async function handleVersion(
     version: DocumentVersion,
     download: boolean,
@@ -107,7 +108,7 @@ export function DocumentWorkspace({
     onBusy(true);
     try {
       if (download) {
-        const { blob, fileName } = await downloadDocument(version);
+        const { blob, fileName } = await reader.download(version);
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -121,7 +122,7 @@ export function DocumentWorkspace({
           'Descarga preparada. El SHA-256 del archivo recibido coincide.',
         );
       } else {
-        const result = await checkDocumentIntegrity(version);
+        const result = await reader.integrity(version);
         setVerified((current) => ({ ...current, [version.id]: result.valid }));
         if (!result.valid)
           throw new Error(
@@ -198,6 +199,9 @@ export function DocumentWorkspace({
     <section
       aria-labelledby="worker-documents-title"
       className={`${tablePanelClass} min-w-0`}
+      aria-busy={
+        folder.status === 'loading' || historyBusy || Boolean(operation)
+      }
     >
       <header className={tableHeaderClass}>
         <div>
@@ -208,23 +212,46 @@ export function DocumentWorkspace({
             Documentos laborales · Historial por versión
           </p>
         </div>
-        <button
-          type="button"
-          className={primaryButtonClass}
-          disabled={
-            folder.status !== 'ready' ||
-            !folder.data.policy.canUpload ||
-            Boolean(operation)
-          }
-          onClick={() => setUpload({ previous: null })}
-        >
-          Subir documento
-        </button>
+        {personal && (
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={folder.status === 'loading' || Boolean(operation)}
+            onClick={() => {
+              setSelected(null);
+              setHistory(null);
+              setHistoryBusy(false);
+              setNotice('');
+              setFailure('');
+              setVerified({});
+              setFolder({ status: 'loading' });
+              setRetry((value) => value + 1);
+            }}
+          >
+            Actualizar documentos
+          </button>
+        )}
+        {!personal && (
+          <button
+            type="button"
+            className={primaryButtonClass}
+            disabled={
+              folder.status !== 'ready' ||
+              !folder.data.policy.canUpload ||
+              Boolean(operation)
+            }
+            onClick={() => setUpload({ previous: null })}
+          >
+            Subir documento
+          </button>
+        )}
       </header>
       <div className="space-y-4 p-5">
         {folder.status === 'loading' && (
           <p role="status" className="py-12 text-center text-sm text-ink2">
-            Consultando documentos del trabajador…
+            {personal
+              ? 'Consultando tus documentos…'
+              : 'Consultando documentos del trabajador…'}
           </p>
         )}
         {folder.status === 'error' && (
@@ -301,7 +328,9 @@ export function DocumentWorkspace({
                 <p className="mt-2 text-sm text-ink2">
                   {filter
                     ? 'Prueba con todos los tipos.'
-                    : 'Puedes cargar el primer documento cuando la carga esté habilitada.'}
+                    : personal
+                      ? 'Cuando la administración registre tus documentos, aparecerán aquí.'
+                      : 'Puedes cargar el primer documento cuando la carga esté habilitada.'}
                 </p>
               </div>
             ) : (
@@ -309,7 +338,7 @@ export function DocumentWorkspace({
                 role="region"
                 aria-label="Documentos del trabajador"
                 tabIndex={0}
-                className="overflow-x-auto rounded-lg border border-line"
+                className="overflow-x-auto rounded-lg border border-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink"
               >
                 <table className={`${tableClass} min-w-[680px]`}>
                   <caption className="sr-only">
@@ -342,7 +371,8 @@ export function DocumentWorkspace({
                             {document.title}
                           </p>
                           <p className="mt-2 text-xs text-ink2">
-                            {DOCUMENT_LABELS[document.type]} · v
+                            {DOCUMENT_LABELS[document.type]} ·{' '}
+                            {personal ? 'Versión vigente: v' : 'v'}
                             {document.latestVersion.number}
                           </p>
                           <p className="mt-2 text-xs text-ink2">
@@ -385,16 +415,20 @@ export function DocumentWorkspace({
                             >
                               Ver historial
                             </button>
-                            <button
-                              className={buttonClass}
-                              disabled={
-                                !folder.data.policy.canUpload ||
-                                Boolean(operation)
-                              }
-                              onClick={() => setUpload({ previous: document })}
-                            >
-                              Nueva versión
-                            </button>
+                            {!personal && (
+                              <button
+                                className={buttonClass}
+                                disabled={
+                                  !folder.data.policy.canUpload ||
+                                  Boolean(operation)
+                                }
+                                onClick={() =>
+                                  setUpload({ previous: document })
+                                }
+                              >
+                                Nueva versión
+                              </button>
+                            )}
                           </div>
                           <div className="mt-2">
                             {versionActions(document.latestVersion)}
@@ -496,7 +530,7 @@ export function DocumentWorkspace({
           )}
         </section>
       )}
-      {upload && folder.status === 'ready' && (
+      {!personal && upload && folder.status === 'ready' && (
         <DocumentUpload
           workerId={workerId}
           workerName={workerName}

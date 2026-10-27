@@ -33,6 +33,24 @@ export default async function DashboardPage({
         <p className="mb-6 text-ink2">
           Sesión iniciada como {session.data.email}.
         </p>
+        {session.data.role === 'SUPERVISOR' && (
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/portal/documentos"
+              prefetch={false}
+              className={buttonClass}
+            >
+              Mis documentos
+            </Link>
+            <Link
+              href="/portal/liquidaciones"
+              prefetch={false}
+              className={buttonClass}
+            >
+              Mis liquidaciones
+            </Link>
+          </div>
+        )}
         {session.data.role === 'ADMINISTRADOR' && (
           <div className="flex flex-wrap gap-3">
             <Link

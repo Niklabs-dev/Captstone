@@ -189,6 +189,7 @@ test('API real: aislamiento, pendientes ocultas, stream verificado, supervisor y
   await login(fixtures.supervisor.email);
   await page.goto('/dashboard');
   await page
+    .getByRole('navigation', { name: 'Navegación principal' })
     .getByRole('link', { name: 'Mis liquidaciones', exact: true })
     .click();
   await expect(
