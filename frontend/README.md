@@ -1,5 +1,9 @@
 # Frontend Moi-food
 
+Responsive de las vistas autenticadas (SPRINT-3-T07): menú móvil desplegable,
+diálogos adaptados y tablas accesibles. Alcance y verificación:
+[SPRINT-3-T07](docs/SPRINT-3-T07.md).
+
 Aplicación Next.js 16 con App Router, TypeScript estricto y Tailwind CSS.
 
 Dashboard, Usuarios, Auditoría y Portal del Trabajador usan un layout general
