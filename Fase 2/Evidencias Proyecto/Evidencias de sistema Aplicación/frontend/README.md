@@ -227,6 +227,10 @@ Panel, permisos y pruebas: [docs/SPRINT-2-T16.md](docs/SPRINT-2-T16.md). API de 
 
 Panel, contrato y pruebas: [docs/SPRINT-2-T17.md](docs/SPRINT-2-T17.md). API de T15 conectada mediante BFF; contrato en Swagger (/api/docs).
 
+## Mis documentos (SPRINT-3-T06)
+
+`/portal/documentos` permite a trabajadores y supervisores consultar sus contratos, anexos, pactos y finiquitos con filtro, versión vigente, historial, verificación SHA-256 y descarga. Solo lectura, identidad desde sesión y sin workerId editable. Mis liquidaciones mantiene su flujo separado y no se exponen liquidaciones pendientes de firma. Contratos y pruebas: [SPRINT-3-T06](docs/SPRINT-3-T06.md). `npm run test:my-documents` ejecuta la regresión y `npm run test:my-documents:real` el recorrido con API real y base exclusiva de pruebas.
+
 ## Locales (SPRINT-3-T02)
 
 `/admin/locales` permite crear, editar, desactivar y reactivar locales como administrador. `GET /api/stores` expone el catálogo autenticado y las mutaciones del BFF conservan el token en servidor y validan origen, rol y datos. Usuarios, Auditoría, Documentos, Alertas DT y Liquidaciones consumen la API sin caché; los locales nuevos aparecen sin configurar variables ni redeplegar. Documentos incluye locales sin trabajadores e identifica los inactivos; Auditoría conserva esa identificación desde el HTML inicial.
