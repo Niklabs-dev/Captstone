@@ -14,6 +14,7 @@ import {
 } from '@/lib/users';
 import {
   primaryButtonClass,
+  dialogActionsClass,
   buttonClass,
   inputClass,
   labelClass,
@@ -165,7 +166,7 @@ export function CreateUserForm({
           </p>
         )}
       </fieldset>
-      <div className="flex flex-wrap justify-end gap-2.5 pt-2">
+      <div className={dialogActionsClass}>
         <button
           type="button"
           disabled={busy}

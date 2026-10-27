@@ -1,5 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { getNavigationItems } from '../../src/lib/navigation';
+import { openNavigation, navigateTo } from '../helpers/navigation';
 
 const controlUrl = process.env.TEST_UI_PROXY_CONTROL_URL;
 const email = process.env.TEST_UI_ADMIN_EMAIL;
@@ -171,10 +173,7 @@ test('Los controles, etiquetas, tablas y marca comparten estilos renderizados', 
     ),
   ).toEqual(brand);
   await page.screenshot({ path: `${folder}/inicio.png`, scale: 'css' });
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('link', { name: 'Usuarios', exact: true })
-    .click();
+  await navigateTo(page, 'Usuarios');
   await expect(
     page.getByRole('heading', { name: 'Usuarios del sistema' }),
   ).toBeVisible();
@@ -242,10 +241,7 @@ test('Los controles, etiquetas, tablas y marca comparten estilos renderizados', 
   ).toEqual(secondary);
   await page.screenshot({ path: `${folder}/formulario.png`, scale: 'css' });
   await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('link', { name: 'Auditoría', exact: true })
-    .click();
+  await navigateTo(page, 'Auditoría');
   await expect(
     page.getByRole('heading', { name: 'Registro de operaciones' }),
   ).toBeVisible();
@@ -339,10 +335,7 @@ test('La paleta global actualiza Usuarios y Auditoría y mantiene contraste legi
       'rgb(20, 70, 90)',
     ),
   );
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('link', { name: 'Usuarios', exact: true })
-    .click();
+  await navigateTo(page, 'Usuarios');
   await expect(
     page.getByRole('heading', { name: 'Usuarios del sistema' }),
   ).toBeVisible();
@@ -351,10 +344,7 @@ test('La paleta global actualiza Usuarios y Auditoría y mantiene contraste legi
       'border-color'
     ],
   ).toBe('rgb(20, 70, 90)');
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('link', { name: 'Auditoría', exact: true })
-    .click();
+  await navigateTo(page, 'Auditoría');
   await expect(
     page.getByRole('heading', { name: 'Registro de operaciones' }),
   ).toBeVisible();
@@ -373,18 +363,16 @@ test('El estado de carga de Auditoría conserva navegación, cuenta y sesión', 
       await request.post(controlUrl!, { data: { auditDelayMs: 2500 } })
     ).status(),
   ).toBe(200);
-  const navigate = page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('link', { name: 'Auditoría', exact: true })
-    .click();
+  const navigate = navigateTo(page, 'Auditoría');
   await expect(
     page.getByText('Cargando registro de auditoría…', { exact: true }),
   ).toBeVisible();
+  await openNavigation(page);
   await expect(
     page
       .getByRole('navigation', { name: 'Navegación principal' })
       .getByRole('link'),
-  ).toHaveText(['Inicio', 'Usuarios', 'Auditoría']);
+  ).toHaveText(getNavigationItems('ADMINISTRADOR').map((item) => item.label));
   await expect(
     page.getByRole('complementary').getByText(email!, { exact: true }),
   ).toBeVisible();
@@ -416,11 +404,12 @@ test('Un fallo del listado de Usuarios conserva el layout y permite cerrar sesi�
   await expect(
     page.getByRole('alert').filter({ hasText: 'No se pudo' }),
   ).toBeVisible();
+  await openNavigation(page);
   await expect(
     page
       .getByRole('navigation', { name: 'Navegación principal' })
       .getByRole('link'),
-  ).toHaveText(['Inicio', 'Usuarios', 'Auditoría']);
+  ).toHaveText(getNavigationItems('ADMINISTRADOR').map((item) => item.label));
   await expect(
     page.getByRole('complementary').getByText(email!, { exact: true }),
   ).toBeVisible();
@@ -531,10 +520,7 @@ test('El fallo de validación de sesión muestra recuperación y reintenta sin e
       await request.post(controlUrl!, { data: { backendUnavailable: true } })
     ).status(),
   ).toBe(200);
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('link', { name: 'Inicio', exact: true })
-    .click();
+  await navigateTo(page, 'Inicio');
   await expect(
     page.getByRole('heading', { name: 'No se pudo cargar esta vista' }),
   ).toBeVisible();

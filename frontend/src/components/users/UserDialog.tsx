@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, type ReactElement, type ReactNode } from 'react';
-import { buttonClass } from '@/components/ui/styles';
+import { buttonClass, dialogClass } from '@/components/ui/styles';
 export function UserDialog({
   title,
   busy,
@@ -31,16 +31,16 @@ export function UserDialog({
         event.preventDefault();
         if (!busy) onDismiss();
       }}
-      className="m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-2xl border border-line bg-bg p-5 text-ink shadow-xl backdrop:bg-ink/35 sm:p-6"
+      className={dialogClass}
     >
-      <div className="mb-5 flex items-center justify-between gap-3">
+      <div className="mb-5 flex items-start justify-between gap-3">
         <h2 className="text-lg font-bold">{title}</h2>
         <button
           type="button"
           onClick={onDismiss}
           disabled={busy}
           aria-label="Cerrar ventana"
-          className={buttonClass}
+          className={`${buttonClass} shrink-0`}
         >
           ×
         </button>
