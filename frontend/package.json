@@ -20,6 +20,7 @@
     "test:users": "tsc -p tsconfig.users-test.json && node --test .users-test-build/users.test.js",
     "test:users:integration": "npm run build && tsc -p tsconfig.users-test.json && node --test .users-test-build/users-http.integration.test.js",
     "test:users:e2e": "playwright test --config playwright.users.config.ts",
+    "test:users:real": "playwright test --config playwright.user-management.config.ts",
     "test:documents": "tsc -p tsconfig.test.json && node --test .test-build/documents.test.js",
     "test:documents:e2e": "playwright test --config playwright.documents.config.ts",
     "test:dt-alerts": "tsc -p tsconfig.test.json && node --test .test-build/dt-alerts.test.js",

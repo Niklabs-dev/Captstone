@@ -6,6 +6,7 @@ import {
   parseUserList,
   type CreateUserInput,
   type ManagedUser,
+  type UpdateUserInput,
 } from './users';
 export type UsersResult<T> =
   { ok: true; data: T } | { ok: false; status: number; message: string };
@@ -36,11 +37,19 @@ export async function callUsersBackend(
     const data: unknown = await response.json().catch(() => null);
     if (!response.ok) {
       const messages: Record<number, string> = {
-        400: 'Revisa los datos. El rol y el local deben estar vigentes y ser compatibles.',
+        400: path.endsWith('/reactivate')
+          ? 'No se pudo reactivar. Usa Editar para asignar un rol y un local activos y compatibles; después vuelve a intentarlo.'
+          : 'Revisa los datos. El rol y el local deben estar vigentes y ser compatibles.',
         401: 'Tu sesión venció. Inicia sesión nuevamente.',
         403: 'No tienes permiso para administrar usuarios.',
         404: 'El usuario no existe.',
-        409: 'Ya existe un usuario con ese correo o RUT.',
+        409:
+          isObject(data) &&
+          data.message === 'La cuenta está anonimizada y no se puede modificar'
+            ? 'La cuenta está anonimizada y no puede modificarse ni reactivarse.'
+            : path.endsWith('/reactivate')
+              ? 'La cuenta no puede reactivarse. Actualiza la lista para comprobar su estado.'
+              : 'Ya existe un usuario con ese correo o RUT.',
       };
       return {
         ok: false,
@@ -58,6 +67,55 @@ export async function callUsersBackend(
       message: 'No se pudo conectar al sistema. Intenta nuevamente.',
     };
   }
+}
+export async function updateManagedUser(
+  token: string,
+  id: string,
+  input: UpdateUserInput | null,
+  fetcher: BackendFetch = fetch,
+): Promise<UsersResult<ManagedUser>> {
+  const result = await callUsersBackend(
+    `/users/${id}${input === null ? '/reactivate' : ''}`,
+    token,
+    {
+      method: 'PATCH',
+      ...(input === null ? {} : { body: JSON.stringify(input) }),
+    },
+    fetcher,
+  );
+  if (!result.ok) return result;
+  const user = parseManagedUser(result.data);
+  if (!user || user.id !== id || (input === null && !user.isActive))
+    return {
+      ok: false,
+      status: 502,
+      message:
+        'La respuesta no pudo verificarse. Actualiza la lista antes de repetir la operación.',
+    };
+  return { ok: true, data: user };
+}
+export async function resetManagedUserPassword(
+  token: string,
+  id: string,
+  input: { newPassword: string },
+  fetcher: BackendFetch = fetch,
+): Promise<UsersResult<ManagedUser>> {
+  const result = await callUsersBackend(
+    `/users/${id}/password`,
+    token,
+    { method: 'PATCH', body: JSON.stringify(input) },
+    fetcher,
+  );
+  if (!result.ok) return result;
+  const user = parseManagedUser(result.data);
+  if (!user || user.id !== id)
+    return {
+      ok: false,
+      status: 502,
+      message:
+        'La respuesta no pudo verificarse. Actualiza la lista antes de repetir la operación.',
+    };
+  return { ok: true, data: user };
 }
 export async function verifyAdministrator(
   token: string | undefined,
