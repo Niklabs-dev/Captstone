@@ -47,11 +47,14 @@ export function AuditTable({
           Solo lectura
         </span>
       </div>
+      <p className="border-b border-line px-4 py-3 text-xs text-ink2 lg:hidden">
+        Desliza la tabla para ver todas las columnas y acciones.
+      </p>
       <div
         role="region"
         aria-label="Tabla de auditoría desplazable"
         tabIndex={0}
-        className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-salmon-ink"
+        className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-salmon-ink"
       >
         <table className={`${tableClass} min-w-[760px]`}>
           <caption className="sr-only">

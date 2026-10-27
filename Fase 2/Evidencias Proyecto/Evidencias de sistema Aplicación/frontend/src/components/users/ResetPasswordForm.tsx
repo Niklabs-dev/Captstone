@@ -3,6 +3,7 @@ import { useState, type FormEvent, type ReactElement } from 'react';
 import { parsePasswordReset } from '@/lib/users';
 import {
   inputClass,
+  dialogActionsClass,
   labelClass,
   buttonClass,
   primaryButtonClass,
@@ -78,7 +79,7 @@ export function ResetPasswordForm({
           />
         </label>
       </fieldset>
-      <div className="flex flex-wrap justify-end gap-2.5 pt-2">
+      <div className={dialogActionsClass}>
         <button
           type="button"
           disabled={busy}

@@ -31,7 +31,7 @@ export function ApplicationShell({
         Ir al contenido
       </a>
       <aside className="border-b border-line bg-bg lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:overflow-y-auto lg:border-r lg:border-b-0">
-        <div className="flex items-center gap-3 border-b border-line px-5 py-5">
+        <div className="flex items-center gap-3 border-b border-line px-4 py-3 sm:px-5 lg:py-5">
           <Image
             src="/logo.png"
             alt=""
@@ -48,7 +48,7 @@ export function ApplicationShell({
           </div>
         </div>
         <ApplicationNavigation role={user.role} />
-        <div className="border-t border-line px-5 py-3 lg:mt-auto lg:py-4">
+        <div className="border-t border-line px-4 py-3 sm:px-5 lg:mt-auto lg:py-4">
           <p className="break-all text-[13px] font-semibold">{user.email}</p>
           <p className="mt-1 text-xs text-salmon-ink">
             {roleLabels[user.role]}
@@ -56,9 +56,9 @@ export function ApplicationShell({
         </div>
       </aside>
       <div className="min-w-0">
-        <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-line bg-bg px-5 py-3 lg:px-7">
+        <header className="flex min-h-16 items-center justify-between gap-3 border-b border-line bg-bg px-4 py-3 sm:px-5 lg:px-7">
           <ApplicationHeading />
-          <details className="relative max-w-full">
+          <details className="relative max-w-full shrink-0">
             <summary className="min-h-11 cursor-pointer rounded-lg border border-line2 px-3 py-2.5 text-sm font-semibold text-salmon-ink hover:bg-tint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink">
               Mi sesión
             </summary>
@@ -70,7 +70,7 @@ export function ApplicationShell({
         <main
           id="application-content"
           tabIndex={-1}
-          className="space-y-5 px-5 py-6 lg:px-7"
+          className="min-w-0 space-y-5 px-4 py-5 wrap-anywhere sm:px-5 sm:py-6 lg:px-7"
         >
           {children}
         </main>
