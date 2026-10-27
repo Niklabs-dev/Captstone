@@ -70,7 +70,25 @@ test(
         res.end('{}');
         return;
       }
-      if (req.method === 'PATCH') managed.isActive = false;
+      if (req.method === 'PATCH') {
+        if (req.url?.endsWith('/deactivate')) managed.isActive = false;
+        else if (req.url?.endsWith('/reactivate')) managed.isActive = true;
+        else {
+          let body = '';
+          for await (const chunk of req) body += String(chunk);
+          const data: unknown = JSON.parse(body);
+          assert.ok(data && typeof data === 'object');
+          if (req.url?.endsWith('/password')) {
+            assert.ok('newPassword' in data);
+            assert.deepEqual(Object.keys(data), ['newPassword']);
+          } else {
+            assert.ok(
+              'firstName' in data && typeof data.firstName === 'string',
+            );
+            managed.firstName = data.firstName;
+          }
+        }
+      }
       if (req.method === 'POST') {
         let body = '';
         for await (const chunk of req) body += String(chunk);
@@ -268,6 +286,81 @@ test(
         ...managed,
         isActive: false,
       });
+      for (const suffix of ['', '/reactivate', '/password']) {
+        assert.equal(
+          (
+            await send(
+              `/api/users/${userId}${suffix}`,
+              'PATCH',
+              'worker-token',
+              { newPassword: 'ClaveNueva123' },
+            )
+          ).status,
+          403,
+        );
+        assert.equal(
+          (
+            await send(
+              `/api/users/${userId}${suffix}`,
+              'PATCH',
+              'admin-token',
+              { newPassword: 'ClaveNueva123' },
+              'https://evil.test',
+            )
+          ).status,
+          403,
+        );
+      }
+      assert.equal(
+        (
+          await send(`/api/users/${userId}`, 'PATCH', 'admin-token', {
+            password: 'ClaveNueva123',
+          })
+        ).status,
+        400,
+      );
+      assert.equal(
+        (
+          await send(`/api/users/${adminId}`, 'PATCH', 'admin-token', {
+            roleCode: 'CONTADOR',
+          })
+        ).status,
+        400,
+      );
+      assert.equal(
+        (
+          await send(`/api/users/${adminId}/password`, 'PATCH', 'admin-token', {
+            newPassword: 'ClaveNueva123',
+          })
+        ).status,
+        400,
+      );
+      const edited = await send(
+        `/api/users/${userId}`,
+        'PATCH',
+        'admin-token',
+        { firstName: 'Ana María' },
+      );
+      assert.equal(edited.status, 200);
+      assert.equal((await edited.json()).firstName, 'Ana María');
+      assert.equal(
+        (await send(`/api/users/${userId}/reactivate`, 'PATCH')).status,
+        200,
+      );
+      assert.equal(managed.isActive, true);
+      const reset = await send(
+        `/api/users/${userId}/password`,
+        'PATCH',
+        'admin-token',
+        { newPassword: 'ClaveNueva123' },
+      );
+      assert.equal(reset.status, 200);
+      assert.equal(reset.headers.get('cache-control'), 'no-store');
+      const resetBody = await reset.text();
+      assert.ok(
+        !resetBody.includes('ClaveNueva123') &&
+          !resetBody.includes('passwordHash'),
+      );
       malformed = true;
       assert.equal((await send('/api/users')).status, 502);
       malformed = false;
