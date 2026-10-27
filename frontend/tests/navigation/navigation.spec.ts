@@ -12,6 +12,95 @@ const storeId = process.env.TEST_NAVIGATION_STORE_ID;
 const password = 'Navigation-test-2026!';
 const accounts = new Map<string, { id: string; email: string }>();
 let adminToken = '';
+
+test('Diseño compartido: radios, icono decorativo, sesión y recuperación paginada de 44 px', async ({
+  page,
+}, info) => {
+  await login(page, adminEmail!, adminPassword!);
+  await openNavigation(page);
+  const navigation = page.getByRole('navigation', {
+    name: 'Navegación principal',
+    exact: true,
+  });
+  expect(
+    await navigation
+      .getByRole('link')
+      .first()
+      .evaluate((element) => getComputedStyle(element).borderRadius),
+  ).toBe('8px');
+  const toggle = page.getByRole('button', {
+    name: 'Menú principal',
+    exact: true,
+  });
+  if (await toggle.isVisible()) {
+    await expect(toggle.locator('svg')).toHaveAttribute('aria-hidden', 'true');
+    await toggle.click();
+  }
+  const summary = page.getByText('Mi sesión', { exact: true });
+  await summary.click();
+  const renew = page.getByRole('button', {
+    name: 'Renovar sesión',
+    exact: true,
+  });
+  await expect(renew).toBeVisible();
+  const styles = await Promise.all(
+    [summary, renew].map((control) =>
+      control.evaluate((element) => {
+        const css = getComputedStyle(element);
+        return Object.fromEntries(
+          [
+            'border-radius',
+            'border-width',
+            'font-family',
+            'font-size',
+            'font-weight',
+            'min-height',
+            'padding',
+          ].map((key) => [key, css.getPropertyValue(key)]),
+        );
+      }),
+    ),
+  );
+  expect(styles[0]).toEqual(styles[1]);
+  await renew.focus();
+  await page.keyboard.press('Escape');
+  await expect(renew).toBeHidden();
+  await expect(summary).toBeFocused();
+  await summary.click();
+  await page.getByRole('heading', { name: 'Inicio', exact: true }).click();
+  await expect(renew).toBeHidden();
+  await page.goto('/admin/auditoria?from=2020-01-01&to=2020-01-01&offset=20');
+  const firstPage = page.getByRole('link', {
+    name: 'Volver a la primera página',
+    exact: true,
+  });
+  await expect(firstPage).toBeVisible();
+  const rect = await firstPage.boundingBox();
+  expect(rect?.height).toBeGreaterThanOrEqual(44);
+  expect(rect?.width).toBeGreaterThanOrEqual(44);
+  await page.keyboard.press('Tab');
+  await firstPage.focus();
+  await expect(firstPage).toBeFocused();
+  expect(
+    await firstPage.evaluate(
+      (element) => getComputedStyle(element).outlineWidth,
+    ),
+  ).toBe('2px');
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  const folder = 'output/playwright/navigation/' + info.project.name;
+  await mkdir(folder, { recursive: true });
+  await page.screenshot({
+    path: folder + '/auditoria-pagina-vacia.png',
+    scale: 'css',
+  });
+  await firstPage.click();
+  await expect(firstPage).toHaveCount(0);
+  expect(Number(new URL(page.url()).searchParams.get('offset') ?? 0)).toBe(0);
+});
 const routes = [
   { href: '/dashboard', label: 'Inicio', title: 'Inicio' },
   { href: '/admin/usuarios', label: 'Usuarios', title: 'Usuarios y roles' },

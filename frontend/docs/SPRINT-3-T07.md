@@ -57,3 +57,16 @@ con Safari a partir de Chromium. La regresión transversal ampliada de T08
 mantiene su seguimiento independiente.
 
 La entrega queda para revisión del equipo; no se marca Hecho automáticamente.
+
+## Correcciones de revisión
+
+Los enlaces de navegación usan el radio común `rounded-lg`. Los iconos de
+menú y cierre se centralizan en `components/ui/Icon.tsx` y permanecen
+decorativos. `SessionMenu` compone `buttonClass` en «Mi sesión» y cierra
+con Escape (restaurando el foco) o al pulsar fuera, sin interferir con diálogos.
+Se retiran esas deudas resueltas de `DESIGN.md`.
+
+«Volver a la primera página» de Auditoría usa el botón secundario compartido,
+con objetivo mínimo de 44 px y foco visible. La regresión de navegación
+comprueba esos estilos, la interacción de sesión y la recuperación de una
+consulta vacía paginada en los cuatro anchos.
