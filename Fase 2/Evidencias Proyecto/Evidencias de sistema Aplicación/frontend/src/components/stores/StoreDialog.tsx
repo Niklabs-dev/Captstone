@@ -17,6 +17,8 @@ import {
 } from '@/lib/stores';
 import {
   buttonClass,
+  dialogClass,
+  dialogActionsClass,
   primaryButtonClass,
   dangerButtonClass,
   inputClass,
@@ -95,9 +97,9 @@ export function StoreDialog({
         event.preventDefault();
         if (!busy) onClose();
       }}
-      className="m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-2xl border border-line bg-bg p-5 text-ink shadow-xl backdrop:bg-ink/35 sm:p-6"
+      className={dialogClass}
     >
-      <div className="mb-5 flex items-center justify-between gap-3">
+      <div className="mb-5 flex items-start justify-between gap-3">
         <h2 className="text-lg font-bold">{title}</h2>
         <button
           type="button"
@@ -127,7 +129,7 @@ export function StoreDialog({
           <p className="mt-3 break-words text-sm font-semibold">
             {action.store.name}
           </p>
-          <div className="mt-6 flex flex-wrap justify-end gap-2">
+          <div className={`mt-6 ${dialogActionsClass}`}>
             <button disabled={busy} onClick={onClose} className={buttonClass}>
               Cancelar
             </button>
@@ -176,7 +178,7 @@ export function StoreDialog({
               )}
             </div>
           ))}
-          <div className="flex flex-wrap justify-end gap-2 pt-2">
+          <div className={dialogActionsClass}>
             <button
               type="button"
               disabled={busy}

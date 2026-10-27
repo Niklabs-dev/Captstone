@@ -1,5 +1,10 @@
 'use client';
-import { buttonClass, primaryButtonClass } from '@/components/ui/styles';
+import {
+  buttonClass,
+  primaryButtonClass,
+  dialogClass,
+  dialogActionsClass,
+} from '@/components/ui/styles';
 import {
   useEffect,
   useRef,
@@ -61,7 +66,7 @@ export function RegistrationDialog({
         event.preventDefault();
         if (!busy) onClose();
       }}
-      className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-2xl border border-line bg-bg p-6 text-ink shadow-xl backdrop:bg-ink/35"
+      className={dialogClass}
     >
       <form onSubmit={submit} className="space-y-5">
         <div>
@@ -103,7 +108,7 @@ export function RegistrationDialog({
             <dd>{dtDate(alert.deadline)}</dd>
           </div>
         </dl>
-        <label className="flex items-start gap-3 text-sm leading-6">
+        <label className="flex min-h-11 items-start gap-3 text-sm leading-6">
           <input
             type="checkbox"
             checked={confirmed}
@@ -125,7 +130,7 @@ export function RegistrationDialog({
             {error}
           </p>
         )}
-        <div className="flex flex-wrap justify-end gap-3">
+        <div className={dialogActionsClass}>
           <button
             type="button"
 

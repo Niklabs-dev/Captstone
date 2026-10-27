@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { navigateTo } from '../helpers/navigation';
 import { formatCalendarDate } from '../../src/lib/display-date';
 import { readFileSync } from 'node:fs';
 import { rename } from 'node:fs/promises';
@@ -188,10 +189,7 @@ test('API real: aislamiento, pendientes ocultas, stream verificado, supervisor y
   }
   await login(fixtures.supervisor.email);
   await page.goto('/dashboard');
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('link', { name: 'Mis liquidaciones', exact: true })
-    .click();
+  await navigateTo(page, 'Mis liquidaciones');
   await expect(
     page.getByRole('heading', { level: 1, name: 'Mis liquidaciones' }),
   ).toBeVisible();

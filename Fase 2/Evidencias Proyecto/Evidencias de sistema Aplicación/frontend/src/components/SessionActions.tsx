@@ -42,7 +42,7 @@ export function SessionActions(): ReactElement {
   }
   return (
     <div className="space-y-3" aria-busy={loading}>
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-col gap-3">
         <button
           disabled={loading}
           onClick={() => perform('refresh')}

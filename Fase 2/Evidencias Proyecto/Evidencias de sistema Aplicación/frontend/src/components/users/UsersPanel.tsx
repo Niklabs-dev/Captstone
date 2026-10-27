@@ -20,6 +20,7 @@ import { ResetPasswordForm } from './ResetPasswordForm';
 import { UserDialog } from './UserDialog';
 import {
   primaryButtonClass,
+  dialogActionsClass,
   buttonClass,
   inputClass,
   labelClass,
@@ -356,11 +357,14 @@ export function UsersPanel({
             </p>
           </div>
         </div>
+        <p className="border-b border-line px-4 py-3 text-xs text-ink2 lg:hidden">
+          Desliza la tabla para ver todas las columnas y acciones.
+        </p>
         <div
           role="region"
           aria-label="Tabla de usuarios desplazable"
           tabIndex={0}
-          className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-salmon-ink"
+          className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-salmon-ink"
         >
           <table className={`${tableClass} min-w-[640px]`}>
             <caption className="sr-only">
@@ -530,7 +534,7 @@ export function UsersPanel({
               {dialogError}
             </p>
           )}
-          <div className="mt-6 flex justify-end gap-2.5">
+          <div className={`mt-6 ${dialogActionsClass}`}>
             <button
               disabled={busy}
               onClick={() => setTarget(null)}
@@ -615,7 +619,7 @@ export function UsersPanel({
               {dialogError}
             </p>
           )}
-          <div className="mt-6 flex flex-wrap justify-end gap-2.5">
+          <div className={`mt-6 ${dialogActionsClass}`}>
             <button
               disabled={busy}
               onClick={() => setReactivating(null)}
