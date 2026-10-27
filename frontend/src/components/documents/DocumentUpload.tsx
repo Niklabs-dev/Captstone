@@ -1,6 +1,8 @@
 'use client';
 import {
   labelClass,
+  dialogClass,
+  dialogActionsClass,
   buttonClass,
   inputClass,
   primaryButtonClass,
@@ -103,10 +105,10 @@ export function DocumentUpload({
         event.preventDefault();
         if (!busy) onClose();
       }}
-      className="m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-2xl border border-line bg-bg p-6 text-ink shadow-xl backdrop:bg-ink/35"
+      className={dialogClass}
     >
       <div className="mb-5 flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <h2 id="document-upload-title" className="text-lg font-bold">
             {previous ? 'Cargar nueva versión' : 'Subir documento'}
           </h2>
@@ -117,7 +119,7 @@ export function DocumentUpload({
           aria-label="Cerrar ventana"
           disabled={busy}
           onClick={onClose}
-          className={buttonClass}
+          className={`${buttonClass} shrink-0`}
         >
           ×
         </button>
@@ -195,7 +197,7 @@ export function DocumentUpload({
             {error}
           </p>
         )}
-        <div className="flex flex-wrap justify-end gap-3 pt-2">
+        <div className={dialogActionsClass}>
           <button
             type="button"
             disabled={busy}

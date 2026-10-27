@@ -1,4 +1,6 @@
+import { isRecord } from './auth';
 import {
+  TIP_INACTIVE_STORE_MESSAGE,
   parseTipEntry,
   parseTipEntries,
   tipErrorMessage,
@@ -7,8 +9,15 @@ import {
 } from './tips';
 
 export class TipRequestError extends Error {
-  constructor(public readonly status: number) {
-    super(tipErrorMessage(status));
+  constructor(
+    public readonly status: number,
+    code?: unknown,
+  ) {
+    super(
+      status === 400 && code === 'STORE_INACTIVE'
+        ? TIP_INACTIVE_STORE_MESSAGE
+        : tipErrorMessage(status),
+    );
   }
 }
 export async function loadTips(
@@ -43,7 +52,13 @@ export async function createTip(
   } catch {
     throw new TipRequestError(503);
   }
-  if (!response.ok) throw new TipRequestError(response.status);
+  if (!response.ok) {
+    const error: unknown = await response.json().catch(() => null);
+    throw new TipRequestError(
+      response.status,
+      isRecord(error) ? error.code : undefined,
+    );
+  }
   const entry = parseTipEntry(
     await response.json().catch(() => null),
     storeId,

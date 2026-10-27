@@ -1,5 +1,6 @@
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { openNavigation } from '../helpers/navigation';
 import type { Store } from '../../src/lib/stores';
 test.skip(
   process.env.TEST_REAL_DISPOSABLE !== 'true',
@@ -42,6 +43,7 @@ test('CRUD real, catálogo completo en Documentos, Usuarios y Auditoría, inacti
   await expect(
     page.getByRole('heading', { level: 1, name: 'Locales', exact: true }),
   ).toHaveCount(1);
+  await openNavigation(page);
   await expect(
     page.getByRole('link', { name: 'Locales', exact: true }),
   ).toBeVisible();
@@ -332,6 +334,7 @@ test('BFF real: autorización, origen, validación, rutas y errores privados', a
     ).toBe(403);
     await page.goto('/admin/locales');
     await expect(page).not.toHaveURL(/\/admin\/locales/);
+    await openNavigation(page);
     await expect(
       page.getByRole('link', { name: 'Locales', exact: true }),
     ).toHaveCount(0);

@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import { hasTrustedOrigin } from '@/lib/auth';
+import { hasTrustedOrigin, isRecord } from '@/lib/auth';
 import { getTipsSession } from '@/lib/tips-session';
 import { callBackend } from '@/lib/auth-backend';
 import {
+  TIP_INACTIVE_STORE_MESSAGE,
   isTipDate,
   parseTipInput,
   parseTipEntry,
@@ -105,6 +106,19 @@ export async function POST(request: Request): Promise<Response> {
     body: JSON.stringify({ ...input, storeId: session.user.storeId }),
   });
   if (!upstream) return failure(503);
+  if (upstream.status === 400) {
+    const error: unknown = await upstream.json().catch(() => null);
+    // Solo este mensaje conocido del contrato se traduce a un motivo público.
+    if (
+      isRecord(error) &&
+      error.message === 'El local indicado no existe o está inactivo'
+    )
+      return respond(
+        { code: 'STORE_INACTIVE', message: TIP_INACTIVE_STORE_MESSAGE },
+        400,
+      );
+    return failure(400);
+  }
   if (![200, 201].includes(upstream.status)) {
     await upstream.body?.cancel();
     return failure(upstream.ok ? 502 : upstream.status);

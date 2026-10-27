@@ -87,6 +87,18 @@ trazas siete días. La evidencia local queda en `output/`, fuera de Git.
 La comprobación móvil usa Chromium emulado; no se afirma validación en
 teléfonos físicos ni Safari.
 
-T11 parte de main y no incluye los cambios de T07 mientras su PR siga pendiente.
-Reutiliza los estilos comunes para recibir esas mejoras cuando se integren.
+T11 integra main con las mejoras responsive de T07 y conserva ambas guías
+referenciadas en README. La regresión se repite sobre esta integración.
+
+Si el local se desactiva después de cargar el formulario, el BFF traduce
+exclusivamente el mensaje conocido de NestJS al código público STORE_INACTIVE.
+El cliente muestra la causa y la acción con el administrador, conserva el monto
+y permite consultar el historial. Los demás errores 400 mantienen la ayuda de
+validación y los mensajes arbitrarios del backend no se muestran.
+La API administrativa impide desactivar locales con usuarios activos. Para
+reproducir este estado con una sesión abierta, la regresión lo prepara mediante
+SQL únicamente en la base exclusiva y verifica el BFF, NestJS y el historial
+reales en los cuatro anchos. El proyecto Compose se toma de
+`COMPOSE_PROJECT_NAME` (por defecto `sprint3-t11`); no cambia las reglas de baja
+del backend.
 La tarea queda para revisión antes de marcarla Hecho.

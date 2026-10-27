@@ -1,5 +1,6 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { isRecord } from '../../src/lib/auth';
 
@@ -439,4 +440,70 @@ test('Carga, error, reintento y conservación de campos sobre la API real', asyn
   ).toBeVisible();
   await expect(page.getByRole('row')).toHaveCount(2);
   await noOverflow(page);
+});
+
+test('Local desactivado después de abrir la vista: causa clara, monto conservado e historial disponible', async ({
+  page,
+  context,
+  baseURL,
+}, info) => {
+  await login(context, baseURL!);
+  await page.goto('/propinas/diarias');
+  await registerDate(page, '2026-10-23');
+  await page
+    .getByRole('combobox', { name: /Medio de pago/ })
+    .selectOption('CASH');
+  const amount = page.getByRole('textbox', { name: /Monto en CLP/ });
+  await amount.fill('7500');
+  // La API bloquea la baja si hay usuarios activos. Solo en esta base exclusiva
+  // se prepara el estado inactivo con la vista abierta para probar la regresión.
+  const changed = execFileSync(
+    'docker',
+    [
+      'compose',
+      '-f',
+      '../docker-compose.yml',
+      '-p',
+      process.env.COMPOSE_PROJECT_NAME ?? 'sprint3-t11',
+      'exec',
+      '-T',
+      'db',
+      'sh',
+      '-c',
+      'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -v store_id="$1"',
+      '--',
+      storeId,
+    ],
+    {
+      input:
+        "UPDATE stores SET is_active = false, updated_at = now() WHERE id = :'store_id'::uuid AND name LIKE 'Propinas %' RETURNING id;",
+      encoding: 'utf8',
+      timeout: 15000,
+    },
+  );
+  expect(changed).toContain(storeId);
+  const response = page.waitForResponse(
+    (res) =>
+      res.url().endsWith('/api/tips') && res.request().method() === 'POST',
+  );
+  await page
+    .getByRole('button', { name: 'Guardar propinas', exact: true })
+    .click();
+  expect((await response).status()).toBe(400);
+  await expect(page.getByRole('main').getByRole('alert')).toContainText(
+    'Tu local está inactivo. Consulta con el administrador',
+  );
+  await expect(amount).toHaveValue('7500');
+  await page.getByRole('button', { name: 'Actualizar registros' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'No hay registros para esta fecha' }),
+  ).toBeVisible();
+  await noOverflow(page);
+  const folder = 'output/playwright/tips/' + info.project.name;
+  await mkdir(folder, { recursive: true });
+  await page.screenshot({
+    path: folder + '/local-desactivado.png',
+    fullPage: true,
+    scale: 'css',
+  });
 });

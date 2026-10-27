@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
+import { openNavigation } from '../helpers/navigation';
 import type { OwnPayslip } from '../../src/lib/my-payslips';
 const workerId = '30000000-0000-4000-8000-000000000217';
 const otherWorker = '31000000-0000-4000-8000-000000000217';
@@ -125,6 +126,7 @@ test('Desde el portal consulta por período y descarga con hash recibido verific
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/portal');
   await page
+    .locator('main')
     .getByRole('link', { name: 'Mis liquidaciones', exact: true })
     .click();
   await expect(
@@ -172,6 +174,7 @@ test('Desde el portal consulta por período y descarga con hash recibido verific
     path: 'output/playwright/my-payslips/' + info.project.name + '.png',
     fullPage: true,
   });
+  await openNavigation(page);
   await expect(
     page.getByRole('link', { name: 'Inicio', exact: true }),
   ).toBeVisible();
@@ -330,11 +333,12 @@ test('Sin simular liquidaciones: rol, sesión, solo lectura y rechazo de paráme
     (await context.request.post('/api/my-payroll', { data: {} })).status(),
   ).toBe(405);
   await page.goto('/portal/liquidaciones');
-  await expect(page.getByRole('heading', { name: 'Aún no tienes liquidaciones publicadas' })).toBeVisible();
-  for (const token of [
-    'test-my-admin',
-    'test-my-accountant',
-  ]) {
+  await expect(
+    page.getByRole('heading', {
+      name: 'Aún no tienes liquidaciones publicadas',
+    }),
+  ).toBeVisible();
+  for (const token of ['test-my-admin', 'test-my-accountant']) {
     await context.clearCookies();
     await context.addCookies([
       { name: 'mf_access', value: token, url: baseURL!, httpOnly: true },
@@ -371,16 +375,29 @@ test('Sin simular liquidaciones: rol, sesión, solo lectura y rechazo de paráme
 });
 
 // Regresión del layout y de los controles compartidos tras actualizar con main.
-test('Diseño compartido: una cabecera, un menú y controles accesibles', async ({ page }, info) => {
+test('Diseño compartido: una cabecera, un menú y controles accesibles', async ({
+  page,
+}, info) => {
   await page.goto('/portal/liquidaciones');
-  await expect(page.getByRole('heading', { level: 1, name: 'Mis liquidaciones' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Mis liquidaciones' }),
+  ).toBeVisible();
   await expect(page.locator('main')).toHaveCount(1);
   await expect(page.getByRole('navigation')).toHaveCount(1);
   await expect(page.getByText('Mi sesión', { exact: true })).toHaveCount(1);
   const active = page.locator('nav [aria-current="page"]');
   await expect(active).toHaveAttribute('href', '/portal/liquidaciones');
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
   await page.keyboard.press('Tab');
-  expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);
-  await page.screenshot({ path: info.outputPath('design.png'), fullPage: true });
+  expect(
+    await page.evaluate(() => document.activeElement !== document.body),
+  ).toBe(true);
+  await page.screenshot({
+    path: info.outputPath('design.png'),
+    fullPage: true,
+  });
 });
