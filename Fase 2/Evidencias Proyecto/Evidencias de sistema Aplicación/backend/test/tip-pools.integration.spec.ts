@@ -977,6 +977,13 @@ describe.skipIf(!databaseUrl)(
           sources: 2,
         }) as unknown,
       });
+      // El primer cálculo no descarta observaciones; el recálculo de un
+      // borrador sin observar deja previousNotes en null (SPRINT-3-T13).
+      expect(audits[0].detail).not.toHaveProperty('previousNotes');
+      expect(audits[1].detail).toMatchObject({
+        recalculated: true,
+        previousNotes: null,
+      });
     });
 
     it('consulta por ID: contador y administrador sí, supervisor no', async () => {

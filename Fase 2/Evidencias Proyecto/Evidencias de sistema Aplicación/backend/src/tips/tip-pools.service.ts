@@ -59,6 +59,7 @@ const TIP_POOL_SELECT = {
   confirmedAt: true,
   paidAt: true,
   paymentDate: true,
+  calculatedAt: true,
   confirmedBy: PERSON_SELECT,
   paidBy: PERSON_SELECT,
   _count: { select: { receipts: true } },
@@ -234,7 +235,8 @@ function toTipPoolResponse(pool: TipPoolRecord): TipPoolResponse {
       id: pool.calculatedBy.id,
       name: fullName(pool.calculatedBy),
     },
-    calculatedAt: pool.updatedAt,
+    calculatedAt: pool.calculatedAt,
+    updatedAt: pool.updatedAt,
     notes: pool.notes,
     confirmedBy: toPerson(pool.confirmedBy),
     confirmedAt: pool.confirmedAt,
@@ -462,7 +464,9 @@ export class TipPoolsService {
     return receipts.map(toReceiptResponse);
   }
 
-  // PDF de la constancia generado al vuelo desde la foto guardada.
+  // PDF de la constancia generado al vuelo desde la foto guardada. La fecha de
+  // emisión es la de la constancia (created_at): cada descarga entrega el
+  // mismo documento, byte a byte.
   async downloadReceipt(
     id: string,
     userId: string,
@@ -479,7 +483,7 @@ export class TipPoolsService {
       );
     }
     const response = toReceiptResponse(receipt);
-    const content = await renderTipReceiptPdf(response, new Date());
+    const content = await renderTipReceiptPdf(response, response.createdAt);
     return {
       receiptId: receipt.id,
       storeId: receipt.storeId,
@@ -586,7 +590,7 @@ export class TipPoolsService {
           periodEnd: period.endDate,
         },
       },
-      select: { id: true, status: true },
+      select: { id: true, status: true, notes: true },
     });
     if (existing && existing.status !== 'DRAFT') {
       throw new ConflictException(
@@ -724,6 +728,7 @@ export class TipPoolsService {
       agreementId: validation.agreement.id,
       agreementSnapshot: { ...toSnapshot(validation.agreement) },
       calculatedById: currentUser.id,
+      calculatedAt: new Date(),
     };
     let poolId: string;
     if (existing) {
@@ -774,7 +779,11 @@ export class TipPoolsService {
       where: { id: poolId },
       select: TIP_POOL_SELECT,
     });
-    return { pool: toTipPoolResponse(pool), created: !existing };
+    return {
+      pool: toTipPoolResponse(pool),
+      created: !existing,
+      previousNotes: existing?.notes ?? null,
+    };
   }
 
   private parsePeriod(dto: PreviewTipPoolDto): PoolPeriod {

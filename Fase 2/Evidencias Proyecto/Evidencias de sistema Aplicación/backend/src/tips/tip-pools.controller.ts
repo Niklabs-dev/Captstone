@@ -123,6 +123,8 @@ export class TipPoolsController {
         recalculated: !result.created,
         workers: result.pool.lines.length,
         sources: result.pool.sources.length,
+        // El recálculo limpia la observación: el registro guarda qué atendió.
+        ...(result.created ? {} : { previousNotes: result.previousNotes }),
       },
     });
     return result.pool;
@@ -195,10 +197,11 @@ export class TipPoolsController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<TipPoolResponse> {
     const pool = await this.tipPoolsService.observe(id, dto, currentUser);
-    // Solo el largo: el texto ya queda en el reparto hasta el recálculo.
+    // El texto completo (máx. 255 caracteres): el recálculo lo borra del
+    // reparto y audit_logs es inmutable, así que aquí queda protegido.
     setAuditContext(res, {
       storeId: pool.store.id,
-      detail: { notesLength: dto.notes.length },
+      detail: { notes: dto.notes, notesLength: dto.notes.length },
     });
     return pool;
   }

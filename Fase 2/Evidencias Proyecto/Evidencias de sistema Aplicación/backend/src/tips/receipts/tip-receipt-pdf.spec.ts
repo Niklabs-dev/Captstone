@@ -87,6 +87,24 @@ describe('renderTipReceiptPdf', () => {
     expect(pdf.getTitle()).toBe('Constancia de pago de propinas');
   });
 
+  it('es determinista: el reloj no cambia los bytes ni los metadatos', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-28T10:00:00Z'));
+      const first = await renderTipReceiptPdf(RECEIPT, RECEIPT.createdAt);
+      vi.setSystemTime(new Date('2027-03-15T22:30:00Z'));
+      const second = await renderTipReceiptPdf(RECEIPT, RECEIPT.createdAt);
+
+      expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
+      const pdf = await PDFDocument.load(first, { updateMetadata: false });
+      expect(pdf.getCreationDate()).toEqual(RECEIPT.createdAt);
+      expect(pdf.getModificationDate()).toEqual(RECEIPT.createdAt);
+      expect(pdf.getProducer()).toBe('Moi-food');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('no falla con caracteres que la fuente no puede dibujar', async () => {
     const bytes = await renderTipReceiptPdf(
       { ...RECEIPT, workerName: 'Ana 李 → Pérez 😀' },

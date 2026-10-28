@@ -228,6 +228,23 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(sql).toContain("USING ERRCODE = 'insufficient_privilege'");
   });
 
+  it('guarda la fecha del último cálculo del reparto, fija desde CONFIRMED (SPRINT-3-T13)', () => {
+    const sql = readMigration('propinas_fecha_calculo');
+    // Las filas existentes se rellenan con updated_at antes del NOT NULL.
+    expect(sql).toContain('SET "calculated_at" = "updated_at"');
+    expect(sql).toContain('ALTER COLUMN "calculated_at" SET NOT NULL');
+    expect(sql).toContain(
+      'ALTER COLUMN "calculated_at" SET DEFAULT CURRENT_TIMESTAMP',
+    );
+    // El trigger se desactiva solo durante el relleno.
+    expect(sql).toContain('DISABLE TRIGGER "tip_pools_status_rows"');
+    expect(sql).toContain('ENABLE TRIGGER "tip_pools_status_rows"');
+    expect(sql).toContain(
+      'CREATE OR REPLACE FUNCTION "tip_pools_enforce_status"()',
+    );
+    expect(sql).toContain('OR NEW."calculated_at" <> OLD."calculated_at"');
+  });
+
   it('soporta el cumplimiento de la Ley N°21.719', () => {
     const sql = readMigrations();
     // Anonimización de titulares (derecho de cancelación).
