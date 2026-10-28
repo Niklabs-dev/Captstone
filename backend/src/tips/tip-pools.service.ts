@@ -23,15 +23,45 @@ import {
 } from './calculation/tip-pool-validation.js';
 import type { PreviewTipPoolDto } from './dto/preview-tip-pool.dto.js';
 import type {
+  ConfirmTipPoolDto,
+  ObserveTipPoolDto,
+  PayTipPoolDto,
+} from './dto/tip-pool-action.dto.js';
+import { resolvePaymentDate } from './receipts/payment-date.js';
+import {
+  buildReceiptFileName,
+  renderTipReceiptPdf,
+} from './receipts/tip-receipt-pdf.js';
+import {
+  buildTipPoolReceipts,
+  parseReceiptDetail,
+} from './receipts/tip-receipt-snapshot.js';
+import type {
   TipAgreementSnapshot,
+  TipPoolConflictBody,
+  TipPoolPersonResponse,
   TipPoolPreviewResult,
+  TipPoolReceiptResponse,
   TipPoolResponse,
+  TipPoolStatusCode,
   TipPoolValidationErrorBody,
 } from './types/tip-pools.types.js';
+
+const PERSON_SELECT = {
+  select: { id: true, firstName: true, lastName: true },
+} as const;
 
 const TIP_POOL_SELECT = {
   id: true,
   status: true,
+  version: true,
+  notes: true,
+  confirmedAt: true,
+  paidAt: true,
+  paymentDate: true,
+  confirmedBy: PERSON_SELECT,
+  paidBy: PERSON_SELECT,
+  _count: { select: { receipts: true } },
   periodStart: true,
   periodEnd: true,
   totalAmount: true,
@@ -65,6 +95,52 @@ type TipPoolRecord = Prisma.TipPoolGetPayload<{
   select: typeof TIP_POOL_SELECT;
 }>;
 
+const TIP_POOL_RECEIPT_SELECT = {
+  id: true,
+  poolId: true,
+  userId: true,
+  workerName: true,
+  storeId: true,
+  storeName: true,
+  periodStart: true,
+  periodEnd: true,
+  hoursWorked: true,
+  amount: true,
+  paymentDate: true,
+  paidById: true,
+  paidByName: true,
+  detail: true,
+  createdAt: true,
+} satisfies Prisma.TipPoolReceiptSelect;
+
+type TipPoolReceiptRecord = Prisma.TipPoolReceiptGetPayload<{
+  select: typeof TIP_POOL_RECEIPT_SELECT;
+}>;
+
+// Fila de tip_pools bloqueada con FOR UPDATE antes de una acción.
+interface LockedPoolRow {
+  id: string;
+  store_id: string;
+  status: TipPoolStatusCode;
+  version: number;
+}
+
+const STATUS_LABEL: Record<TipPoolStatusCode, string> = {
+  DRAFT: 'en borrador',
+  CONFIRMED: 'confirmado',
+  PAID: 'pagado',
+};
+
+export const VERSION_CONFLICT_MESSAGE =
+  'El reparto cambió desde que lo revisaste; recarga y vuelve a intentarlo';
+
+export interface TipPoolReceiptFile {
+  receiptId: string;
+  storeId: string;
+  fileName: string;
+  content: Buffer;
+}
+
 interface PoolPeriod {
   start: string;
   end: string;
@@ -74,6 +150,17 @@ interface PoolPeriod {
 
 function fullName(person: { firstName: string; lastName: string }): string {
   return `${person.firstName} ${person.lastName}`;
+}
+
+function toPerson(
+  person: { id: string; firstName: string; lastName: string } | null,
+): TipPoolPersonResponse | null {
+  return person ? { id: person.id, name: fullName(person) } : null;
+}
+
+// Fecha YYYY-MM-DD ya validada como Date de una columna date.
+function dbDay(value: string): Date {
+  return new Date(`${value}T00:00:00.000Z`);
 }
 
 // Lee el snapshot JSON del pacto sin confiar en su forma: los repartos
@@ -121,6 +208,7 @@ function toTipPoolResponse(pool: TipPoolRecord): TipPoolResponse {
   return {
     id: pool.id,
     status: pool.status,
+    version: pool.version,
     store: pool.store,
     periodStart: formatDbDate(pool.periodStart),
     periodEnd: formatDbDate(pool.periodEnd),
@@ -147,11 +235,49 @@ function toTipPoolResponse(pool: TipPoolRecord): TipPoolResponse {
       name: fullName(pool.calculatedBy),
     },
     calculatedAt: pool.updatedAt,
+    notes: pool.notes,
+    confirmedBy: toPerson(pool.confirmedBy),
+    confirmedAt: pool.confirmedAt,
+    paidBy: toPerson(pool.paidBy),
+    paidAt: pool.paidAt,
+    paymentDate: pool.paymentDate ? formatDbDate(pool.paymentDate) : null,
+    receiptsCount: pool._count.receipts,
+  };
+}
+
+function toReceiptResponse(
+  receipt: TipPoolReceiptRecord,
+): TipPoolReceiptResponse {
+  return {
+    id: receipt.id,
+    poolId: receipt.poolId,
+    userId: receipt.userId,
+    workerName: receipt.workerName,
+    store: { id: receipt.storeId, name: receipt.storeName },
+    periodStart: formatDbDate(receipt.periodStart),
+    periodEnd: formatDbDate(receipt.periodEnd),
+    hoursWorked: receipt.hoursWorked.toFixed(2),
+    amount: Number(receipt.amount),
+    paymentDate: formatDbDate(receipt.paymentDate),
+    paidBy: { id: receipt.paidById, name: receipt.paidByName },
+    detail: parseReceiptDetail(receipt.detail),
+    createdAt: receipt.createdAt,
   };
 }
 
 function toSnapshot(agreement: AgreementCandidate): TipAgreementSnapshot {
   return { ...agreement, capturedAt: new Date().toISOString() };
+}
+
+// 409 de una acción con el estado y la versión actuales del reparto.
+function conflict(message: string, pool: LockedPoolRow): ConflictException {
+  const body: TipPoolConflictBody = {
+    statusCode: 409,
+    message,
+    currentStatus: pool.status,
+    currentVersion: pool.version,
+  };
+  return new ConflictException(body);
 }
 
 function isPrismaError(error: unknown, code: string): boolean {
@@ -162,7 +288,9 @@ function isPrismaError(error: unknown, code: string): boolean {
 
 // Cálculo y vista previa del reparto de propinas (SPRINT-3-T12). Genera la
 // foto del reparto en estado DRAFT a partir del pacto vigente, los registros
-// diarios del período y las horas trabajadas; confirmarla es de SPRINT-3-T13.
+// diarios del período y las horas trabajadas. El contador la observa, la
+// confirma y la marca como pagada, lo que emite una constancia por trabajador
+// (SPRINT-3-T13).
 @Injectable()
 export class TipPoolsService {
   constructor(
@@ -205,6 +333,233 @@ export class TipPoolsService {
       throw new NotFoundException('Reparto de propinas no encontrado');
     }
     return toTipPoolResponse(pool);
+  }
+
+  // Observación del contador sobre un borrador: reemplaza notes y sube la
+  // versión; el reparto sigue en DRAFT hasta que se recalcule y confirme.
+  async observe(
+    id: string,
+    dto: ObserveTipPoolDto,
+    currentUser: AuthUser,
+  ): Promise<TipPoolResponse> {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockPool(tx, id, currentUser, dto.expectedVersion, {
+        status: 'DRAFT',
+        message:
+          'Solo se pueden registrar observaciones en un reparto en borrador',
+      });
+      return this.updateAndRead(tx, id, {
+        notes: dto.notes,
+        version: { increment: 1 },
+      });
+    });
+  }
+
+  // Validación del contador: revalida la conciliación y pasa a CONFIRMED.
+  // Desde ahí los triggers impiden cambiar montos, líneas y fuentes.
+  async confirm(
+    id: string,
+    dto: ConfirmTipPoolDto,
+    currentUser: AuthUser,
+  ): Promise<TipPoolResponse> {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockPool(tx, id, currentUser, dto.expectedVersion, {
+        status: 'DRAFT',
+        message: 'Solo se puede confirmar un reparto en borrador',
+      });
+      const current = await this.read(tx, id);
+      if (!current.reconciled) {
+        throw new UnprocessableEntityException(
+          'El reparto no está conciliado: la suma de las líneas o de las fuentes no coincide con el total; recalcúlalo antes de confirmar',
+        );
+      }
+      return this.updateAndRead(tx, id, {
+        status: 'CONFIRMED',
+        confirmedAt: new Date(),
+        confirmedBy: { connect: { id: currentUser.id } },
+        version: { increment: 1 },
+      });
+    });
+  }
+
+  // Pago (enterado) de un reparto confirmado: pasa a PAID y, en la misma
+  // transacción y después del cambio de estado, inserta una constancia por
+  // línea con la foto del reparto (el trigger exige que ya esté PAID).
+  async pay(
+    id: string,
+    dto: PayTipPoolDto,
+    currentUser: AuthUser,
+  ): Promise<TipPoolResponse> {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockPool(tx, id, currentUser, dto.expectedVersion, {
+        status: 'CONFIRMED',
+        message: 'Solo se puede marcar como pagado un reparto confirmado',
+      });
+      const current = await this.read(tx, id);
+      const paymentDate = resolvePaymentDate(
+        dto.paymentDate,
+        current.periodEnd,
+        new Date(),
+      );
+      if (!paymentDate.valid) {
+        throw new BadRequestException(paymentDate.message);
+      }
+      const payer = await tx.user.findUniqueOrThrow({
+        where: { id: currentUser.id },
+        select: { id: true, firstName: true, lastName: true },
+      });
+      const paidBy = { id: payer.id, name: fullName(payer) };
+
+      await tx.tipPool.update({
+        where: { id },
+        data: {
+          status: 'PAID',
+          paidAt: new Date(),
+          paidBy: { connect: { id: paidBy.id } },
+          paymentDate: dbDay(paymentDate.date),
+          version: { increment: 1 },
+        },
+      });
+      const receipts = buildTipPoolReceipts(current, paymentDate.date, paidBy);
+      await tx.tipPoolReceipt.createMany({
+        data: receipts.map((receipt) => ({
+          poolId: id,
+          userId: receipt.userId,
+          workerName: receipt.workerName,
+          storeId: receipt.storeId,
+          storeName: receipt.storeName,
+          periodStart: dbDay(receipt.periodStart),
+          periodEnd: dbDay(receipt.periodEnd),
+          hoursWorked: new Prisma.Decimal(receipt.hoursWorked),
+          amount: new Prisma.Decimal(receipt.amount),
+          paymentDate: dbDay(receipt.paymentDate),
+          paidById: receipt.paidById,
+          paidByName: receipt.paidByName,
+          // El spread materializa el detalle como objeto JSON de Prisma.
+          detail: {
+            ...receipt.detail,
+            agreementSnapshot: receipt.detail.agreementSnapshot
+              ? { ...receipt.detail.agreementSnapshot }
+              : null,
+            lines: receipt.detail.lines.map((line) => ({ ...line })),
+          },
+        })),
+      });
+      return this.read(tx, id);
+    });
+  }
+
+  async listReceipts(
+    id: string,
+    currentUser: AuthUser,
+  ): Promise<TipPoolReceiptResponse[]> {
+    await this.assertPaidPool(id, currentUser);
+    const receipts = await this.prisma.tipPoolReceipt.findMany({
+      where: { poolId: id },
+      select: TIP_POOL_RECEIPT_SELECT,
+      orderBy: { userId: 'asc' },
+    });
+    return receipts.map(toReceiptResponse);
+  }
+
+  // PDF de la constancia generado al vuelo desde la foto guardada.
+  async downloadReceipt(
+    id: string,
+    userId: string,
+    currentUser: AuthUser,
+  ): Promise<TipPoolReceiptFile> {
+    await this.assertPaidPool(id, currentUser);
+    const receipt = await this.prisma.tipPoolReceipt.findUnique({
+      where: { poolId_userId: { poolId: id, userId } },
+      select: TIP_POOL_RECEIPT_SELECT,
+    });
+    if (!receipt) {
+      throw new NotFoundException(
+        'El trabajador no tiene constancia en este reparto',
+      );
+    }
+    const response = toReceiptResponse(receipt);
+    const content = await renderTipReceiptPdf(response, new Date());
+    return {
+      receiptId: receipt.id,
+      storeId: receipt.storeId,
+      fileName: buildReceiptFileName(response),
+      content: Buffer.from(content),
+    };
+  }
+
+  // Bloquea el reparto (FOR UPDATE) y verifica acceso, estado y versión, en
+  // ese orden: sin acceso responde como si no existiera (404) y un estado
+  // incorrecto se informa antes que una versión desactualizada (ambos 409).
+  private async lockPool(
+    tx: Prisma.TransactionClient,
+    id: string,
+    currentUser: AuthUser,
+    expectedVersion: number,
+    expected: { status: TipPoolStatusCode; message: string },
+  ): Promise<LockedPoolRow> {
+    const rows = await tx.$queryRaw<LockedPoolRow[]>`
+      SELECT id, store_id, status::text AS status, version
+      FROM tip_pools
+      WHERE id = ${id}::uuid
+      FOR UPDATE`;
+    const pool = rows.at(0);
+    if (!pool || !canAccessStore(currentUser, pool.store_id)) {
+      throw new NotFoundException('Reparto de propinas no encontrado');
+    }
+    if (pool.status !== expected.status) {
+      throw conflict(
+        `${expected.message}; el reparto está ${STATUS_LABEL[pool.status]}`,
+        pool,
+      );
+    }
+    if (pool.version !== expectedVersion) {
+      throw conflict(VERSION_CONFLICT_MESSAGE, pool);
+    }
+    return pool;
+  }
+
+  private async read(
+    tx: Prisma.TransactionClient,
+    id: string,
+  ): Promise<TipPoolResponse> {
+    const pool = await tx.tipPool.findUniqueOrThrow({
+      where: { id },
+      select: TIP_POOL_SELECT,
+    });
+    return toTipPoolResponse(pool);
+  }
+
+  private async updateAndRead(
+    tx: Prisma.TransactionClient,
+    id: string,
+    data: Prisma.TipPoolUpdateInput,
+  ): Promise<TipPoolResponse> {
+    const pool = await tx.tipPool.update({
+      where: { id },
+      data,
+      select: TIP_POOL_SELECT,
+    });
+    return toTipPoolResponse(pool);
+  }
+
+  // Las constancias solo existen en un reparto pagado.
+  private async assertPaidPool(
+    id: string,
+    currentUser: AuthUser,
+  ): Promise<void> {
+    const pool = await this.prisma.tipPool.findUnique({
+      where: { id },
+      select: { storeId: true, status: true },
+    });
+    if (!pool || !canAccessStore(currentUser, pool.storeId)) {
+      throw new NotFoundException('Reparto de propinas no encontrado');
+    }
+    if (pool.status !== 'PAID') {
+      throw new ConflictException(
+        `Las constancias se emiten al pagar el reparto; el reparto está ${STATUS_LABEL[pool.status]}`,
+      );
+    }
   }
 
   private async calculateAndSave(
@@ -376,7 +731,13 @@ export class TipPoolsService {
       poolId = existing.id;
       await tx.tipPoolLine.deleteMany({ where: { poolId } });
       await tx.tipPoolSource.deleteMany({ where: { poolId } });
-      await tx.tipPool.update({ where: { id: poolId }, data: poolData });
+      await tx.tipPool.update({
+        where: { id: poolId },
+        // Las observaciones se limpian (quedan en la auditoría y el recálculo
+        // las atiende) y la versión sube: quien revisó la foto anterior
+        // recibe 409 al confirmarla (SPRINT-3-T13).
+        data: { ...poolData, version: { increment: 1 } },
+      });
     } else {
       const created = await tx.tipPool.create({
         data: {

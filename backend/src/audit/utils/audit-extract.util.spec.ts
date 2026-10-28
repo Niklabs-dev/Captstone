@@ -66,6 +66,22 @@ describe('resolveEntityId', () => {
     expect(entityId).toBe('user-3');
   });
 
+  it('toma el ID del contexto cuando entityIdFrom es context.entityId', () => {
+    const options: AuditedOptions = {
+      action: AUDIT_ACTION.TIP_POOL_RECEIPT_DOWNLOADED,
+      entityType: 'tip_pool_receipts',
+      entityIdFrom: 'context.entityId',
+    };
+    expect(
+      resolveEntityId(
+        options,
+        info({ context: { entityId: 'receipt-1' } }),
+        Buffer.from('%PDF'),
+      ),
+    ).toBe('receipt-1');
+    expect(resolveEntityId(options, info(), undefined)).toBeNull();
+  });
+
   it('devuelve null si no se declaró origen o el campo no es un string', () => {
     expect(resolveEntityId(CREATE_USER_OPTIONS, info(), { id: 42 })).toBeNull();
     expect(
