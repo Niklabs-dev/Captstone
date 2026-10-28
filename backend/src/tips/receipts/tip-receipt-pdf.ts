@@ -118,10 +118,16 @@ export async function renderTipReceiptPdf(
   receipt: TipPoolReceiptResponse,
   issuedAt: Date,
 ): Promise<Uint8Array> {
-  const pdf = await PDFDocument.create();
+  // Determinista: con updateMetadata (por defecto) pdf-lib fija Producer,
+  // CreationDate y ModDate con la hora actual. Todo sale de la constancia
+  // guardada, así que cada descarga entrega el mismo archivo byte a byte
+  // (pdf-lib no escribe /ID en el trailer).
+  const pdf = await PDFDocument.create({ updateMetadata: false });
   pdf.setTitle('Constancia de pago de propinas');
   pdf.setCreator('Moi-food');
+  pdf.setProducer('Moi-food');
   pdf.setCreationDate(issuedAt);
+  pdf.setModificationDate(issuedAt);
   const page = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);

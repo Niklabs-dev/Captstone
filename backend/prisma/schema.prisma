@@ -422,6 +422,7 @@ model TipPool {
   version           Int           @default(1)
   paidAt            DateTime?     @map("paid_at") @db.Timestamptz(6)
   paymentDate       DateTime?     @map("payment_date") @db.Date
+  calculatedAt      DateTime      @default(now()) @map("calculated_at") @db.Timestamptz(6)
   createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 

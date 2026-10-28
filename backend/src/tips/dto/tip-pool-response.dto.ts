@@ -224,10 +224,17 @@ export class TipPoolResponseDto implements TipPoolResponse {
   calculatedBy: TipPoolUserResponseDto;
 
   @ApiProperty({
-    description: 'Instante del último cálculo.',
+    description:
+      'Instante del último cálculo; observar, confirmar y pagar no lo cambian.',
     example: '2026-10-26T15:00:00.000Z',
   })
   calculatedAt: Date;
+
+  @ApiProperty({
+    description: 'Instante del último cambio del reparto.',
+    example: '2026-10-27T13:00:00.000Z',
+  })
+  updatedAt: Date;
 
   @ApiProperty({
     description:
@@ -402,7 +409,8 @@ export class TipPoolReceiptResponseDto implements TipPoolReceiptResponse {
   detail: TipPoolReceiptDetailDto;
 
   @ApiProperty({
-    description: 'Instante de emisión de la constancia.',
+    description:
+      'Instante de emisión de la constancia; es la fecha de emisión del PDF, que no cambia entre descargas.',
     example: '2026-10-27T15:00:00.000Z',
   })
   createdAt: Date;

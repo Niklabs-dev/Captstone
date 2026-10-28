@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'node:crypto';
+import { PDFDocument } from 'pdf-lib';
 import request from 'supertest';
 import {
   seedDatabase,
@@ -32,6 +33,7 @@ import {
   PrismaClient,
 } from '../src/generated/prisma/client.js';
 import type { PrismaService } from '../src/prisma/prisma.service.js';
+import { renderTipReceiptPdf } from '../src/tips/receipts/tip-receipt-pdf.js';
 import { StoresService } from '../src/stores/stores.service.js';
 import {
   TipPoolsService,
@@ -81,6 +83,12 @@ function day(value: string): Date {
 // Día de hoy en hora de Chile: la fecha de pago por defecto.
 function todayInChile(): string {
   return formatDbDate(toDbDate(businessDateOf(new Date())));
+}
+
+// Pausa breve entre acciones: así cada una deja un instante distinto aunque
+// el reloj tenga resolución de milisegundos.
+function tick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 5));
 }
 
 function sumAmounts(items: { amount: number }[]): number {
@@ -368,6 +376,63 @@ describe.skipIf(!databaseUrl)(
           // El pago conserva la foto del reparto.
           expect(paidPool.lines).toEqual(confirmedPool.lines);
           expect(paidPool.sources).toEqual(confirmedPool.sources);
+        });
+      });
+
+      it('calculatedAt solo cambia al recalcular; updatedAt con cada acción', async () => {
+        await withinRollback(async (f) => {
+          const first = await draft(f);
+          expect(first.calculatedAt).toBeInstanceOf(Date);
+          expect(first.updatedAt).toBeInstanceOf(Date);
+
+          // Recalcular un DRAFT avanza calculatedAt.
+          await tick();
+          const recalculated = (
+            await f.service.preview(
+              {
+                storeId: f.storeId,
+                periodStart: PERIOD.start,
+                periodEnd: PERIOD.end,
+              },
+              f.accountant,
+            )
+          ).pool;
+          expect(recalculated.calculatedAt.getTime()).toBeGreaterThan(
+            first.calculatedAt.getTime(),
+          );
+          const calculatedAt = recalculated.calculatedAt;
+
+          // Observar, confirmar y pagar cambian updatedAt, no calculatedAt.
+          await tick();
+          const observed = await f.service.observe(
+            recalculated.id,
+            { expectedVersion: recalculated.version, notes: 'Revisar' },
+            f.accountant,
+          );
+          await tick();
+          const confirmedPool = await f.service.confirm(
+            observed.id,
+            { expectedVersion: observed.version },
+            f.accountant,
+          );
+          await tick();
+          const paidPool = await f.service.pay(
+            confirmedPool.id,
+            {
+              expectedVersion: confirmedPool.version,
+              paymentDate: '2026-10-20',
+            },
+            f.accountant,
+          );
+          let lastUpdate = recalculated.updatedAt.getTime();
+          for (const pool of [observed, confirmedPool, paidPool]) {
+            expect(pool.calculatedAt).toEqual(calculatedAt);
+            expect(pool.updatedAt.getTime()).toBeGreaterThan(lastUpdate);
+            lastUpdate = pool.updatedAt.getTime();
+          }
+          const stored = await f.service.findOne(paidPool.id, f.accountant);
+          expect(stored.calculatedAt).toEqual(calculatedAt);
+          expect(stored.updatedAt).toEqual(paidPool.updatedAt);
         });
       });
 
@@ -723,6 +788,48 @@ describe.skipIf(!databaseUrl)(
         });
       });
 
+      it('dos descargas de la misma constancia son idénticas byte a byte', async () => {
+        await withinRollback(async (f) => {
+          const pool = await paid(f);
+          const [receipt] = await f.service.listReceipts(pool.id, f.accountant);
+          const first = await f.service.downloadReceipt(
+            pool.id,
+            receipt.userId,
+            f.accountant,
+          );
+          await tick();
+          const second = await f.service.downloadReceipt(
+            pool.id,
+            receipt.userId,
+            f.accountant,
+          );
+          expect(first.content.equals(second.content)).toBe(true);
+
+          // La fecha de emisión (texto y metadatos) es el created_at guardado:
+          // el archivo es el mismo que se obtiene al renderizar con esa fecha.
+          const stored = await f.tx.tipPoolReceipt.findUniqueOrThrow({
+            where: { id: receipt.id },
+            select: { createdAt: true },
+          });
+          expect(receipt.createdAt).toEqual(stored.createdAt);
+          const expected = await renderTipReceiptPdf(receipt, stored.createdAt);
+          expect(first.content.equals(Buffer.from(expected))).toBe(true);
+          // Las fechas del PDF tienen precisión de segundos.
+          const storedSeconds = Math.floor(stored.createdAt.getTime() / 1000);
+          const pdf = await PDFDocument.load(first.content, {
+            updateMetadata: false,
+          });
+          for (const date of [
+            pdf.getCreationDate(),
+            pdf.getModificationDate(),
+          ]) {
+            expect(Math.floor((date?.getTime() ?? 0) / 1000)).toBe(
+              storedSeconds,
+            );
+          }
+        });
+      });
+
       it('sin pagar responde 409 y un trabajador sin constancia responde 404', async () => {
         await withinRollback(async (f) => {
           const pool = await confirmed(f);
@@ -799,6 +906,16 @@ describe.skipIf(!databaseUrl)(
           await expect(
             f.tx
               .$executeRaw`UPDATE tip_pools SET total_amount = 1 WHERE id = ${pool.id}::uuid`,
+          ).rejects.toThrow(CONFIRMED_IMMUTABLE);
+        });
+      });
+
+      it('no se puede cambiar la fecha de cálculo de un reparto CONFIRMED', async () => {
+        await withinRollback(async (f) => {
+          const pool = await confirmed(f);
+          await expect(
+            f.tx
+              .$executeRaw`UPDATE tip_pools SET calculated_at = now() - interval '1 day' WHERE id = ${pool.id}::uuid`,
           ).rejects.toThrow(CONFIRMED_IMMUTABLE);
         });
       });
@@ -1325,10 +1442,26 @@ describe.skipIf(!databaseUrl)(
         AUDIT_ACTION.TIP_POOL_PAID,
       ]);
       expect(audits.every((audit) => audit.storeId === storeId)).toBe(true);
+      // El texto de la observación queda en la auditoría (ya recortado) y el
+      // recálculo registra cuál descartó; el reparto ya no la tiene.
+      const notes = 'Revisar las horas de workerTwo';
       expect(audits[1].detail).toEqual({
         version: 2,
-        notesLength: 'Revisar las horas de workerTwo'.length,
+        notes,
+        notesLength: notes.length,
       });
+      expect(audits[2].detail).toMatchObject({
+        recalculated: true,
+        previousNotes: notes,
+      });
+      expect(
+        (
+          await prisma.tipPool.findUniqueOrThrow({
+            where: { id: created.id },
+            select: { notes: true },
+          })
+        ).notes,
+      ).toBeNull();
       expect(audits[3].detail).toEqual({ totalAmount: 10001, version: 4 });
       expect(audits[4].detail).toEqual({
         paymentDate: todayInChile(),

@@ -84,7 +84,10 @@ export interface TipPoolResponse {
   // Σ líneas = total y Σ fuentes = total.
   reconciled: boolean;
   calculatedBy: TipPoolPersonResponse;
+  // Solo cambia al calcular o recalcular el borrador.
   calculatedAt: Date;
+  // Cambia con cualquier acción: observar, recalcular, confirmar o pagar.
+  updatedAt: Date;
   // Observación vigente del contador; el recálculo la limpia (SPRINT-3-T13).
   notes: string | null;
   confirmedBy: TipPoolPersonResponse | null;
@@ -99,6 +102,9 @@ export interface TipPoolResponse {
 export interface TipPoolPreviewResult {
   pool: TipPoolResponse;
   created: boolean;
+  // Observación que el recálculo descartó (null si no había o si es el
+  // primer cálculo); el controller la deja en la auditoría.
+  previousNotes: string | null;
 }
 
 // Confirmación, observaciones y pago del reparto (SPRINT-3-T13).
