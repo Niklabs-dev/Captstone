@@ -36,7 +36,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(output).toContain('is valid');
   });
 
-  it('las migraciones crean las 23 tablas del modelo', () => {
+  it('las migraciones crean las 24 tablas del modelo', () => {
     const sql = readMigrations();
     const tablasEsperadas = [
       'stores',
@@ -54,6 +54,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'tip_pools',
       'tip_pool_lines',
       'tip_pool_sources',
+      'tip_pool_receipts',
       'sales',
       'cash_closings',
       'cash_closing_lines',
@@ -197,6 +198,34 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     // El archivo de una liquidación publicada no recibe versiones nuevas.
     expect(sql).toContain('BEFORE INSERT ON "document_versions"');
     expect(sql).toContain('ON "documents"');
+  });
+
+  it('controla los estados del reparto y hace inmutables sus constancias (SPRINT-3-T13)', () => {
+    const sql = readMigration('propinas_confirmacion_pago');
+    expect(sql).toContain('"version" INTEGER NOT NULL DEFAULT 1');
+    expect(sql).toContain('CONSTRAINT "tip_pools_status_consistency" CHECK');
+    expect(sql).toContain('"payment_date" >= "period_end"');
+    expect(sql).toContain('CREATE TABLE "tip_pool_receipts"');
+    expect(sql).toContain('"tip_pool_receipts_amount_nonnegative" CHECK');
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "tip_pool_receipts_pool_id_user_id_key"',
+    );
+    // Estados del reparto por fila y TRUNCATE por sentencia.
+    expect(sql).toContain('BEFORE UPDATE OR DELETE ON "tip_pools"');
+    expect(sql).toContain('BEFORE TRUNCATE ON "tip_pools"');
+    // La foto (líneas y fuentes) solo cambia en DRAFT.
+    expect(sql).toContain(
+      'BEFORE INSERT OR UPDATE OR DELETE ON "tip_pool_lines"',
+    );
+    expect(sql).toContain(
+      'BEFORE INSERT OR UPDATE OR DELETE ON "tip_pool_sources"',
+    );
+    // Constancias: solo INSERT de un reparto pagado.
+    expect(sql).toContain(
+      'BEFORE INSERT OR UPDATE OR DELETE ON "tip_pool_receipts"',
+    );
+    expect(sql).toContain('BEFORE TRUNCATE ON "tip_pool_receipts"');
+    expect(sql).toContain("USING ERRCODE = 'insufficient_privilege'");
   });
 
   it('soporta el cumplimiento de la Ley N°21.719', () => {

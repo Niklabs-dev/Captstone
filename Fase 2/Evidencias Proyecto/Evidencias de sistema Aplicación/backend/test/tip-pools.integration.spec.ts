@@ -589,11 +589,25 @@ describe.skipIf(!databaseUrl)(
           await f.tx.tipPool.update({
             where: { id: pool.id },
             data: {
-              status,
+              status: 'CONFIRMED',
               confirmedAt: new Date(),
               confirmedById: f.accountant.id,
             },
           });
+          // Desde SPRINT-3-T13 PAID exige pasar por CONFIRMED y los datos del
+          // pago (CHECK y triggers de tip_pools).
+          if (status === 'PAID') {
+            await f.tx.tipPool.update({
+              where: { id: pool.id },
+              data: {
+                status,
+                paidAt: new Date(),
+                paidById: f.accountant.id,
+                paymentDate: day(PERIOD.end),
+                version: { increment: 1 },
+              },
+            });
+          }
           await addEntry(f, '2026-10-03', 'TRANSFER', 3000);
 
           await expect(preview(f)).rejects.toBeInstanceOf(ConflictException);
