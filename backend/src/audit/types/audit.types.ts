@@ -7,8 +7,11 @@ import type { AuditAction } from '../constants/audit-actions.constants.js';
 // - 'params.<nombre>': el ID viaja en la ruta (ej. 'params.id' en
 //   PATCH /users/:id/deactivate o 'params.versionId' en la descarga de una
 //   versión). Es el único origen disponible también en los rechazos.
+// - 'context.entityId': lo fija el endpoint con setAuditContext cuando la
+//   respuesta es un archivo y la ruta no trae el ID (ej. la constancia de
+//   pago de propinas, SPRINT-3-T13).
 export type AuditEntityIdSource =
-  'response.id' | 'response.user.id' | `params.${string}`;
+  'response.id' | 'response.user.id' | `params.${string}` | 'context.entityId';
 
 // Elige la acción según la solicitud y la respuesta, para endpoints con más
 // de un resultado posible (ej. carga de un documento nuevo o de una nueva
@@ -50,6 +53,8 @@ export interface AuditedOptions {
 // trae, por ejemplo una descarga, que responde con el archivo (SPRINT-2-T09).
 // Se fijan con setAuditContext (utils/audit-context.util.ts).
 export interface AuditContext {
+  /** ID de la entidad afectada, para entityIdFrom: 'context.entityId'. */
+  entityId?: string;
   /** Local de la entidad afectada. */
   storeId?: string | null;
   /** Campos adicionales para detail; nunca contenido de archivos. */

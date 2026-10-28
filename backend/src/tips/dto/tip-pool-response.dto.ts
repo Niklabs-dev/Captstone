@@ -5,7 +5,10 @@ import {
   type TipAgreementSnapshot,
   type TipPoolIssue,
   type TipPoolIssueCode,
+  type TipPoolConflictBody,
   type TipPoolLineResponse,
+  type TipPoolReceiptDetail,
+  type TipPoolReceiptResponse,
   type TipPoolResponse,
   type TipPoolSourceResponse,
   type TipPoolStatusCode,
@@ -29,7 +32,7 @@ class TipPoolStoreResponseDto {
 
 class TipPoolUserResponseDto {
   @ApiProperty({
-    description: 'ID del usuario que calculó el reparto.',
+    description: 'ID del usuario (quien calculó, confirmó o pagó).',
     example: 'a9000000-0000-4000-8000-000000000001',
   })
   id: string;
@@ -149,6 +152,13 @@ export class TipPoolResponseDto implements TipPoolResponse {
   status: TipPoolStatusCode;
 
   @ApiProperty({
+    description:
+      'Versión del reparto (bloqueo optimista). Sube en cada recálculo, observación, confirmación y pago; las acciones la reciben como expectedVersion.',
+    example: 1,
+  })
+  version: number;
+
+  @ApiProperty({
     description: 'Local del reparto.',
     type: TipPoolStoreResponseDto,
   })
@@ -214,10 +224,196 @@ export class TipPoolResponseDto implements TipPoolResponse {
   calculatedBy: TipPoolUserResponseDto;
 
   @ApiProperty({
-    description: 'Instante del último cálculo.',
+    description:
+      'Instante del último cálculo; observar, confirmar y pagar no lo cambian.',
     example: '2026-10-26T15:00:00.000Z',
   })
   calculatedAt: Date;
+
+  @ApiProperty({
+    description: 'Instante del último cambio del reparto.',
+    example: '2026-10-27T13:00:00.000Z',
+  })
+  updatedAt: Date;
+
+  @ApiProperty({
+    description:
+      'Observación vigente del contador; null si no hay. El recálculo la limpia (queda en la auditoría).',
+    example: null,
+    nullable: true,
+    type: String,
+  })
+  notes: string | null;
+
+  @ApiProperty({
+    description: 'Contador que confirmó el reparto; null mientras es DRAFT.',
+    type: TipPoolUserResponseDto,
+    nullable: true,
+  })
+  confirmedBy: TipPoolUserResponseDto | null;
+
+  @ApiProperty({
+    description: 'Instante de la confirmación; null mientras es DRAFT.',
+    example: '2026-10-27T13:00:00.000Z',
+    nullable: true,
+    type: Date,
+  })
+  confirmedAt: Date | null;
+
+  @ApiProperty({
+    description: 'Responsable del pago; null mientras no está PAID.',
+    type: TipPoolUserResponseDto,
+    nullable: true,
+  })
+  paidBy: TipPoolUserResponseDto | null;
+
+  @ApiProperty({
+    description: 'Instante en que se marcó como pagado.',
+    example: '2026-10-27T15:00:00.000Z',
+    nullable: true,
+    type: Date,
+  })
+  paidAt: Date | null;
+
+  @ApiProperty({
+    description: 'Fecha en que se enteró el pago (YYYY-MM-DD).',
+    example: '2026-10-27',
+    nullable: true,
+    type: String,
+  })
+  paymentDate: string | null;
+
+  @ApiProperty({
+    description: 'Constancias emitidas (una por trabajador al pagar).',
+    example: 0,
+  })
+  receiptsCount: number;
+}
+
+export class TipPoolConflictDto implements TipPoolConflictBody {
+  @ApiProperty({ description: 'Código HTTP.', example: 409 })
+  statusCode: 409;
+
+  @ApiProperty({
+    description:
+      'Motivo: estado incorrecto para la acción o versión desactualizada.',
+    example:
+      'El reparto cambió desde que lo revisaste; recarga y vuelve a intentarlo',
+  })
+  message: string;
+
+  @ApiProperty({
+    description: 'Estado actual del reparto.',
+    enum: TIP_POOL_STATUSES,
+    example: 'DRAFT',
+  })
+  currentStatus: TipPoolStatusCode;
+
+  @ApiProperty({ description: 'Versión actual del reparto.', example: 3 })
+  currentVersion: number;
+}
+
+class TipPoolReceiptDetailDto implements TipPoolReceiptDetail {
+  @ApiProperty({
+    description: 'Copia del pacto aplicado al momento del pago.',
+    type: TipAgreementSnapshotDto,
+    nullable: true,
+  })
+  agreementSnapshot: TipAgreementSnapshotDto | null;
+
+  @ApiProperty({ description: 'Total del reparto en CLP.', example: 25000 })
+  totalAmount: number;
+
+  @ApiProperty({
+    description: 'Horas totales del reparto, con 2 decimales.',
+    example: '100.00',
+  })
+  totalHours: string;
+
+  @ApiProperty({
+    description: 'Todas las líneas del reparto al momento del pago.',
+    type: TipPoolLineResponseDto,
+    isArray: true,
+  })
+  lines: TipPoolLineResponseDto[];
+}
+
+export class TipPoolReceiptResponseDto implements TipPoolReceiptResponse {
+  @ApiProperty({
+    description: 'ID de la constancia.',
+    example: '3f1c2b9a-6d4e-4c1a-9b7f-2a8e5d0c4b11',
+  })
+  id: string;
+
+  @ApiProperty({
+    description: 'ID del reparto pagado.',
+    example: 'a9000000-0000-4000-8000-000000000009',
+  })
+  poolId: string;
+
+  @ApiProperty({
+    description: 'ID del trabajador.',
+    example: 'a9000000-0000-4000-8000-000000000002',
+  })
+  userId: string;
+
+  @ApiProperty({
+    description: 'Nombre del trabajador al momento del pago (copia).',
+    example: 'Ana Pérez',
+  })
+  workerName: string;
+
+  @ApiProperty({
+    description: 'Local al momento del pago (copia).',
+    type: TipPoolStoreResponseDto,
+  })
+  store: TipPoolStoreResponseDto;
+
+  @ApiProperty({
+    description: 'Primer día del período (YYYY-MM-DD).',
+    example: '2026-01-05',
+  })
+  periodStart: string;
+
+  @ApiProperty({
+    description: 'Último día del período (YYYY-MM-DD).',
+    example: '2026-01-11',
+  })
+  periodEnd: string;
+
+  @ApiProperty({
+    description: 'Horas del trabajador, con 2 decimales.',
+    example: '40.00',
+  })
+  hoursWorked: string;
+
+  @ApiProperty({ description: 'Monto pagado en CLP.', example: 10000 })
+  amount: number;
+
+  @ApiProperty({
+    description: 'Fecha en que se enteró el pago (YYYY-MM-DD).',
+    example: '2026-10-27',
+  })
+  paymentDate: string;
+
+  @ApiProperty({
+    description: 'Responsable del pago (nombre copiado al pagar).',
+    type: TipPoolUserResponseDto,
+  })
+  paidBy: TipPoolUserResponseDto;
+
+  @ApiProperty({
+    description: 'Foto del reparto al momento del pago.',
+    type: TipPoolReceiptDetailDto,
+  })
+  detail: TipPoolReceiptDetailDto;
+
+  @ApiProperty({
+    description:
+      'Instante de emisión de la constancia; es la fecha de emisión del PDF, que no cambia entre descargas.',
+    example: '2026-10-27T15:00:00.000Z',
+  })
+  createdAt: Date;
 }
 
 class TipPoolIssueDto implements TipPoolIssue {
