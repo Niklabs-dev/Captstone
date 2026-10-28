@@ -453,10 +453,18 @@ async function seedTipDemoFixtures(
     });
   }
 
-  await db.tipPool.upsert({
+  // El reparto demo, sus líneas y sus fuentes se crean solo si el reparto no
+  // existe (SPRINT-3-T13): una vez creado su ciclo lo administra la API
+  // (recálculo, confirmación y pago) y los triggers impiden tocar la foto de
+  // un reparto confirmado o pagado, así que repetir el seed no lo modifica.
+  const existingPool = await db.tipPool.findUnique({
     where: { id: TIP_DEMO_POOL.id },
-    update: {},
-    create: {
+    select: { id: true },
+  });
+  if (existingPool) return;
+
+  await db.tipPool.create({
+    data: {
       id: TIP_DEMO_POOL.id,
       periodStart: TIP_DEMO_PERIOD.start,
       periodEnd: TIP_DEMO_PERIOD.end,
@@ -471,33 +479,25 @@ async function seedTipDemoFixtures(
     },
   });
 
-  for (const registro of TIP_DEMO_WORKER_PERIODS) {
-    await db.tipPoolLine.upsert({
-      where: { id: registro.lineId },
-      update: {},
-      create: {
-        id: registro.lineId,
-        poolId: TIP_DEMO_POOL.id,
-        userId: registro.workerId,
-        workHoursRecordId: registro.hoursId,
-        hoursWorked: registro.hoursWorked,
-        amount: registro.lineAmount,
-      },
-    });
-  }
+  await db.tipPoolLine.createMany({
+    data: TIP_DEMO_WORKER_PERIODS.map((registro) => ({
+      id: registro.lineId,
+      poolId: TIP_DEMO_POOL.id,
+      userId: registro.workerId,
+      workHoursRecordId: registro.hoursId,
+      hoursWorked: registro.hoursWorked,
+      amount: registro.lineAmount,
+    })),
+  });
 
-  for (const fuente of TIP_DEMO_POOL_SOURCES) {
-    await db.tipPoolSource.upsert({
-      where: { id: fuente.id },
-      update: {},
-      create: {
-        id: fuente.id,
-        poolId: TIP_DEMO_POOL.id,
-        tipEntryId: fuente.entryId,
-        amount: fuente.amount,
-      },
-    });
-  }
+  await db.tipPoolSource.createMany({
+    data: TIP_DEMO_POOL_SOURCES.map((fuente) => ({
+      id: fuente.id,
+      poolId: TIP_DEMO_POOL.id,
+      tipEntryId: fuente.entryId,
+      amount: fuente.amount,
+    })),
+  });
 }
 
 async function main(): Promise<void> {

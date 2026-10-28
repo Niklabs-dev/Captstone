@@ -35,6 +35,11 @@ export const AUDIT_ACTION = {
   // período y recálculo de su borrador.
   TIP_POOL_CALCULATED: 'TIP_POOL_CALCULATED',
   TIP_POOL_RECALCULATED: 'TIP_POOL_RECALCULATED',
+  // Confirmación y pago de repartos (SPRINT-3-T13).
+  TIP_POOL_OBSERVED: 'TIP_POOL_OBSERVED',
+  TIP_POOL_CONFIRMED: 'TIP_POOL_CONFIRMED',
+  TIP_POOL_PAID: 'TIP_POOL_PAID',
+  TIP_POOL_RECEIPT_DOWNLOADED: 'TIP_POOL_RECEIPT_DOWNLOADED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

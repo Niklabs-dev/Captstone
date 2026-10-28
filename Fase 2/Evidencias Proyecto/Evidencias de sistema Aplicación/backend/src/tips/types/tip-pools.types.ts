@@ -62,9 +62,16 @@ export interface TipPoolSourceResponse {
   amount: number;
 }
 
+export interface TipPoolPersonResponse {
+  id: string;
+  name: string;
+}
+
 export interface TipPoolResponse {
   id: string;
   status: TipPoolStatusCode;
+  // Bloqueo optimista: las acciones lo reciben como expectedVersion.
+  version: number;
   store: { id: string; name: string };
   periodStart: string;
   periodEnd: string;
@@ -76,11 +83,62 @@ export interface TipPoolResponse {
   sources: TipPoolSourceResponse[];
   // Σ líneas = total y Σ fuentes = total.
   reconciled: boolean;
-  calculatedBy: { id: string; name: string };
+  calculatedBy: TipPoolPersonResponse;
+  // Solo cambia al calcular o recalcular el borrador.
   calculatedAt: Date;
+  // Cambia con cualquier acción: observar, recalcular, confirmar o pagar.
+  updatedAt: Date;
+  // Observación vigente del contador; el recálculo la limpia (SPRINT-3-T13).
+  notes: string | null;
+  confirmedBy: TipPoolPersonResponse | null;
+  confirmedAt: Date | null;
+  paidBy: TipPoolPersonResponse | null;
+  paidAt: Date | null;
+  // Fecha en que se enteró el pago (YYYY-MM-DD).
+  paymentDate: string | null;
+  receiptsCount: number;
 }
 
 export interface TipPoolPreviewResult {
   pool: TipPoolResponse;
   created: boolean;
+  // Observación que el recálculo descartó (null si no había o si es el
+  // primer cálculo); el controller la deja en la auditoría.
+  previousNotes: string | null;
+}
+
+// Confirmación, observaciones y pago del reparto (SPRINT-3-T13).
+
+// Cuerpo de las respuestas 409 de las acciones: el estado y la versión
+// actuales permiten a la vista del contador recargar sin otra consulta.
+export interface TipPoolConflictBody {
+  statusCode: 409;
+  message: string;
+  currentStatus: TipPoolStatusCode;
+  currentVersion: number;
+}
+
+// Foto del reparto al momento del pago, guardada en tip_pool_receipts.detail
+// para que cada constancia se explique sola.
+export interface TipPoolReceiptDetail {
+  agreementSnapshot: TipAgreementSnapshot | null;
+  totalAmount: number;
+  totalHours: string;
+  lines: TipPoolLineResponse[];
+}
+
+export interface TipPoolReceiptResponse {
+  id: string;
+  poolId: string;
+  userId: string;
+  workerName: string;
+  store: { id: string; name: string };
+  periodStart: string;
+  periodEnd: string;
+  hoursWorked: string;
+  amount: number;
+  paymentDate: string;
+  paidBy: TipPoolPersonResponse;
+  detail: TipPoolReceiptDetail;
+  createdAt: Date;
 }

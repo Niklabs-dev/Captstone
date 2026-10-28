@@ -589,11 +589,25 @@ describe.skipIf(!databaseUrl)(
           await f.tx.tipPool.update({
             where: { id: pool.id },
             data: {
-              status,
+              status: 'CONFIRMED',
               confirmedAt: new Date(),
               confirmedById: f.accountant.id,
             },
           });
+          // Desde SPRINT-3-T13 PAID exige pasar por CONFIRMED y los datos del
+          // pago (CHECK y triggers de tip_pools).
+          if (status === 'PAID') {
+            await f.tx.tipPool.update({
+              where: { id: pool.id },
+              data: {
+                status,
+                paidAt: new Date(),
+                paidById: f.accountant.id,
+                paymentDate: day(PERIOD.end),
+                version: { increment: 1 },
+              },
+            });
+          }
           await addEntry(f, '2026-10-03', 'TRANSFER', 3000);
 
           await expect(preview(f)).rejects.toBeInstanceOf(ConflictException);
@@ -962,6 +976,13 @@ describe.skipIf(!databaseUrl)(
           workers: 2,
           sources: 2,
         }) as unknown,
+      });
+      // El primer cálculo no descarta observaciones; el recálculo de un
+      // borrador sin observar deja previousNotes en null (SPRINT-3-T13).
+      expect(audits[0].detail).not.toHaveProperty('previousNotes');
+      expect(audits[1].detail).toMatchObject({
+        recalculated: true,
+        previousNotes: null,
       });
     });
 

@@ -115,12 +115,14 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
         recordedById: base.supervisor.id,
       },
     });
-    const pool = await tx.tipPool.create({
+    // Se crea en DRAFT y se confirma después de agregar líneas y fuentes: desde
+    // SPRINT-3-T13 los triggers solo permiten cambiar la foto de un borrador.
+    const draft = await tx.tipPool.create({
       data: {
         periodStart: new Date('2026-01-05'),
         periodEnd: new Date('2026-01-11'),
         totalAmount: 10000,
-        status: TipPoolStatus.CONFIRMED,
+        status: TipPoolStatus.DRAFT,
         agreementSnapshot: {
           id: agreement.id,
           name: agreement.name,
@@ -128,8 +130,6 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
           validFrom: '2026-01-01',
           validTo: '2026-12-31',
         },
-        confirmedAt: new Date('2026-01-12T12:00:00Z'),
-        confirmedById: base.supervisor.id,
         storeId: base.store.id,
         calculatedById: base.supervisor.id,
         agreementId: agreement.id,
@@ -137,7 +137,7 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
     });
     const line = await tx.tipPoolLine.create({
       data: {
-        poolId: pool.id,
+        poolId: draft.id,
         userId: base.worker.id,
         workHoursRecordId: workHours.id,
         hoursWorked: 40,
@@ -146,9 +146,17 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
     });
     const source = await tx.tipPoolSource.create({
       data: {
-        poolId: pool.id,
+        poolId: draft.id,
         tipEntryId: tipEntry.id,
         amount: 10000,
+      },
+    });
+    const pool = await tx.tipPool.update({
+      where: { id: draft.id },
+      data: {
+        status: TipPoolStatus.CONFIRMED,
+        confirmedAt: new Date('2026-01-12T12:00:00Z'),
+        confirmedById: base.supervisor.id,
       },
     });
     return { ...base, agreement, tipEntry, workHours, pool, line, source };

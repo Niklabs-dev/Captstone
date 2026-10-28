@@ -51,6 +51,9 @@ export function resolveEntityId(
 ): string | null {
   const source = options.entityIdFrom;
   if (source === undefined) return null;
+  if (source === 'context.entityId') {
+    return asString(info.context?.entityId);
+  }
   if (source.startsWith(PARAMS_PREFIX)) {
     return asString(info.params[source.slice(PARAMS_PREFIX.length)]);
   }
