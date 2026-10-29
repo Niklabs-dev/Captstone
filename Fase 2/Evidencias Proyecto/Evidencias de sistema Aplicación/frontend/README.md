@@ -1,5 +1,8 @@
 # Frontend Moi-food
 
+Reparto, validación y entrega de propinas para contador (SPRINT-3-T15):
+[guía y pruebas](docs/SPRINT-3-T15.md).
+
 Responsive de las vistas autenticadas (SPRINT-3-T07): menú móvil desplegable,
 diálogos adaptados y tablas accesibles. Alcance y verificación:
 [SPRINT-3-T07](docs/SPRINT-3-T07.md).

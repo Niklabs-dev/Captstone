@@ -7,6 +7,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Res,
   StreamableFile,
 } from '@nestjs/common';
@@ -58,6 +59,25 @@ import type {
 @Controller('tip-pools')
 export class TipPoolsController {
   constructor(private readonly tipPoolsService: TipPoolsService) {}
+
+  @Get()
+  @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR)
+  @ApiOperation({
+    summary: 'Consulta un reparto por local y período, sin recalcular',
+  })
+  @ApiOkResponse({
+    description: 'Reparto existente o lista vacía.',
+    type: TipPoolResponseDto,
+    isArray: true,
+  })
+  @ApiBadRequestResponse({ description: 'Local o período inválidos.' })
+  @ApiForbiddenResponse({ description: 'Solo contador y administrador.' })
+  list(
+    @Query() query: PreviewTipPoolDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<TipPoolResponse[]> {
+    return this.tipPoolsService.findPeriod(query, user);
+  }
 
   @Post('preview')
   @Roles(ROLE.CONTADOR)
