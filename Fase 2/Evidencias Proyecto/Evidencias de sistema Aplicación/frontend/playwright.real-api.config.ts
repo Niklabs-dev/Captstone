@@ -14,16 +14,21 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [
+    { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
     {
-      name: 'desktop',
-      use: {
-        ...devices['Desktop Chrome'],
-        viewport: { width: 1440, height: 900 },
-      },
+      name: 'mobile-360',
+      use: { ...devices['Pixel 7'], viewport: { width: 360, height: 800 } },
     },
     {
-      name: 'mobile',
+      name: 'mobile-390',
       use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } },
+    },
+    {
+      name: 'tablet-768',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 768, height: 1024 },
+      },
     },
   ],
 });

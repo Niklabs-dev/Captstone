@@ -257,9 +257,17 @@ test('Supervisor: campos, CLP, cuatro medios, totales, responsable, doble envío
   await page.keyboard.press('Tab');
   await amount.focus();
   await expect(amount).toBeFocused();
-  expect(
-    await amount.evaluate((element) => getComputedStyle(element).outlineWidth),
-  ).toBe('2px');
+  await expect(amount).toHaveClass(/focus-visible:outline-2/);
+  const outline = await amount.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      width: Number.parseFloat(style.outlineWidth),
+      style: style.outlineStyle,
+    };
+  });
+  expect(outline.style).toBe('solid');
+  // Admite el redondeo de píxeles de Chromium visible con escala de escritorio.
+  expect(Math.abs(outline.width - 2)).toBeLessThan(1);
   await noOverflow(page);
   const folder = 'output/playwright/tips/' + info.project.name;
   await mkdir(folder, { recursive: true });

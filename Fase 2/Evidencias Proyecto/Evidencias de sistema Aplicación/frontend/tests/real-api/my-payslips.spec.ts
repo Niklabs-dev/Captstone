@@ -206,3 +206,13 @@ test('API real: aislamiento, pendientes ocultas, stream verificado, supervisor y
     fullPage: true,
   });
 });
+
+// La regresión transversal comprueba el viewport al terminar cada recorrido real.
+test.afterEach(async ({ page }) => {
+  if (page.url() === 'about:blank') return;
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});

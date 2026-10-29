@@ -105,3 +105,13 @@ test('API real: carga, nuevas versiones inmutables, hash, descarga y conservaciÃ
     fullPage: true,
   });
 });
+
+// La regresiÃ³n transversal comprueba el viewport al terminar cada recorrido real.
+test.afterEach(async ({ page }) => {
+  if (page.url() === 'about:blank') return;
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});

@@ -117,3 +117,13 @@ test('API real: PDF con tildes, firma explícita, publicación persistente y adm
     ).status(),
   ).toBe(403);
 });
+
+// La regresión transversal comprueba el viewport al terminar cada recorrido real.
+test.afterEach(async ({ page }) => {
+  if (page.url() === 'about:blank') return;
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
