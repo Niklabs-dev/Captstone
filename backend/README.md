@@ -424,3 +424,10 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+### Consulta de reparto por local y período (SPRINT-3-T15)
+
+`GET /tip-pools?storeId=<uuid>&periodStart=YYYY-MM-DD&periodEnd=YYYY-MM-DD`
+consulta la foto guardada sin recalcular. Solo contador y administrador;
+responde una lista vacía o un reparto. Fechas inválidas o período invertido
+responden 400, otros roles 403. No cambia montos, versiones ni estados.
