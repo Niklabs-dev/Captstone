@@ -431,3 +431,12 @@ Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
 consulta la foto guardada sin recalcular. Solo contador y administrador;
 responde una lista vacía o un reparto. Fechas inválidas o período invertido
 responden 400, otros roles 403. No cambia montos, versiones ni estados.
+
+### Constancias propias de propinas (SPRINT-3-T16)
+
+`GET /my-tip-receipts` lista solo constancias propias de repartos PAID.
+`GET /my-tip-receipts/:id/download` descarga su PDF con SHA-256 en
+`X-Content-SHA256`. Ambas rutas son exclusivas del trabajador y fijan el
+usuario desde el JWT; no aceptan filtros de identidad. Ajena, inexistente
+o sin reparto pagado responde 404. Descarga auditada y sin caché. El PDF
+se genera desde el snapshot de T13, conservando el historial de local.

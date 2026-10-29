@@ -14,7 +14,8 @@ export interface NavigationItem {
     | '/propinas/diarias'
     | '/propinas/repartos'
     | '/portal/liquidaciones'
-    | '/portal/documentos';
+    | '/portal/documentos'
+    | '/portal/propinas';
   label: string;
 }
 
@@ -23,6 +24,7 @@ export function getNavigationView(pathname: string): {
   title: string;
 } {
   const views = [
+    { href: '/portal/propinas', title: 'Mis propinas' },
     { href: '/portal/documentos', title: 'Mis documentos' },
     { href: '/portal/liquidaciones', title: 'Mis liquidaciones' },
     { href: '/admin/documentos', title: 'Gestor documental' },
@@ -50,6 +52,7 @@ export function getNavigationItems(
   if (role === 'TRABAJADOR')
     return [
       { href: '/portal', label: 'Inicio' },
+      { href: '/portal/propinas', label: 'Mis propinas' },
       { href: '/portal/documentos', label: 'Mis documentos' },
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
     ];

@@ -250,3 +250,6 @@ Calidad: `npm run test:stores`, `npm run lint`, `npm run format:check`, `npm run
 ## Edición, reactivación y restablecimiento de usuarios (SPRINT-3-T05)
 
 `/admin/usuarios` permite editar cuentas activas e inactivas, reactivarlas con confirmación y restablecer la contraseña de otra cuenta con nueva clave y confirmación. Conectado a las API reales de T03/T04, sin mostrar credenciales actuales ni devolver hashes o tokens. Las asignaciones nuevas solo admiten locales activos y se protege el rol de la propia cuenta administradora. Contratos, política de contraseñas, revocación de sesiones y pruebas: [SPRINT-3-T05](docs/SPRINT-3-T05.md). `npm run test:users:real` ejecuta el recorrido con base exclusiva; el workflow de T05 conserva la evidencia de Docker y navegador en cuatro anchos.
+
+Constancias propias de propinas enteradas (SPRINT-3-T16):
+[guía de consulta y descarga](docs/SPRINT-3-T16.md).
