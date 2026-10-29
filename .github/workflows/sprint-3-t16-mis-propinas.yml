@@ -1,0 +1,102 @@
+name: Sprint 3 T16 - Mis constancias de propinas
+
+on:
+  push:
+    branches:
+      - codex/sprint-3-t16-mis-propinas
+    paths:
+      - ".github/workflows/sprint-3-t16-mis-propinas.yml"
+      - "Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sprint-3-t16-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: Calidad y constancias propias con API real
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+        working-directory: Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación
+    env:
+      COMPOSE_PROJECT_NAME: sprint3-t16-ci
+      COMPOSE_FILE: docker-compose.yml:docker-compose.override.yml
+      DB_PASSWORD: ci-disposable-password
+      ADMIN_PASSWORD: ci-admin-test-only-2026
+      TEST_REAL_ADMIN_EMAIL: admin@moi-food.cl
+      TEST_REAL_ADMIN_PASSWORD: ci-admin-test-only-2026
+      TEST_REAL_DISPOSABLE: "true"
+      TEST_REAL_FRONTEND_URL: http://127.0.0.1:3000
+      TEST_REAL_BACKEND_URL: http://127.0.0.1:3001
+      PLAYWRIGHT_JUNIT_OUTPUT_FILE: output/ci/my-tip-receipts.xml
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/package-lock.json
+      - name: Instalar dependencias y navegador
+        run: |
+          npm ci --prefix backend
+          cd frontend
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Calidad, regresiones y contrato HTTP
+        run: |
+          cd backend
+          npm run lint
+          npm run format:check
+          npm run build
+          npm test -- --testTimeout=30000
+          cd ../frontend
+          npm run lint
+          npm run format:check
+          npm run build
+          npx tsc -p tsconfig.test.json
+          node --test .test-build/{auth,users,audit,navigation,backend-proxy,display-date,documents,dt-alerts,payroll,my-payslips,my-documents,stores,tips,my-tip-receipts}.test.js
+          node --test .test-build/tips-http.integration.test.js
+      - name: Levantar sistema exclusivo con migraciones y seed
+        run: |
+          mkdir -p frontend/output/ci
+          docker compose up --build -d 2>&1 | tee frontend/output/ci/compose-build.log
+          for attempt in {1..90}; do
+            if curl --fail --silent http://127.0.0.1:3001/ >/dev/null && curl --fail --silent http://127.0.0.1:3000/login >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs --no-color
+          exit 1
+      - name: Probar registro, estados, permisos y móvil con API real
+        run: |
+          cd frontend
+          npm run test:my-tip-receipts:real -- --reporter=line,junit
+      - name: Guardar estado y logs
+        if: always()
+        run: |
+          mkdir -p frontend/output/ci
+          docker compose ps --all > frontend/output/ci/compose-status.txt
+          docker compose logs --no-color > frontend/output/ci/compose.log 2>&1
+      - name: Adjuntar resultados, capturas y trazas
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sprint-3-t16-propinas-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/output/ci
+            Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/output/playwright/my-tip-receipts
+      - name: Eliminar los recursos efímeros de este runner
+        if: always()
+        run: docker compose down --volumes --remove-orphans
