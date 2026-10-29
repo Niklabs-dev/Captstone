@@ -82,3 +82,13 @@ test('API real: tipos, registro persistente y conflicto al confirmar una revisiÃ
     fullPage: true,
   });
 });
+
+// La regresiÃ³n transversal comprueba el viewport al terminar cada recorrido real.
+test.afterEach(async ({ page }) => {
+  if (page.url() === 'about:blank') return;
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});

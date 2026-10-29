@@ -253,3 +253,5 @@ Calidad: `npm run test:stores`, `npm run lint`, `npm run format:check`, `npm run
 
 Constancias propias de propinas enteradas (SPRINT-3-T16):
 [guía de consulta y descarga](docs/SPRINT-3-T16.md).
+
+Regresión transversal responsive del sprint: [SPRINT-3-T08](docs/SPRINT-3-T08.md), mediante npm run test:responsive.
