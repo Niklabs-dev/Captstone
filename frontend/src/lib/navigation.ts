@@ -12,6 +12,7 @@ export interface NavigationItem {
     | '/admin/alertas-dt'
     | '/liquidaciones'
     | '/propinas/diarias'
+    | '/propinas/repartos'
     | '/portal/liquidaciones'
     | '/portal/documentos'
     | '/portal/propinas';
@@ -29,6 +30,7 @@ export function getNavigationView(pathname: string): {
     { href: '/admin/documentos', title: 'Gestor documental' },
     { href: '/admin/alertas-dt', title: 'Alertas de registro en la DT' },
     { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
+    { href: '/propinas/repartos', title: 'Reparto de propinas' },
     { href: '/propinas/diarias', title: 'Registro diario de propinas' },
     { href: '/dashboard', title: 'Inicio' },
     { href: '/admin/usuarios', title: 'Usuarios y roles' },
@@ -71,9 +73,14 @@ export function getNavigationItems(
         { href: '/admin/documentos', label: 'Documentos' },
         { href: '/admin/alertas-dt', label: 'Alertas DT' },
         { href: '/liquidaciones', label: 'Liquidaciones' },
+        { href: '/propinas/repartos', label: 'Reparto de propinas' },
       ]
     : role === 'CONTADOR'
-      ? [home, { href: '/liquidaciones', label: 'Liquidaciones' }]
+      ? [
+          home,
+          { href: '/liquidaciones', label: 'Liquidaciones' },
+          { href: '/propinas/repartos', label: 'Reparto de propinas' },
+        ]
       : [home];
 }
 
@@ -104,6 +111,13 @@ export function getPageRedirect(role: Role, pathname: string): string | null {
     (pathname === '/liquidaciones' || pathname.startsWith('/liquidaciones/')) &&
     role !== 'ADMINISTRADOR' &&
     role !== 'CONTADOR'
+  )
+    return '/dashboard?reason=forbidden';
+  if (
+    (pathname === '/propinas/repartos' ||
+      pathname.startsWith('/propinas/repartos/')) &&
+    role !== 'CONTADOR' &&
+    role !== 'ADMINISTRADOR'
   )
     return '/dashboard?reason=forbidden';
   const inAdmin = pathname === '/admin' || pathname.startsWith('/admin/');

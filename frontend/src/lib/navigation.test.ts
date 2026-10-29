@@ -41,6 +41,7 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
     { href: '/admin/documentos', label: 'Documentos' },
     { href: '/admin/alertas-dt', label: 'Alertas DT' },
     { href: '/liquidaciones', label: 'Liquidaciones' },
+    { href: '/propinas/repartos', label: 'Reparto de propinas' },
   ]);
 });
 
