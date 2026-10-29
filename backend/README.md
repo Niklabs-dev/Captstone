@@ -285,6 +285,37 @@ Las mutaciones generan `TIP_ENTRY_CREATED`, `TIP_ENTRY_UPDATED` y
 `TIP_ENTRY_DELETED` en auditoría. El detalle se limita a local, responsable,
 fecha, medio y monto, sin correo, nombre, RUT ni contraseña.
 
+## Alerta legal de entrega de propinas
+
+| Endpoint | Roles | Descripción |
+| --- | --- | --- |
+| `GET /tip-payment-alerts` | `CONTADOR`, `ADMINISTRADOR` | `{ items, calculatedAt }`: propinas con débito o crédito pendientes de entrega, con registro, local, reparto asociado (o `null`), `deadline`, `daysRemaining` y `status` `UPCOMING`/`OVERDUE`. Primero las vencidas y luego las de fecha límite más próxima. |
+
+Cada registro con tarjeta inicia su propio plazo en `businessDate`: la fecha
+límite es el séptimo día hábil posterior, excluyendo el día de recepción,
+sábados, domingos y feriados. La alerta incluye registros aún sin reparto y
+repartos `DRAFT` o `CONFIRMED`; desaparece cuando el reparto vinculado pasa a
+`PAID` y queda registrado el pago. No se almacena como una fila independiente.
+
+`daysRemaining` se calcula con la fecha de Chile (`America/Santiago`): es 0 en
+el día límite y negativo al vencer, descontando solo días hábiles. Si el plazo
+vence el viernes, el fin de semana siguiente ya figura `OVERDUE` con 0 días
+hábiles transcurridos. `calculatedAt` indica el instante de la consulta.
+
+El calendario se configura con `TIP_ALERT_HOLIDAYS`, una lista separada por
+comas de feriados chilenos `YYYY-MM-DD` (sin comillas), por ejemplo:
+
+```dotenv
+TIP_ALERT_HOLIDAYS=2026-01-01,2026-05-01,2026-09-18,2026-12-25
+```
+
+Debe contener **todos** los feriados aplicables y actualizarse cada año según
+el calendario oficial; el ejemplo es solo ilustrativo. Las fechas duplicadas se
+ignoran y una fecha inexistente o con otro formato impide iniciar el backend
+con un error de configuración. Un valor vacío calcula sin feriados. La variable
+está documentada en `.env.example` y se propaga al contenedor mediante
+`docker-compose.yml`.
+
 ## Documentación interactiva (Swagger / OpenAPI)
 
 La API genera su documentación OpenAPI con `@nestjs/swagger`:
