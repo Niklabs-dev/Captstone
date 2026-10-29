@@ -39,3 +39,16 @@ aprobadas. Las suites pueden ejecutarse individualmente con su configuración.
 La emulación usa Chromium; no acredita Safari ni teléfonos físicos.
 Notion requiere registrar el commit final y En revisión; no marcar Hecho sin
 confirmación del usuario.
+
+## Ejecución en vivo
+
+`npm run test:responsive:live` recorre la misma matriz abriendo Chromium
+visible en el escritorio. Requiere el sistema local levantado y las mismas
+variables y base exclusiva. No ejecutar mientras se compilan las imágenes:
+la carga adicional puede causar tiempos de espera en equipos con poca memoria.
+
+La comprobación de foco exige la clase focus-visible:outline-2, contorno sólido
+y anchura cercana a 2 px (menos de un píxel de diferencia). Chromium visible
+en Windows puede devolver 1,6 px por redondeo con la escala del escritorio;
+una comparación textual con 2px fallaba aunque el token era correcto. Se
+conservan la comprobación de foco activo y el mínimo táctil de 44 px.

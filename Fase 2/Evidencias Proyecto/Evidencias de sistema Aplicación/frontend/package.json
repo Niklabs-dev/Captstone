@@ -40,7 +40,8 @@
     "test:tip-pools:real": "playwright test --config playwright.tip-pools.config.ts",
     "test:my-tip-receipts": "tsc -p tsconfig.test.json && node --test .test-build/my-tip-receipts.test.js .test-build/navigation.test.js",
     "test:my-tip-receipts:real": "playwright test --config playwright.my-tip-receipts.config.ts",
-    "test:responsive": "node scripts/run-responsive.mjs"
+    "test:responsive": "node scripts/run-responsive.mjs",
+    "test:responsive:live": "node scripts/run-responsive.mjs --headed"
   },
   "dependencies": {
     "next": "16.3.6",

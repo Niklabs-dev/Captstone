@@ -81,11 +81,17 @@ test('Diseño compartido: radios, icono decorativo, sesión y recuperación pagi
   await page.keyboard.press('Tab');
   await firstPage.focus();
   await expect(firstPage).toBeFocused();
-  expect(
-    await firstPage.evaluate(
-      (element) => getComputedStyle(element).outlineWidth,
-    ),
-  ).toBe('2px');
+  await expect(firstPage).toHaveClass(/focus-visible:outline-2/);
+  const outline = await firstPage.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      width: Number.parseFloat(style.outlineWidth),
+      style: style.outlineStyle,
+    };
+  });
+  expect(outline.style).toBe('solid');
+  // Chromium visible en Windows puede redondear 2 px a 1,6 px por la escala del escritorio.
+  expect(Math.abs(outline.width - 2)).toBeLessThan(1);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

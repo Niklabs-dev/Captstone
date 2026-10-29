@@ -42,6 +42,7 @@ for (const suite of [
       '--config',
       'playwright.' + suite + '.config.ts',
       '--reporter=line,junit',
+      ...(process.argv.includes('--headed') ? ['--headed'] : []),
     ],
     {
       ...env,
