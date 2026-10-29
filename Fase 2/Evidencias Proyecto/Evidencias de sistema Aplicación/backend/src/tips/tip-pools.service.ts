@@ -325,6 +325,23 @@ export class TipPoolsService {
     }
   }
 
+  async findPeriod(
+    dto: PreviewTipPoolDto,
+    user: AuthUser,
+  ): Promise<TipPoolResponse[]> {
+    const period = this.parsePeriod(dto);
+    if (!canAccessStore(user, dto.storeId)) throw new ForbiddenException();
+    const pools = await this.prisma.tipPool.findMany({
+      where: {
+        storeId: dto.storeId,
+        periodStart: period.startDate,
+        periodEnd: period.endDate,
+      },
+      select: TIP_POOL_SELECT,
+    });
+    return pools.map(toTipPoolResponse);
+  }
+
   async findOne(id: string, currentUser: AuthUser): Promise<TipPoolResponse> {
     const pool = await this.prisma.tipPool.findUnique({
       where: { id },
