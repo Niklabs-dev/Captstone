@@ -121,6 +121,30 @@ export function StoresPanel(): ReactElement {
     setDialogError('');
     setAction(next);
   }
+  function renderActions(store: Store): ReactElement {
+    return (
+      <div className="flex flex-wrap gap-2">
+        <button
+          disabled={busy}
+          className={buttonClass}
+          aria-label={'Editar ' + store.name}
+          onClick={() => open({ kind: 'edit', store })}
+        >
+          Editar
+        </button>
+        <button
+          disabled={busy}
+          className={buttonClass}
+          aria-label={
+            (store.isActive ? 'Desactivar ' : 'Reactivar ') + store.name
+          }
+          onClick={() => open({ kind: 'state', store })}
+        >
+          {store.isActive ? 'Desactivar' : 'Reactivar'}
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="space-y-5" aria-busy={loading || busy}>
       <section aria-labelledby="stores-filters" className={filterPanelClass}>
@@ -201,14 +225,42 @@ export function StoresPanel(): ReactElement {
           </p>
         ) : (
           <>
-            <p className="border-b border-line px-4 py-3 text-xs text-ink2 lg:hidden">
-              Desliza la tabla para ver todas las columnas y acciones.
-            </p>
+            <ul
+              aria-label="Tarjetas de locales"
+              className="divide-y divide-line lg:hidden"
+            >
+              {visible.map((store) => (
+                <li key={store.id}>
+                  <article aria-label={store.name} className="space-y-4 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="text-base font-bold">{store.name}</h3>
+                        <p className="mt-1 text-sm text-ink2 wrap-anywhere">
+                          {store.city} · {store.address}
+                        </p>
+                      </div>
+                      <span
+                        className={
+                          badgeClass +
+                          ' shrink-0 ' +
+                          (store.isActive
+                            ? 'bg-ok-bg text-ok'
+                            : 'bg-crit-bg text-crit')
+                        }
+                      >
+                        {store.isActive ? 'Activo' : 'Inactivo'}
+                      </span>
+                    </div>
+                    {renderActions(store)}
+                  </article>
+                </li>
+              ))}
+            </ul>
             <div
               role="region"
               aria-label="Tabla de locales desplazable"
               tabIndex={0}
-              className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-salmon-ink"
+              className="hidden min-w-0 max-w-full overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-salmon-ink lg:block"
             >
               <table className={`${tableClass} min-w-[640px]`}>
                 <caption className="sr-only">
@@ -253,29 +305,7 @@ export function StoresPanel(): ReactElement {
                           {store.isActive ? 'Activo' : 'Inactivo'}
                         </span>
                       </td>
-                      <td className={tableCellClass}>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            disabled={busy}
-                            className={buttonClass}
-                            aria-label={'Editar ' + store.name}
-                            onClick={() => open({ kind: 'edit', store })}
-                          >
-                            Editar
-                          </button>
-                          <button
-                            disabled={busy}
-                            className={buttonClass}
-                            aria-label={
-                              (store.isActive ? 'Desactivar ' : 'Reactivar ') +
-                              store.name
-                            }
-                            onClick={() => open({ kind: 'state', store })}
-                          >
-                            {store.isActive ? 'Desactivar' : 'Reactivar'}
-                          </button>
-                        </div>
-                      </td>
+                      <td className={tableCellClass}>{renderActions(store)}</td>
                     </tr>
                   ))}
                 </tbody>
