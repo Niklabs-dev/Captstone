@@ -1,9 +1,9 @@
-import { buttonClass } from '@/components/ui/styles';
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
 import type { ReactElement } from 'react';
 import { getSession } from '@/lib/session';
 import { getPageRedirect } from '@/lib/navigation';
+import { OperationsHome } from '@/components/OperationsHome';
+
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -18,91 +18,10 @@ export default async function DashboardPage({
   if (destination) redirect(destination);
   const params = await searchParams;
   return (
-    <>
-      <section className="max-w-3xl rounded-[14px] border border-line bg-bg p-6">
-        <h2 className="mb-3 text-xl font-bold">Bienvenido al sistema</h2>
-        {params.reason === 'forbidden' && (
-          <p
-            role="status"
-            className="mb-5 rounded-xl border border-line2 bg-tint2 p-4 text-sm text-ink2"
-          >
-            Tu cuenta no tiene acceso a la página solicitada. Te redirigimos al
-            inicio, donde puedes continuar con las funciones de tu rol.
-          </p>
-        )}
-        <p className="mb-6 text-ink2">
-          Sesión iniciada como {session.data.email}.
-        </p>
-        {session.data.role === 'SUPERVISOR' && (
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/propinas/diarias"
-              prefetch={false}
-              className={buttonClass}
-            >
-              Registrar propinas
-            </Link>
-            <Link
-              href="/portal/documentos"
-              prefetch={false}
-              className={buttonClass}
-            >
-              Mis documentos
-            </Link>
-            <Link
-              href="/portal/liquidaciones"
-              prefetch={false}
-              className={buttonClass}
-            >
-              Mis liquidaciones
-            </Link>
-          </div>
-        )}
-        {session.data.role === 'ADMINISTRADOR' && (
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/admin/usuarios"
-              prefetch={false}
-              className={buttonClass}
-            >
-              Gestionar usuarios
-            </Link>
-            <Link
-              href="/admin/locales"
-              prefetch={false}
-              className={buttonClass}
-            >
-              Gestionar locales
-            </Link>
-            <Link
-              href="/admin/auditoria"
-              prefetch={false}
-              className={buttonClass}
-            >
-              Consultar auditoría
-            </Link>
-          </div>
-        )}
-        {session.data.role === 'ADMINISTRADOR' && (
-          <Link
-            href="/admin/alertas-dt"
-            prefetch={false}
-            className={`${buttonClass} mt-4`}
-          >
-            Abrir alertas DT
-          </Link>
-        )}
-        {(session.data.role === 'ADMINISTRADOR' ||
-          session.data.role === 'CONTADOR') && (
-          <Link
-            href="/liquidaciones"
-            prefetch={false}
-            className={`${buttonClass} mt-4`}
-          >
-            Abrir liquidaciones
-          </Link>
-        )}
-      </section>
-    </>
+    <OperationsHome
+      role={session.data.role}
+      email={session.data.email}
+      forbidden={params.reason === 'forbidden'}
+    />
   );
 }

@@ -1,6 +1,6 @@
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { openNavigation } from '../helpers/navigation';
+import { openNavigation, getNavigationSurface } from '../helpers/navigation';
 import type { Store } from '../../src/lib/stores';
 test.skip(
   process.env.TEST_REAL_DISPOSABLE !== 'true',
@@ -45,8 +45,13 @@ test('CRUD real, catálogo completo en Documentos, Usuarios y Auditoría, inacti
   ).toHaveCount(1);
   await openNavigation(page);
   await expect(
-    page.getByRole('link', { name: 'Locales', exact: true }),
+    getNavigationSurface(page).getByRole('link', {
+      name: 'Locales',
+      exact: true,
+    }),
   ).toBeVisible();
+  if (await page.getByRole('dialog', { name: 'Todos los módulos' }).isVisible())
+    await page.keyboard.press('Escape');
   await assertNoOverflow(page);
   const create = page.getByRole('button', { name: 'Crear local', exact: true });
   await create.click();
@@ -117,6 +122,11 @@ test('CRUD real, catálogo completo en Documentos, Usuarios y Auditoría, inacti
     fullPage: true,
   });
   await page.goto('/admin/usuarios');
+  const advancedFilters = page.getByRole('button', {
+    name: 'Más filtros',
+    exact: true,
+  });
+  if (await advancedFilters.isVisible()) await advancedFilters.click();
   await expect(
     page
       .getByRole('combobox', { name: 'Local', exact: true })
@@ -189,9 +199,17 @@ test('CRUD real, catálogo completo en Documentos, Usuarios y Auditoría, inacti
   await dialog.getByRole('button', { name: 'Confirmar desactivación' }).click();
   await expect(dialog).not.toBeVisible();
   await expect(
-    page.getByRole('row').filter({ hasText: updatedName }),
+    page
+      .getByRole('row')
+      .filter({ hasText: updatedName })
+      .or(page.getByRole('article', { name: updatedName, exact: true })),
   ).toContainText('Inactivo');
   await page.goto('/admin/usuarios');
+  const advancedFilters = page.getByRole('button', {
+    name: 'Más filtros',
+    exact: true,
+  });
+  if (await advancedFilters.isVisible()) await advancedFilters.click();
   await expect(
     page
       .getByRole('combobox', { name: 'Local', exact: true })
@@ -247,7 +265,12 @@ test('CRUD real, catálogo completo en Documentos, Usuarios y Auditoría, inacti
   await dialog.getByRole('button', { name: 'Confirmar reactivación' }).click();
   await expect(dialog).not.toBeVisible();
   await page.getByLabel('Buscar local').fill(updatedName);
-  await expect(page.locator('tbody').getByRole('row')).toHaveCount(1);
+  await expect(
+    page
+      .locator('tbody')
+      .getByRole('row')
+      .or(page.getByRole('article', { name: updatedName, exact: true })),
+  ).toHaveCount(1);
   await assertNoOverflow(page);
   await page.screenshot({
     path: info.outputPath('locales-crud-real.png'),

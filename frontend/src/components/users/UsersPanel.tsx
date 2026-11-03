@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState, type ReactElement } from 'react';
+import { useId, useMemo, useState, type ReactElement } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStoreOptions } from '@/lib/use-store-options';
 import {
@@ -18,6 +18,7 @@ import { CreateUserForm } from './CreateUserForm';
 import { EditUserForm } from './EditUserForm';
 import { ResetPasswordForm } from './ResetPasswordForm';
 import { UserDialog } from './UserDialog';
+import { Icon } from '@/components/ui/Icon';
 import {
   primaryButtonClass,
   dialogActionsClass,
@@ -49,6 +50,8 @@ export function UsersPanel({
   stores: StoreOption[];
 }): ReactElement {
   const router = useRouter();
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const filtersId = useId();
   const {
     stores,
     catalogError,
@@ -240,6 +243,63 @@ export function UsersPanel({
       setBusy(false);
     }
   }
+  function renderActions(user: ManagedUser): ReactElement {
+    return (
+      <div className="flex flex-wrap gap-2">
+        <button
+          className={buttonClass}
+          disabled={busy}
+          aria-label={`Editar a ${user.firstName} ${user.lastName}`}
+          onClick={() => {
+            setEditing(user);
+            setDialogError('');
+          }}
+        >
+          Editar
+        </button>
+        {user.id !== currentUserId && (
+          <button
+            className={buttonClass}
+            disabled={busy}
+            aria-label={`Restablecer contraseña de ${user.firstName} ${user.lastName}`}
+            onClick={() => {
+              setResetting(user);
+              setDialogError('');
+            }}
+          >
+            Restablecer contraseña
+          </button>
+        )}
+        {user.id === currentUserId ? (
+          <span className="text-xs text-ink2">Tu cuenta</span>
+        ) : user.isActive ? (
+          <button
+            className={buttonClass}
+            disabled={busy}
+            aria-label={`Desactivar a ${user.firstName} ${user.lastName}`}
+            onClick={() => {
+              setTarget(user);
+              setDialogError('');
+            }}
+          >
+            Desactivar
+          </button>
+        ) : (
+          <button
+            className={buttonClass}
+            disabled={busy}
+            aria-label={`Reactivar a ${user.firstName} ${user.lastName}`}
+            onClick={() => {
+              setReactivating(user);
+              setDialogError('');
+            }}
+          >
+            Reactivar
+          </button>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="space-y-5" aria-busy={busy}>
       <p className={introClass}>
@@ -249,9 +309,23 @@ export function UsersPanel({
         className={filterPanelClass}
         aria-labelledby="users-filter-title"
       >
-        <h2 id="users-filter-title" className={panelTitleClass}>
-          Filtrar usuarios
-        </h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 id="users-filter-title" className={panelTitleClass}>
+            Filtrar usuarios
+          </h2>
+          <button
+            type="button"
+            className={buttonClass + ' lg:hidden'}
+            aria-expanded={filtersExpanded}
+            aria-controls={filtersId}
+            onClick={() => setFiltersExpanded((value) => !value)}
+          >
+            {filtersExpanded ? 'Menos filtros' : 'Más filtros'}
+            {[role, active, storeId].filter(Boolean).length > 0 && (
+              <span>({[role, active, storeId].filter(Boolean).length})</span>
+            )}
+          </button>
+        </div>
         <div className="mt-4 grid items-end gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))]">
           <label className={`${labelClass} min-w-0 space-y-2`}>
             <span>Buscar usuario</span>
@@ -262,49 +336,57 @@ export function UsersPanel({
               className={inputClass}
             />
           </label>
-          <label className={`${labelClass} min-w-0 space-y-2`}>
-            <span>Rol</span>
-            <select
-              value={role}
-              onChange={(event) => setRole(event.target.value)}
-              className={inputClass}
-            >
-              <option value="">Todos los roles</option>
-              {USER_ROLES.map((code) => (
-                <option key={code} value={code}>
-                  {ROLE_LABELS[code]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={`${labelClass} min-w-0 space-y-2`}>
-            <span>Estado</span>
-            <select
-              value={active}
-              onChange={(event) => setActive(event.target.value)}
-              className={inputClass}
-            >
-              <option value="">Todos</option>
-              <option value="true">Activos</option>
-              <option value="false">Desactivados</option>
-            </select>
-          </label>
-          <label className={`${labelClass} min-w-0 space-y-2`}>
-            <span>Local</span>
-            <select
-              value={storeId}
-              onChange={(event) => setStoreId(event.target.value)}
-              className={inputClass}
-            >
-              <option value="">Todos los locales</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                  {store.isActive === false ? ' (inactivo)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div
+            id={filtersId}
+            className={
+              (filtersExpanded ? 'contents' : 'hidden') + ' lg:contents'
+            }
+          >
+            {' '}
+            <label className={`${labelClass} min-w-0 space-y-2`}>
+              <span>Rol</span>
+              <select
+                value={role}
+                onChange={(event) => setRole(event.target.value)}
+                className={inputClass}
+              >
+                <option value="">Todos los roles</option>
+                {USER_ROLES.map((code) => (
+                  <option key={code} value={code}>
+                    {ROLE_LABELS[code]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={`${labelClass} min-w-0 space-y-2`}>
+              <span>Estado</span>
+              <select
+                value={active}
+                onChange={(event) => setActive(event.target.value)}
+                className={inputClass}
+              >
+                <option value="">Todos</option>
+                <option value="true">Activos</option>
+                <option value="false">Desactivados</option>
+              </select>
+            </label>
+            <label className={`${labelClass} min-w-0 space-y-2`}>
+              <span>Local</span>
+              <select
+                value={storeId}
+                onChange={(event) => setStoreId(event.target.value)}
+                className={inputClass}
+              >
+                <option value="">Todos los locales</option>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                    {store.isActive === false ? ' (inactivo)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>{' '}
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           <button onClick={reload} disabled={busy} className={buttonClass}>
@@ -331,7 +413,7 @@ export function UsersPanel({
             }}
             className={primaryButtonClass}
           >
-            ＋ Crear usuario
+            <Icon name="plus" /> Crear usuario
           </button>
         </div>
       </section>
@@ -357,14 +439,61 @@ export function UsersPanel({
             </p>
           </div>
         </div>
-        <p className="border-b border-line px-4 py-3 text-xs text-ink2 lg:hidden">
-          Desliza la tabla para ver todas las columnas y acciones.
-        </p>
+        <ul
+          aria-label="Tarjetas de usuarios"
+          className="divide-y divide-line lg:hidden"
+        >
+          {visible.map((user) => (
+            <li key={user.id}>
+              <article
+                aria-label={user.firstName + ' ' + user.lastName}
+                className="space-y-4 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-bold">
+                      {user.firstName} {user.lastName}
+                    </h3>
+                    <p className="mt-1 text-xs text-muted wrap-anywhere">
+                      {user.email}
+                    </p>
+                  </div>
+                  <span
+                    className={
+                      badgeClass +
+                      ' shrink-0 ' +
+                      (user.isActive
+                        ? 'bg-ok-bg text-ok'
+                        : 'bg-crit-bg text-crit')
+                    }
+                  >
+                    {user.isActive ? 'Activo' : 'Desactivado'}
+                  </span>
+                </div>
+                <dl className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <dt className="text-muted">Rol</dt>
+                    <dd className="mt-1 font-semibold">
+                      {ROLE_LABELS[user.role.code]}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted">Local</dt>
+                    <dd className="mt-1 font-semibold">
+                      {user.store?.name ?? 'Todos los locales'}
+                    </dd>
+                  </div>
+                </dl>
+                {renderActions(user)}
+              </article>
+            </li>
+          ))}
+        </ul>
         <div
           role="region"
           aria-label="Tabla de usuarios desplazable"
           tabIndex={0}
-          className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-salmon-ink"
+          className="hidden min-w-0 max-w-full overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-salmon-ink lg:block"
         >
           <table className={`${tableClass} min-w-[640px]`}>
             <caption className="sr-only">
@@ -416,61 +545,7 @@ export function UsersPanel({
                       {user.isActive ? 'Activo' : 'Desactivado'}
                     </span>
                   </td>
-                  <td className={tableCellClass}>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        className={buttonClass}
-                        disabled={busy}
-                        aria-label={`Editar a ${user.firstName} ${user.lastName}`}
-                        onClick={() => {
-                          setEditing(user);
-                          setDialogError('');
-                        }}
-                      >
-                        Editar
-                      </button>
-                      {user.id !== currentUserId && (
-                        <button
-                          className={buttonClass}
-                          disabled={busy}
-                          aria-label={`Restablecer contraseña de ${user.firstName} ${user.lastName}`}
-                          onClick={() => {
-                            setResetting(user);
-                            setDialogError('');
-                          }}
-                        >
-                          Restablecer contraseña
-                        </button>
-                      )}
-                      {user.id === currentUserId ? (
-                        <span className="text-xs text-ink2">Tu cuenta</span>
-                      ) : user.isActive ? (
-                        <button
-                          className={buttonClass}
-                          disabled={busy}
-                          aria-label={`Desactivar a ${user.firstName} ${user.lastName}`}
-                          onClick={() => {
-                            setTarget(user);
-                            setDialogError('');
-                          }}
-                        >
-                          Desactivar
-                        </button>
-                      ) : (
-                        <button
-                          className={buttonClass}
-                          disabled={busy}
-                          aria-label={`Reactivar a ${user.firstName} ${user.lastName}`}
-                          onClick={() => {
-                            setReactivating(user);
-                            setDialogError('');
-                          }}
-                        >
-                          Reactivar
-                        </button>
-                      )}
-                    </div>
-                  </td>
+                  <td className={tableCellClass}>{renderActions(user)}</td>
                 </tr>
               ))}
             </tbody>

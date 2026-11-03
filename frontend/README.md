@@ -253,3 +253,5 @@ Calidad: `npm run test:stores`, `npm run lint`, `npm run format:check`, `npm run
 
 Constancias propias de propinas enteradas (SPRINT-3-T16):
 [guía de consulta y descarga](docs/SPRINT-3-T16.md).
+
+Diseño móvil del Sprint 4: [dirección y verificación](docs/SPRINT-4-DISENO-MOVIL.md). Prueba de navegador: npm run test:mobile-design -- --headed.
