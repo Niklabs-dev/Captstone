@@ -26,6 +26,8 @@
   --color-ok-bg: #e9f6f0;
   --color-info: #35669f;
   --color-info-bg: #ecf2fa;
+  --color-mobile-ground: #faf8f6;
+  --shadow-dock: 0 8px 32px -8px #2e232030;
 }
 
 body {
@@ -36,4 +38,49 @@ body {
 
 ::selection {
   background: var(--color-tint3);
+}
+
+/* La barra flotante y el menú respetan las áreas seguras del dispositivo. */
+@media (width < 64rem) {
+  body {
+    background: var(--color-mobile-ground);
+  }
+  .application-content {
+    background: var(--color-mobile-ground);
+    padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
+  }
+  html {
+    scroll-padding-block: 6rem calc(8rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.mobile-dock {
+  position: fixed;
+  z-index: 30;
+  inset-inline: max(0.75rem, env(safe-area-inset-left, 0px))
+    max(0.75rem, env(safe-area-inset-right, 0px));
+  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  padding: 0.5rem;
+  border-radius: 1rem;
+  background: var(--color-bg);
+  box-shadow: var(--shadow-dock);
+}
+
+.mobile-menu {
+  position: fixed;
+  inset: auto 0 0;
+  margin: 0 auto;
+  width: 100%;
+  max-width: 36rem;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 0;
+  border-radius: 1rem 1rem 0 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--color-bg);
+  color: var(--color-ink);
+}
+.mobile-menu::backdrop {
+  background: color-mix(in srgb, var(--color-ink) 35%, transparent);
 }
