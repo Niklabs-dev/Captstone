@@ -80,7 +80,11 @@ test('CRUD real, catálogo completo en Documentos, Usuarios y Auditoría, inacti
   expect(created).toBeDefined();
   if (!created) throw Error('Local no persistido');
   await page.reload();
-  await expect(page.getByRole('cell', { name, exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole('cell', { name, exact: true })
+      .or(page.getByRole('article', { name, exact: true })),
+  ).toBeVisible();
   // El mismo nombre se rechaza; no basta con recargar y reintentar.
   await create.click();
   dialog = page.getByRole('dialog', { name: 'Crear local' });
@@ -205,10 +209,6 @@ test('CRUD real, catálogo completo en Documentos, Usuarios y Auditoría, inacti
       .or(page.getByRole('article', { name: updatedName, exact: true })),
   ).toContainText('Inactivo');
   await page.goto('/admin/usuarios');
-  const advancedFilters = page.getByRole('button', {
-    name: 'Más filtros',
-    exact: true,
-  });
   if (await advancedFilters.isVisible()) await advancedFilters.click();
   await expect(
     page
