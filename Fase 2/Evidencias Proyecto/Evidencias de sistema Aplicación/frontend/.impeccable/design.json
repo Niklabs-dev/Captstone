@@ -1,0 +1,499 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-03T01:58:45.583233Z",
+  "title": "Design System: MoiFood",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Blanco de superficie",
+        "tonalRamp": [
+          "oklch(15% 0.0000 0.00)",
+          "oklch(26.43% 0.0000 0.00)",
+          "oklch(37.86% 0.0000 0.00)",
+          "oklch(49.29% 0.0000 0.00)",
+          "oklch(60.71% 0.0000 0.00)",
+          "oklch(72.14% 0.0000 0.00)",
+          "oklch(83.57% 0.0000 0.00)",
+          "oklch(95% 0.0000 0.00)"
+        ]
+      },
+      "tint": {
+        "role": "neutral",
+        "displayName": "Fondo cálido de escritorio",
+        "tonalRamp": [
+          "oklch(15% 0.0127 48.59)",
+          "oklch(26.43% 0.0127 48.59)",
+          "oklch(37.86% 0.0127 48.59)",
+          "oklch(49.29% 0.0127 48.59)",
+          "oklch(60.71% 0.0127 48.59)",
+          "oklch(72.14% 0.0127 48.59)",
+          "oklch(83.57% 0.0127 48.59)",
+          "oklch(95% 0.0127 48.59)"
+        ]
+      },
+      "tint2": {
+        "role": "primary",
+        "displayName": "Salmón suave seleccionado",
+        "tonalRamp": [
+          "oklch(15% 0.0248 49.75)",
+          "oklch(26.43% 0.0248 49.75)",
+          "oklch(37.86% 0.0248 49.75)",
+          "oklch(49.29% 0.0248 49.75)",
+          "oklch(60.71% 0.0248 49.75)",
+          "oklch(72.14% 0.0248 49.75)",
+          "oklch(83.57% 0.0248 49.75)",
+          "oklch(95% 0.0248 49.75)"
+        ]
+      },
+      "tint3": {
+        "role": "primary",
+        "displayName": "Salmón de selección",
+        "tonalRamp": [
+          "oklch(15% 0.0396 52.35)",
+          "oklch(26.43% 0.0396 52.35)",
+          "oklch(37.86% 0.0396 52.35)",
+          "oklch(49.29% 0.0396 52.35)",
+          "oklch(60.71% 0.0396 52.35)",
+          "oklch(72.14% 0.0396 52.35)",
+          "oklch(83.57% 0.0396 52.35)",
+          "oklch(95% 0.0396 52.35)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Borde cálido suave",
+        "tonalRamp": [
+          "oklch(15% 0.0204 53.25)",
+          "oklch(26.43% 0.0204 53.25)",
+          "oklch(37.86% 0.0204 53.25)",
+          "oklch(49.29% 0.0204 53.25)",
+          "oklch(60.71% 0.0204 53.25)",
+          "oklch(72.14% 0.0204 53.25)",
+          "oklch(83.57% 0.0204 53.25)",
+          "oklch(95% 0.0204 53.25)"
+        ]
+      },
+      "line2": {
+        "role": "neutral",
+        "displayName": "Borde cálido de controles",
+        "tonalRamp": [
+          "oklch(15% 0.0286 51.81)",
+          "oklch(26.43% 0.0286 51.81)",
+          "oklch(37.86% 0.0286 51.81)",
+          "oklch(49.29% 0.0286 51.81)",
+          "oklch(60.71% 0.0286 51.81)",
+          "oklch(72.14% 0.0286 51.81)",
+          "oklch(83.57% 0.0286 51.81)",
+          "oklch(95% 0.0286 51.81)"
+        ]
+      },
+      "salmon": {
+        "role": "primary",
+        "displayName": "Salmón MoiFood",
+        "tonalRamp": [
+          "oklch(15% 0.1579 45.50)",
+          "oklch(26.43% 0.1579 45.50)",
+          "oklch(37.86% 0.1579 45.50)",
+          "oklch(49.29% 0.1579 45.50)",
+          "oklch(60.71% 0.1579 45.50)",
+          "oklch(72.14% 0.1579 45.50)",
+          "oklch(83.57% 0.1579 45.50)",
+          "oklch(95% 0.1579 45.50)"
+        ]
+      },
+      "salmon-deep": {
+        "role": "primary",
+        "displayName": "Salmón profundo",
+        "tonalRamp": [
+          "oklch(15% 0.1675 44.18)",
+          "oklch(26.43% 0.1675 44.18)",
+          "oklch(37.86% 0.1675 44.18)",
+          "oklch(49.29% 0.1675 44.18)",
+          "oklch(60.71% 0.1675 44.18)",
+          "oklch(72.14% 0.1675 44.18)",
+          "oklch(83.57% 0.1675 44.18)",
+          "oklch(95% 0.1675 44.18)"
+        ]
+      },
+      "salmon-ink": {
+        "role": "primary",
+        "displayName": "Naranja de texto y foco",
+        "tonalRamp": [
+          "oklch(15% 0.1460 43.44)",
+          "oklch(26.43% 0.1460 43.44)",
+          "oklch(37.86% 0.1460 43.44)",
+          "oklch(49.29% 0.1460 43.44)",
+          "oklch(60.71% 0.1460 43.44)",
+          "oklch(72.14% 0.1460 43.44)",
+          "oklch(83.57% 0.1460 43.44)",
+          "oklch(95% 0.1460 43.44)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Tinta principal",
+        "tonalRamp": [
+          "oklch(15% 0.0178 35.74)",
+          "oklch(26.43% 0.0178 35.74)",
+          "oklch(37.86% 0.0178 35.74)",
+          "oklch(49.29% 0.0178 35.74)",
+          "oklch(60.71% 0.0178 35.74)",
+          "oklch(72.14% 0.0178 35.74)",
+          "oklch(83.57% 0.0178 35.74)",
+          "oklch(95% 0.0178 35.74)"
+        ]
+      },
+      "ink2": {
+        "role": "neutral",
+        "displayName": "Tinta secundaria",
+        "tonalRamp": [
+          "oklch(15% 0.0286 48.03)",
+          "oklch(26.43% 0.0286 48.03)",
+          "oklch(37.86% 0.0286 48.03)",
+          "oklch(49.29% 0.0286 48.03)",
+          "oklch(60.71% 0.0286 48.03)",
+          "oklch(72.14% 0.0286 48.03)",
+          "oklch(83.57% 0.0286 48.03)",
+          "oklch(95% 0.0286 48.03)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Tinta de metadatos",
+        "tonalRamp": [
+          "oklch(15% 0.0281 40.22)",
+          "oklch(26.43% 0.0281 40.22)",
+          "oklch(37.86% 0.0281 40.22)",
+          "oklch(49.29% 0.0281 40.22)",
+          "oklch(60.71% 0.0281 40.22)",
+          "oklch(72.14% 0.0281 40.22)",
+          "oklch(83.57% 0.0281 40.22)",
+          "oklch(95% 0.0281 40.22)"
+        ]
+      },
+      "warn": {
+        "role": "semantic",
+        "displayName": "Advertencia",
+        "tonalRamp": [
+          "oklch(15% 0.1038 66.14)",
+          "oklch(26.43% 0.1038 66.14)",
+          "oklch(37.86% 0.1038 66.14)",
+          "oklch(49.29% 0.1038 66.14)",
+          "oklch(60.71% 0.1038 66.14)",
+          "oklch(72.14% 0.1038 66.14)",
+          "oklch(83.57% 0.1038 66.14)",
+          "oklch(95% 0.1038 66.14)"
+        ]
+      },
+      "warn-bg": {
+        "role": "semantic",
+        "displayName": "Fondo de advertencia",
+        "tonalRamp": [
+          "oklch(15% 0.0237 79.74)",
+          "oklch(26.43% 0.0237 79.74)",
+          "oklch(37.86% 0.0237 79.74)",
+          "oklch(49.29% 0.0237 79.74)",
+          "oklch(60.71% 0.0237 79.74)",
+          "oklch(72.14% 0.0237 79.74)",
+          "oklch(83.57% 0.0237 79.74)",
+          "oklch(95% 0.0237 79.74)"
+        ]
+      },
+      "crit": {
+        "role": "semantic",
+        "displayName": "Crítico",
+        "tonalRamp": [
+          "oklch(15% 0.1624 29.58)",
+          "oklch(26.43% 0.1624 29.58)",
+          "oklch(37.86% 0.1624 29.58)",
+          "oklch(49.29% 0.1624 29.58)",
+          "oklch(60.71% 0.1624 29.58)",
+          "oklch(72.14% 0.1624 29.58)",
+          "oklch(83.57% 0.1624 29.58)",
+          "oklch(95% 0.1624 29.58)"
+        ]
+      },
+      "crit-bg": {
+        "role": "semantic",
+        "displayName": "Fondo crítico",
+        "tonalRamp": [
+          "oklch(15% 0.0179 30.27)",
+          "oklch(26.43% 0.0179 30.27)",
+          "oklch(37.86% 0.0179 30.27)",
+          "oklch(49.29% 0.0179 30.27)",
+          "oklch(60.71% 0.0179 30.27)",
+          "oklch(72.14% 0.0179 30.27)",
+          "oklch(83.57% 0.0179 30.27)",
+          "oklch(95% 0.0179 30.27)"
+        ]
+      },
+      "ok": {
+        "role": "semantic",
+        "displayName": "Confirmación",
+        "tonalRamp": [
+          "oklch(15% 0.1010 160.90)",
+          "oklch(26.43% 0.1010 160.90)",
+          "oklch(37.86% 0.1010 160.90)",
+          "oklch(49.29% 0.1010 160.90)",
+          "oklch(60.71% 0.1010 160.90)",
+          "oklch(72.14% 0.1010 160.90)",
+          "oklch(83.57% 0.1010 160.90)",
+          "oklch(95% 0.1010 160.90)"
+        ]
+      },
+      "ok-bg": {
+        "role": "semantic",
+        "displayName": "Fondo de confirmación",
+        "tonalRamp": [
+          "oklch(15% 0.0158 166.73)",
+          "oklch(26.43% 0.0158 166.73)",
+          "oklch(37.86% 0.0158 166.73)",
+          "oklch(49.29% 0.0158 166.73)",
+          "oklch(60.71% 0.0158 166.73)",
+          "oklch(72.14% 0.0158 166.73)",
+          "oklch(83.57% 0.0158 166.73)",
+          "oklch(95% 0.0158 166.73)"
+        ]
+      },
+      "info": {
+        "role": "semantic",
+        "displayName": "Información",
+        "tonalRamp": [
+          "oklch(15% 0.1058 253.64)",
+          "oklch(26.43% 0.1058 253.64)",
+          "oklch(37.86% 0.1058 253.64)",
+          "oklch(49.29% 0.1058 253.64)",
+          "oklch(60.71% 0.1058 253.64)",
+          "oklch(72.14% 0.1058 253.64)",
+          "oklch(83.57% 0.1058 253.64)",
+          "oklch(95% 0.1058 253.64)"
+        ]
+      },
+      "info-bg": {
+        "role": "semantic",
+        "displayName": "Fondo de información",
+        "tonalRamp": [
+          "oklch(15% 0.0125 255.51)",
+          "oklch(26.43% 0.0125 255.51)",
+          "oklch(37.86% 0.0125 255.51)",
+          "oklch(49.29% 0.0125 255.51)",
+          "oklch(60.71% 0.0125 255.51)",
+          "oklch(72.14% 0.0125 255.51)",
+          "oklch(83.57% 0.0125 255.51)",
+          "oklch(95% 0.0125 255.51)"
+        ]
+      },
+      "mobile-ground": {
+        "role": "neutral",
+        "displayName": "Fondo neutro móvil",
+        "tonalRamp": [
+          "oklch(15% 0.0034 67.78)",
+          "oklch(26.43% 0.0034 67.78)",
+          "oklch(37.86% 0.0034 67.78)",
+          "oklch(49.29% 0.0034 67.78)",
+          "oklch(60.71% 0.0034 67.78)",
+          "oklch(72.14% 0.0034 67.78)",
+          "oklch(83.57% 0.0034 67.78)",
+          "oklch(95% 0.0034 67.78)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Título de inicio",
+        "purpose": "Bienvenida y tarjeta de tarea."
+      },
+      "title": {
+        "displayName": "Título de vista",
+        "purpose": "Único h1 de ApplicationHeading."
+      },
+      "body": {
+        "displayName": "Cuerpo",
+        "purpose": "Texto operativo e introducciones."
+      },
+      "label": {
+        "displayName": "Etiqueta",
+        "purpose": "Etiquetas de controles y badges."
+      },
+      "table": {
+        "displayName": "Cuerpo de tabla",
+        "purpose": "Datos de listados en escritorio."
+      },
+      "table-heading": {
+        "displayName": "Encabezado técnico",
+        "purpose": "Encabezados de tabla en JetBrains Mono."
+      },
+      "dock-label": {
+        "displayName": "Etiqueta de barra",
+        "purpose": "Nombres cortos de navegación móvil."
+      }
+    },
+    "shadows": [
+      {
+        "name": "shadow-dock",
+        "value": "0 8px 32px -8px #2e232030",
+        "purpose": "Barra inferior flotante."
+      },
+      {
+        "name": "shadow-lg",
+        "value": "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+        "purpose": "Menú de sesión; valor de Tailwind instalado."
+      },
+      {
+        "name": "shadow-xl",
+        "value": "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
+        "purpose": "Diálogos; valor de Tailwind instalado."
+      }
+    ],
+    "motion": [
+      {
+        "name": "default-transition-duration",
+        "value": "150ms",
+        "purpose": "Transiciones compartidas de color."
+      },
+      {
+        "name": "default-transition-timing-function",
+        "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Curva de transición compartida de Tailwind."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "xl",
+        "value": "1280px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Botón primario",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Control compartido de al menos 44 px con foco visible y estado deshabilitado.",
+      "html": "<button type=\"button\" class=\"ds-button-primary\">Guardar usuario</button>",
+      "css": ".ds-button-primary{display:inline-flex;min-height:44px;min-width:44px;max-width:100%;align-items:center;justify-content:center;gap:8px;border:1px solid;border-radius:8px;padding:10px 16px;text-align:center;font-size:14px;line-height:20px;font-weight:600;overflow-wrap:anywhere;transition:color 150ms cubic-bezier(0.4,0,0.2,1),background-color 150ms cubic-bezier(0.4,0,0.2,1),border-color 150ms cubic-bezier(0.4,0,0.2,1);font-family:var(--font-inter),Arial,sans-serif;background:var(--color-salmon);border-color:var(--color-salmon);color:var(--color-ink);}.ds-button-primary:hover{background:var(--color-salmon-deep);border-color:var(--color-salmon-deep);}.ds-button-primary:focus-visible{outline:2px solid var(--color-salmon-ink);outline-offset:2px;}.ds-button-primary:disabled{cursor:not-allowed;opacity:.5;}"
+    },
+    {
+      "name": "Botón secundario",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Control compartido de al menos 44 px con foco visible y estado deshabilitado.",
+      "html": "<button type=\"button\" class=\"ds-button-secondary\">Actualizar</button>",
+      "css": ".ds-button-secondary{display:inline-flex;min-height:44px;min-width:44px;max-width:100%;align-items:center;justify-content:center;gap:8px;border:1px solid;border-radius:8px;padding:10px 16px;text-align:center;font-size:14px;line-height:20px;font-weight:600;overflow-wrap:anywhere;transition:color 150ms cubic-bezier(0.4,0,0.2,1),background-color 150ms cubic-bezier(0.4,0,0.2,1),border-color 150ms cubic-bezier(0.4,0,0.2,1);font-family:var(--font-inter),Arial,sans-serif;background:var(--color-bg);border-color:var(--color-line2);color:var(--color-salmon-ink);}.ds-button-secondary:hover{background:var(--color-tint);}.ds-button-secondary:focus-visible{outline:2px solid var(--color-salmon-ink);outline-offset:2px;}.ds-button-secondary:disabled{cursor:not-allowed;opacity:.5;}"
+    },
+    {
+      "name": "Botón destructivo",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Control compartido de al menos 44 px con foco visible y estado deshabilitado.",
+      "html": "<button type=\"button\" class=\"ds-button-danger\">Confirmar desactivación</button>",
+      "css": ".ds-button-danger{display:inline-flex;min-height:44px;min-width:44px;max-width:100%;align-items:center;justify-content:center;gap:8px;border:1px solid;border-radius:8px;padding:10px 16px;text-align:center;font-size:14px;line-height:20px;font-weight:600;overflow-wrap:anywhere;transition:color 150ms cubic-bezier(0.4,0,0.2,1),background-color 150ms cubic-bezier(0.4,0,0.2,1),border-color 150ms cubic-bezier(0.4,0,0.2,1);font-family:var(--font-inter),Arial,sans-serif;background:var(--color-crit);border-color:var(--color-crit);color:#fff;}.ds-button-danger:hover{background:color-mix(in srgb,var(--color-crit) 90%,transparent);}.ds-button-danger:focus-visible{outline:2px solid var(--color-salmon-ink);outline-offset:2px;}.ds-button-danger:disabled{cursor:not-allowed;opacity:.5;}"
+    },
+    {
+      "name": "Campo de búsqueda",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Etiqueta visible y control de 16 px en móvil; 14 px desde 640 px.",
+      "html": "<label class=\"ds-label\">Buscar usuario<input class=\"ds-input\" placeholder=\"Nombre o correo…\"></label>",
+      "css": ".ds-label{display:block;min-width:0;font-size:12px;font-weight:600;color:var(--color-ink2);font-family:var(--font-inter),Arial,sans-serif;}.ds-input{display:block;margin-top:8px;min-height:44px;width:100%;min-width:0;max-width:100%;border:1px solid var(--color-line2);border-radius:8px;background:var(--color-bg);padding:10px 12px;font-size:16px;line-height:20px;font-weight:400;color:var(--color-ink);outline:none;font-family:var(--font-inter),Arial,sans-serif;}.ds-input::placeholder{color:var(--color-muted);}.ds-input:focus-visible{outline:2px solid var(--color-salmon-ink);outline-offset:2px;}.ds-input:disabled{cursor:not-allowed;opacity:.6;}@media(min-width:640px){.ds-input{font-size:14px;}}"
+    },
+    {
+      "name": "Badge de estado",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "Estado textual en pareja semántica ok/ok-bg; no es un control interactivo.",
+      "html": "<span class=\"ds-badge\">Activo</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;border-radius:9999px;padding:4px 10px;font-size:12px;line-height:16px;font-weight:600;background:var(--color-ok-bg);color:var(--color-ok);font-family:var(--font-inter),Arial,sans-serif;}"
+    },
+    {
+      "name": "Panel de filtros",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Superficie plana con borde cálido, radio de 14 px y padding de 20 px.",
+      "html": "<section class=\"ds-panel\" aria-labelledby=\"ds-panel-title\"><h2 id=\"ds-panel-title\" class=\"ds-panel-title\">Filtrar usuarios</h2></section>",
+      "css": ".ds-panel{border:1px solid var(--color-line);border-radius:14px;background:var(--color-bg);padding:20px;color:var(--color-ink);font-family:var(--font-inter),Arial,sans-serif;}.ds-panel-title{margin:0;font-size:14px;line-height:20px;font-weight:700;}"
+    },
+    {
+      "name": "Barra móvil",
+      "kind": "nav",
+      "refersTo": "mobile-dock",
+      "description": "Hasta cinco plazas; el marco de vista previa contiene la posición fija. Más abre el diálogo nativo en la aplicación.",
+      "html": "<div class=\"ds-dock-preview\"><nav class=\"ds-dock\" aria-label=\"Navegación principal\"><div class=\"ds-dock-row\"><a class=\"ds-dock-item\" href=\"/dashboard\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" width=\"20\" height=\"20\"><path d=\"m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z\"/></svg><span>Inicio</span></a><a class=\"ds-dock-item\" href=\"/admin/usuarios\" aria-current=\"page\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" width=\"20\" height=\"20\"><path d=\"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z\"/></svg><span>Usuarios</span></a><a class=\"ds-dock-item\" href=\"/admin/locales\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" width=\"20\" height=\"20\"><path d=\"M3 10h18l-2-7H5l-2 7Zm1 0v11h16V10M9 21v-7h6v7M3 10a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0\"/></svg><span>Locales</span></a><a class=\"ds-dock-item\" href=\"/admin/documentos\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" width=\"20\" height=\"20\"><path d=\"M14 2H5v20h14V7l-5-5Zm0 0v6h5M8 12h8M8 16h6\"/></svg><span>Documentos</span></a><button type=\"button\" class=\"ds-dock-item\" aria-label=\"Menú principal\" aria-haspopup=\"dialog\" aria-expanded=\"false\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" width=\"20\" height=\"20\"><path d=\"M5 11v2M12 11v2M19 11v2\"/></svg><span>Más</span></button></div></nav></div>",
+      "css": ".ds-dock-preview{position:relative;transform:translate(0);min-height:112px;background:var(--color-mobile-ground);}.ds-dock{position:fixed;z-index:30;inset-inline:max(.75rem,env(safe-area-inset-left,0px)) max(.75rem,env(safe-area-inset-right,0px));bottom:calc(.75rem + env(safe-area-inset-bottom,0px));padding:8px;border-radius:16px;background:var(--color-bg);box-shadow:var(--shadow-dock);}.ds-dock-row{display:flex;align-items:stretch;justify-content:space-around;gap:4px;}.ds-dock-item{display:flex;min-height:56px;min-width:44px;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:0;border-radius:12px;padding:8px 4px;font-size:11px;line-height:16px;font-weight:600;text-decoration:none;background:transparent;color:var(--color-ink2);font-family:var(--font-inter),Arial,sans-serif;}.ds-dock-item:hover{background:var(--color-tint);}.ds-dock-item[aria-current=\"page\"]{background:var(--color-tint2);color:var(--color-salmon-ink);}.ds-dock-item:focus-visible{outline:2px solid var(--color-salmon-ink);outline-offset:2px;}"
+    },
+    {
+      "name": "Módulo del menú Más",
+      "kind": "nav",
+      "refersTo": "mobile-module",
+      "description": "Enlace de módulo con nombre completo dentro del diálogo Todos los módulos.",
+      "html": "<a class=\"ds-mobile-module\" href=\"/admin/documentos\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" width=\"20\" height=\"20\"><path d=\"M14 2H5v20h14V7l-5-5Zm0 0v6h5M8 12h8M8 16h6\"/></svg><span>Gestión documental</span></a>",
+      "css": ".ds-mobile-module{display:flex;min-height:96px;min-width:0;flex-direction:column;align-items:flex-start;justify-content:center;gap:12px;border-radius:14px;padding:16px;font-size:14px;line-height:20px;font-weight:600;overflow-wrap:anywhere;text-decoration:none;background:var(--color-tint);color:var(--color-ink2);font-family:var(--font-inter),Arial,sans-serif;}.ds-mobile-module:hover,.ds-mobile-module[aria-current=\"page\"]{background:var(--color-tint2);}.ds-mobile-module[aria-current=\"page\"]{color:var(--color-salmon-ink);}.ds-mobile-module:focus-visible{outline:2px solid var(--color-salmon-ink);outline-offset:2px;}"
+    },
+    {
+      "name": "Acceso rápido",
+      "kind": "custom",
+      "description": "Icono en módulo de 48 px y etiqueta; el enlace completo mantiene un objetivo mínimo de 80 px.",
+      "html": "<a href=\"/admin/locales\" class=\"ds-home-module\"><span class=\"ds-home-icon\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" width=\"20\" height=\"20\"><path d=\"M3 10h18l-2-7H5l-2 7Zm1 0v11h16V10M9 21v-7h6v7M3 10a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0\"/></svg></span><span>Locales</span></a>",
+      "css": ".ds-home-module{display:flex;min-height:80px;min-width:0;flex-direction:column;align-items:center;gap:8px;padding:8px;text-align:center;font-size:12px;line-height:16px;font-weight:600;text-decoration:none;color:var(--color-ink2);font-family:var(--font-inter),Arial,sans-serif;}.ds-home-icon{display:flex;width:48px;height:48px;align-items:center;justify-content:center;border-radius:14px;border:1px solid var(--color-line);background:var(--color-bg);color:var(--color-salmon-ink);transition:color 150ms cubic-bezier(0.4,0,0.2,1),background-color 150ms cubic-bezier(0.4,0,0.2,1),border-color 150ms cubic-bezier(0.4,0,0.2,1);}.ds-home-module:hover .ds-home-icon{border-color:var(--color-line2);background:var(--color-tint2);}.ds-home-module:focus-visible{outline:2px solid var(--color-salmon-ink);outline-offset:2px;}@media(min-width:640px){.ds-home-module{font-size:14px;line-height:20px;}}"
+    },
+    {
+      "name": "Tarjeta de tarea enlazada",
+      "kind": "card",
+      "refersTo": "featured-module",
+      "description": "Toda la superficie es un enlace con nombre accesible de la acción y ruta según el rol.",
+      "html": "<a href=\"/admin/usuarios\" class=\"ds-feature\" aria-label=\"Ver usuarios\"><h2>Tu equipo, al día</h2><p>Gestiona las cuentas y los locales. Todo lo que necesitas para acompañar a tu equipo.</p><span class=\"ds-feature-action\">Ver usuarios<svg aria-hidden=\"true\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" width=\"20\" height=\"20\"><path d=\"M5 12h14m-6-6 6 6-6 6\"/></svg></span></a>",
+      "css": ".ds-feature{display:block;border-radius:16px;background:var(--color-salmon);padding:20px;color:var(--color-ink);text-decoration:none;font-family:var(--font-inter),Arial,sans-serif;}.ds-feature:hover{background:var(--color-salmon-deep);}.ds-feature:focus-visible{outline:2px solid var(--color-ink);outline-offset:4px;}.ds-feature h2{margin:0;font-size:20px;line-height:28px;font-weight:700;letter-spacing:-.025em;}.ds-feature p{margin:12px 0 0;max-width:32rem;font-size:14px;line-height:24px;}.ds-feature-action{display:inline-flex;align-items:center;gap:12px;margin-top:16px;font-size:14px;line-height:20px;font-weight:600;}@media(min-width:640px){.ds-feature{padding:24px;}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "MoiFood",
+    "overview": "MoiFood conserva su identidad naranja, su logo y su lenguaje de gestión interna\nen español de Chile. Las vistas priorizan tareas, permisos y lectura clara: una\ncabecera compacta, superficies claras y controles compartidos acompañan la misma\ninformación en móvil y escritorio. La referencia móvil aportada por el usuario\norienta la composición; la marca y los datos proceden de MoiFood.\n\nGuía obligatoria para cualquier vista o componente nuevo del frontend. Su objetivo\nes que todas las pantallas se vean y se comporten igual, sin temas por módulo ni\nestilos duplicados. Si un cambio necesita salirse de estas reglas, primero se\nactualiza este archivo en el mismo PR y se justifica en la descripción.",
+    "keyCharacteristics": [
+      "Identidad naranja MoiFood y tema claro compartido por todos los módulos.",
+      "Densidad operativa con bordes suaves, texto legible y foco visible.",
+      "Navegación inferior en móvil y menú lateral en escritorio.",
+      "Las fichas y tablas conservan metadatos, estados y operaciones."
+    ],
+    "rules": [
+      {
+        "name": "The Contraste de Marca Rule",
+        "body": "El texto sobre `salmon` es `ink`, tanto en el botón primario como en la tarjeta de tarea.",
+        "section": "colors"
+      },
+      {
+        "name": "The Bordes Antes que Sombras Rule",
+        "body": "El borde delimita el contenido; la sombra comunica una capa flotante como la barra, el menú de sesión o un diálogo.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do reutilizar `globals.css`, `ui/styles.ts` y `ApplicationShell` como fuentes compartidas.",
+      "Do mantener objetivos táctiles de al menos 44 px, foco visible y contraste AA.",
+      "Do conservar permisos, metadatos, estados, acciones y conteos al alternar fichas y tablas.",
+      "Do conservar los valores y el conteo de filtros adicionales al cerrar Más filtros.",
+      "Do reservar espacio y scroll-padding para la barra inferior y las áreas seguras.",
+      "Do revisar carga, vacío, error, foco por teclado y reflujo en móvil y escritorio antes del PR."
+    ],
+    "donts": [
+      "Don't crear temas por módulo, fuentes duplicadas ni variantes oscuras sin una decisión de diseño.",
+      "Don't escribir colores arbitrarios en componentes; definir primero los tokens.",
+      "Don't usar texto blanco sobre salmón ni comunicar estados solo mediante color.",
+      "Don't duplicar `ApplicationShell` ni el `h1` compartido dentro de una página o su loading.",
+      "Don't ocultar el overflow de toda la página ni cubrir contenido con la barra inferior.",
+      "Don't inventar saldos, indicadores o información ajena para llenar el inicio."
+    ]
+  }
+}
