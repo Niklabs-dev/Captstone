@@ -1,13 +1,22 @@
 import { ApiProperty } from '@nestjs/swagger';
 // Proyección personal: nunca incluye el detalle ni las líneas de otros trabajadores.
 export class OwnTipReceiptDto {
-  @ApiProperty({ description: 'Estado pagado del reparto.', enum: ['PAID'] })
+  @ApiProperty({
+    description: 'Estado pagado del reparto.',
+    enum: ['PAID'],
+    example: 'PAID',
+  })
   status: 'PAID';
-  @ApiProperty({ description: 'ID de la constancia propia.', format: 'uuid' })
+  @ApiProperty({
+    description: 'ID de la constancia propia.',
+    format: 'uuid',
+    example: '3f2b8c1e-6a4d-4f7e-9b1a-2c5d8e7f1a30',
+  })
   id: string;
   @ApiProperty({
     description: 'Propietario de la constancia, obtenido de la sesión.',
     format: 'uuid',
+    example: 'a9000000-0000-4000-8000-000000000002',
   })
   userId: string;
   @ApiProperty({
@@ -33,6 +42,7 @@ export class OwnTipReceiptDto {
   @ApiProperty({
     description: 'Fecha de emisión de la constancia.',
     type: Date,
+    example: '2026-01-12T15:30:00.000Z',
   })
   createdAt: Date;
 }
