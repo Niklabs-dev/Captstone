@@ -139,6 +139,7 @@ describe('Swagger de confirmación y pago del reparto (SPRINT-3-T13)', () => {
     expect(download.responses['200']).toMatchObject({
       content: { 'application/pdf': expect.anything() as unknown },
       headers: {
+        'Cache-Control': expect.anything() as unknown,
         'Content-Disposition': expect.anything() as unknown,
         'X-Content-Type-Options': expect.anything() as unknown,
       },

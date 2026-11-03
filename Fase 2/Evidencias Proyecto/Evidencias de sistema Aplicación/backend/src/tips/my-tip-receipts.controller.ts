@@ -75,9 +75,22 @@ export class MyTipReceiptsController {
     description: 'PDF propio y resumen SHA-256 en X-Content-SHA256.',
     schema: { type: 'string', format: 'binary' },
     headers: {
+      'Cache-Control': {
+        description: 'El PDF personal no se guarda en caché.',
+        schema: { type: 'string', example: 'private, no-store' },
+      },
+      'Content-Disposition': {
+        description:
+          'attachment con el nombre del archivo, sin datos personales.',
+        schema: { type: 'string' },
+      },
       'X-Content-SHA256': {
         description: 'SHA-256 hexadecimal del PDF.',
         schema: { type: 'string' },
+      },
+      'X-Content-Type-Options': {
+        description: 'Siempre nosniff.',
+        schema: { type: 'string', example: 'nosniff' },
       },
     },
   })

@@ -324,6 +324,7 @@ export class TipPoolsController {
 
   @Get(':id/receipts')
   @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR)
+  @Header('Cache-Control', 'private, no-store')
   @ApiOperation({
     summary: 'Lista las constancias de pago de un reparto pagado',
   })
@@ -351,6 +352,7 @@ export class TipPoolsController {
 
   @Get(':id/receipts/:userId/download')
   @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR)
+  @Header('Cache-Control', 'private, no-store')
   @Header('X-Content-Type-Options', 'nosniff')
   @Audited({
     action: AUDIT_ACTION.TIP_POOL_RECEIPT_DOWNLOADED,
@@ -368,6 +370,10 @@ export class TipPoolsController {
       'Constancia en PDF, con nombre constancia-propinas_<inicio>_<fin>_<id corto>.pdf en Content-Disposition.',
     schema: { type: 'string', format: 'binary' },
     headers: {
+      'Cache-Control': {
+        description: 'El PDF personal no se guarda en caché.',
+        schema: { type: 'string', example: 'private, no-store' },
+      },
       'Content-Disposition': {
         description:
           'attachment con el nombre del archivo (filename y filename*).',
