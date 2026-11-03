@@ -2,6 +2,7 @@ import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile } from 'node:fs/promises';
+import { navigateTo } from '../helpers/navigation';
 test.skip(
   process.env.TEST_REAL_DISPOSABLE !== 'true',
   'Requiere sistema exclusivo con datos sintéticos.',
@@ -230,11 +231,7 @@ test('Portal: solo PAID propio, navegación, PDF verificado y aislamiento entre 
 }, info) => {
   await login(context, baseURL!);
   await page.goto('/portal');
-  const mobile = await page
-    .getByText('Menú principal', { exact: true })
-    .isVisible();
-  if (mobile) await page.getByText('Menú principal', { exact: true }).click();
-  await page.getByRole('link', { name: 'Mis propinas', exact: true }).click();
+  await navigateTo(page, 'Mis propinas');
   await expect(page).toHaveURL(/\/portal\/propinas$/);
   await expect(
     page.getByRole('heading', { level: 1, name: 'Mis propinas' }),

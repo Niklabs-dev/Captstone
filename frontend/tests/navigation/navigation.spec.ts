@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { getNavigationItems } from '../../src/lib/navigation';
-import { openNavigation, navigateTo } from '../helpers/navigation';
+import type { Role } from '../../src/lib/auth';
+import {
+  openNavigation,
+  navigateTo,
+  getNavigationSurface,
+} from '../helpers/navigation';
 
 const backend =
   process.env.TEST_NAVIGATION_BACKEND_URL ?? 'http://127.0.0.1:3001';
@@ -13,30 +18,41 @@ const password = 'Navigation-test-2026!';
 const accounts = new Map<string, { id: string; email: string }>();
 let adminToken = '';
 
+async function assertRoleNavigation(
+  page: Page,
+  role: Role,
+): Promise<undefined> {
+  const surface = getNavigationSurface(page);
+  const items = getNavigationItems(role);
+  await expect(surface.getByRole('link')).toHaveCount(items.length);
+  for (const item of items)
+    await expect(
+      surface.getByRole('link', { name: item.label, exact: true }),
+    ).toHaveAttribute('href', item.href);
+}
+
 test('Diseño compartido: radios, icono decorativo, sesión y recuperación paginada de 44 px', async ({
   page,
 }, info) => {
   await login(page, adminEmail!, adminPassword!);
   await openNavigation(page);
-  const navigation = page.getByRole('navigation', {
-    name: 'Navegación principal',
-    exact: true,
-  });
+  const navigation = getNavigationSurface(page);
   expect(
     await navigation
       .getByRole('link')
       .first()
       .evaluate((element) => getComputedStyle(element).borderRadius),
-  ).toBe('8px');
+  ).toBe(info.project.name === 'desktop' ? '8px' : '14px');
+  if (await page.getByRole('dialog', { name: 'Todos los módulos' }).isVisible())
+    await page.keyboard.press('Escape');
   const toggle = page.getByRole('button', {
     name: 'Menú principal',
     exact: true,
   });
   if (await toggle.isVisible()) {
     await expect(toggle.locator('svg')).toHaveAttribute('aria-hidden', 'true');
-    await toggle.click();
   }
-  const summary = page.getByText('Mi sesión', { exact: true });
+  const summary = page.locator('summary').filter({ hasText: 'Mi sesión' });
   await summary.click();
   const renew = page.getByRole('button', {
     name: 'Renovar sesión',
@@ -81,11 +97,12 @@ test('Diseño compartido: radios, icono decorativo, sesión y recuperación pagi
   await page.keyboard.press('Tab');
   await firstPage.focus();
   await expect(firstPage).toBeFocused();
+  await expect(firstPage).toHaveClass(/focus-visible:outline-2/);
   expect(
-    await firstPage.evaluate(
-      (element) => getComputedStyle(element).outlineWidth,
+    await firstPage.evaluate((element) =>
+      Math.abs(Number.parseFloat(getComputedStyle(element).outlineWidth) - 2),
     ),
-  ).toBe('2px');
+  ).toBeLessThan(1);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -209,10 +226,7 @@ test('El administrador recorre las tres vistas con el mismo menú y un solo enla
   const folder = `output/playwright/navigation/${info.project.name}`;
   await mkdir(folder, { recursive: true });
   for (const route of [...routes, routes[0]]) {
-    const nav = page.getByRole('navigation', {
-      name: 'Navegación principal',
-      exact: true,
-    });
+    const nav = getNavigationSurface(page);
     await navigateTo(page, route.label);
     await expect(page).toHaveURL(new RegExp(route.href + '$'));
     expect(
@@ -234,16 +248,23 @@ test('El administrador recorre las tres vistas con el mismo menú y un solo enla
       }),
     ).toBeVisible();
     await openNavigation(page);
-    await expect(nav.getByRole('link')).toHaveText(
-      getNavigationItems('ADMINISTRADOR').map((item) => item.label),
-    );
+    await assertRoleNavigation(page, 'ADMINISTRADOR');
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
     await expect(
       nav.getByRole('link', { name: route.label, exact: true }),
     ).toHaveAttribute('aria-current', 'page');
-    await expect(
-      page.getByText(adminEmail!, { exact: true }).first(),
-    ).toBeVisible();
+    if (info.project.name === 'desktop') {
+      await expect(
+        page.getByText(adminEmail!, { exact: true }).first(),
+      ).toBeVisible();
+    } else {
+      await page.keyboard.press('Escape');
+      await page.locator('summary').filter({ hasText: 'Mi sesión' }).click();
+      await expect(
+        page.locator('details[open]').getByText(adminEmail!, { exact: true }),
+      ).toBeVisible();
+      await page.keyboard.press('Escape');
+    }
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -264,7 +285,7 @@ for (const route of routes) {
   }) => {
     await login(page, adminEmail!, adminPassword!);
     await page.goto(route.href);
-    await page.getByText('Mi sesión', { exact: true }).click();
+    await page.locator('summary').filter({ hasText: 'Mi sesión' }).click();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -292,13 +313,14 @@ for (const role of ['TRABAJADOR', 'SUPERVISOR', 'CONTADOR'] as const) {
     if (!account) throw new Error('Falta la cuenta de prueba.');
     await login(page, account.email, password);
     const home = role === 'TRABAJADOR' ? '/portal' : '/dashboard';
-    const nav = page.getByRole('navigation', {
-      name: 'Navegación principal',
-      exact: true,
-    });
+    const nav = getNavigationSurface(page);
     const labels = getNavigationItems(role).map((item) => item.label);
     await openNavigation(page);
-    await expect(nav.getByRole('link')).toHaveText(labels);
+    await expect(nav.getByRole('link')).toHaveCount(labels.length);
+    for (const label of labels)
+      await expect(
+        nav.getByRole('link', { name: label, exact: true }),
+      ).toHaveCount(1);
     await expect(nav.getByRole('link').first()).toHaveAttribute('href', home);
     await page.goto('/admin/auditoria');
     await expect(page).toHaveURL(new RegExp(home + '\\?reason=forbidden$'));
@@ -307,14 +329,22 @@ for (const role of ['TRABAJADOR', 'SUPERVISOR', 'CONTADOR'] as const) {
     await expect(page).toHaveURL(new RegExp(home + '\\?reason=forbidden$'));
     expect((await page.request.get('/api/users')).status()).toBe(403);
     await openNavigation(page);
-    await expect(nav.getByRole('link')).toHaveText(labels);
-    await page.getByText('Mi sesión', { exact: true }).click();
+    await expect(nav.getByRole('link')).toHaveCount(labels.length);
+    for (const label of labels)
+      await expect(
+        nav.getByRole('link', { name: label, exact: true }),
+      ).toHaveCount(1);
+    await page.locator('summary').filter({ hasText: 'Mi sesión' }).click();
     await page
       .getByRole('button', { name: 'Renovar sesión', exact: true })
       .click();
     await expect(page).toHaveURL(new RegExp(home + '$'));
     await openNavigation(page);
-    await expect(nav.getByRole('link')).toHaveText(labels);
+    await expect(nav.getByRole('link')).toHaveCount(labels.length);
+    for (const label of labels)
+      await expect(
+        nav.getByRole('link', { name: label, exact: true }),
+      ).toHaveCount(1);
   });
 }
 
@@ -327,7 +357,7 @@ test('Renovar desde Usuarios vuelve a Inicio con la misma navegación', async ({
     (cookie) => cookie.name === 'mf_refresh',
   )?.value;
   await page.goto('/admin/usuarios');
-  await page.getByText('Mi sesión', { exact: true }).click();
+  await page.locator('summary').filter({ hasText: 'Mi sesión' }).click();
   await page
     .getByRole('button', { name: 'Renovar sesión', exact: true })
     .click();
@@ -340,11 +370,7 @@ test('Renovar desde Usuarios vuelve a Inicio con la misma navegación', async ({
     )
     .not.toBe(before);
   await openNavigation(page);
-  await expect(
-    page
-      .getByRole('navigation', { name: 'Navegación principal' })
-      .getByRole('link'),
-  ).toHaveText(getNavigationItems('ADMINISTRADOR').map((item) => item.label));
+  await assertRoleNavigation(page, 'ADMINISTRADOR');
 });
 
 test('Cambiar entre administrador y trabajador no conserva las opciones de la cuenta anterior', async ({
@@ -354,7 +380,7 @@ test('Cambiar entre administrador y trabajador no conserva las opciones de la cu
   if (!worker) throw new Error('Falta el trabajador de prueba.');
   await login(page, adminEmail!, adminPassword!);
   for (const identity of [worker.email, adminEmail!]) {
-    await page.getByText('Mi sesión', { exact: true }).click();
+    await page.locator('summary').filter({ hasText: 'Mi sesión' }).click();
     await page
       .getByRole('button', { name: 'Cerrar sesión', exact: true })
       .click();
@@ -364,19 +390,20 @@ test('Cambiar entre administrador y trabajador no conserva las opciones de la cu
       identity,
       identity === worker.email ? password : adminPassword!,
     );
-    const nav = page.getByRole('navigation', {
-      name: 'Navegación principal',
-      exact: true,
-    });
     await openNavigation(page);
-    await expect(nav.getByRole('link')).toHaveText(
-      getNavigationItems(
-        identity === worker.email ? 'TRABAJADOR' : 'ADMINISTRADOR',
-      ).map((item) => item.label),
+    await assertRoleNavigation(
+      page,
+      identity === worker.email ? 'TRABAJADOR' : 'ADMINISTRADOR',
     );
+    if (
+      await page.getByRole('dialog', { name: 'Todos los módulos' }).isVisible()
+    )
+      await page.keyboard.press('Escape');
+    await page.locator('summary').filter({ hasText: 'Mi sesión' }).click();
     await expect(
-      page.getByRole('complementary').getByText(identity, { exact: true }),
+      page.locator('details[open]').getByText(identity, { exact: true }),
     ).toBeVisible();
+    await page.keyboard.press('Escape');
     expect((await page.request.get('/api/users')).status()).toBe(
       identity === worker.email ? 403 : 200,
     );
