@@ -1,6 +1,7 @@
 # SPRINT-3-T16 — Mis constancias de propinas
 
-Ruta `/portal/propinas`, exclusiva del trabajador. Presenta únicamente
+Ruta `/portal/propinas`, exclusiva de trabajador y supervisor según la
+[corrección de alcance SPRINT-4-T02](SPRINT-4-T02.md). Presenta únicamente
 constancias propias de repartos PAID: local histórico, período, monto,
 horas, fecha de entrega, responsable y emisión. La navegación personal
 incluye Mis propinas. Se reutilizan las tarjetas y controles de DESIGN.md.
