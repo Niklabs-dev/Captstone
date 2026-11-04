@@ -58,6 +58,8 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'sales',
       'cash_closings',
       'cash_closing_lines',
+      'cash_closing_vouchers',
+      'cash_closing_tip_entries',
       'products',
       'inventory_movements',
       'inventory_counts',
@@ -67,6 +69,43 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     for (const tabla of tablasEsperadas) {
       expect(sql).toContain(`CREATE TABLE "${tabla}"`);
     }
+  });
+
+  it('modela cierres de caja por turno con conciliación, vouchers y reversa (SPRINT-4-T08)', () => {
+    const sql = readMigration('cierres_caja_turno_conciliacion');
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "cash_closings_store_id_business_date_shift_key"',
+    );
+    expect(sql).toContain('"cash_closing_lines_difference_consistent" CHECK');
+    expect(sql).toContain(
+      '"cash_closings_reconciliation_difference_consistent" CHECK',
+    );
+    expect(sql).toContain('"cash_closings_status_consistency" CHECK');
+    expect(sql).toContain('"cash_closing_vouchers_valid_period" CHECK');
+    expect(sql).toContain(
+      '"cash_closing_vouchers_tip_only_mercado_pago" CHECK',
+    );
+    expect(sql).toContain('CREATE TRIGGER "cash_closings_status_rows"');
+    expect(sql).toContain('CREATE TRIGGER "cash_closing_lines_require_open"');
+    expect(sql).toContain(
+      'CREATE TRIGGER "cash_closing_vouchers_require_open"',
+    );
+    expect(sql).toContain('CREATE TRIGGER "sales_cash_closing_require_open"');
+
+    // La reversa vive junto a la migración y deshace triggers y esquema.
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('cierres_caja_turno_conciliacion'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toContain('DROP FUNCTION "cash_closings_enforce_status"()');
+    expect(down).toContain('DROP FUNCTION "sales_require_open_cash_closing"()');
+    expect(down).toContain('DROP TABLE "cash_closing_vouchers"');
+    expect(down).toContain(
+      'CREATE UNIQUE INDEX "cash_closings_store_id_business_date_key"',
+    );
   });
 
   it('modela propinas diarias, pacto, horas y fuentes sin doble contabilización (SPRINT-3-T09)', () => {
