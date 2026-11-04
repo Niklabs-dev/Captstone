@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { AuthUser } from '../auth/types/auth.types.js';
+import { ROLE } from '../auth/constants/roles.constants.js';
+import { hasAnyRole } from '../auth/policies/store-access.policy.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { formatDbDate } from '../documents/utils/document-dates.util.js';
@@ -23,14 +29,20 @@ const PERSONAL_SELECT = {
   paidByName: true,
   createdAt: true,
 } satisfies Prisma.TipPoolReceiptSelect;
+function ownReceiptUserId(user: AuthUser): string {
+  if (!hasAnyRole(user, [ROLE.TRABAJADOR, ROLE.SUPERVISOR]))
+    throw new ForbiddenException(
+      'La consulta personal de propinas requiere el rol TRABAJADOR o SUPERVISOR.',
+    );
+  return user.id;
+}
 @Injectable()
 export class MyTipReceiptsService {
   constructor(private readonly prisma: PrismaService) {}
-  // No se valida el rol: cualquier usuario ve solo lo suyo. El filtro por
-  // propietario y PAID es la barrera de privacidad y no debe quitarse.
   async list(user: AuthUser): Promise<OwnTipReceiptDto[]> {
+    const userId = ownReceiptUserId(user);
     const rows = await this.prisma.tipPoolReceipt.findMany({
-      where: { userId: user.id, pool: { status: 'PAID' } },
+      where: { userId, pool: { status: 'PAID' } },
       select: PERSONAL_SELECT,
       orderBy: [{ paymentDate: 'desc' }, { id: 'asc' }],
     });
@@ -59,9 +71,10 @@ export class MyTipReceiptsService {
     sha256: string;
   }> {
     // La misma consulta exige propietario y PAID: ajenas, inexistentes y no pagadas dan 404.
-    // No depende del rol ni del local actual; conserva el historial si cambian.
+    // Conserva el historial de local de los roles autorizados.
+    const userId = ownReceiptUserId(user);
     const r = await this.prisma.tipPoolReceipt.findFirst({
-      where: { id, userId: user.id, pool: { status: 'PAID' } },
+      where: { id, userId, pool: { status: 'PAID' } },
       select: {
         ...PERSONAL_SELECT,
         poolId: true,
