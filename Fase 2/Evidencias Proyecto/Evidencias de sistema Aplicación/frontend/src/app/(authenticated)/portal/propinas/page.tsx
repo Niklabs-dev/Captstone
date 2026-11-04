@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { MyTipReceiptsPanel } from '@/components/tips/MyTipReceiptsPanel';
+import { canReadOwnTipReceipts } from '@/lib/my-tip-receipts';
 export const metadata = { title: 'Mis propinas | MoiFood' };
 export default async function Page() {
   const session = await getSession();
@@ -8,7 +9,8 @@ export default async function Page() {
     if (session.status === 401) redirect('/session-expired');
     throw Error(session.message);
   }
-  // Cualquier rol consulta solo sus constancias; el backend filtra por propietario.
+  if (!canReadOwnTipReceipts(session.data.role))
+    redirect('/dashboard?reason=forbidden');
   return (
     <MyTipReceiptsPanel key={session.data.id} workerId={session.data.id} />
   );

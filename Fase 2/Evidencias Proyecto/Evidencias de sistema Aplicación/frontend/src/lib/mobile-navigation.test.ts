@@ -37,9 +37,20 @@ test('Más conserva auditoría, alertas, liquidaciones y reparto del administrad
       '/admin/alertas-dt',
       '/liquidaciones',
       '/propinas/repartos',
-      '/portal/propinas',
     ],
   );
+});
+
+test('Mis propinas se ofrece en móvil solo a trabajador y supervisor', () => {
+  for (const role of ROLES) {
+    const { primary, additional } = getMobileNavigation(role);
+    assert.equal(
+      [...primary, ...additional].some(
+        (item) => item.href === '/portal/propinas',
+      ),
+      role === 'TRABAJADOR' || role === 'SUPERVISOR',
+    );
+  }
 });
 test('Cada destino tiene icono compartido y etiqueta móvil legible', () => {
   for (const role of ROLES)

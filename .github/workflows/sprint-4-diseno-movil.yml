@@ -1,4 +1,4 @@
-name: Sprint 4 - Diseño móvil
+name: Sprint 4 - Calidad, permisos y diseño móvil
 
 on:
   pull_request:
@@ -63,6 +63,13 @@ jobs:
           npm run format:check
           npx tsc -p tsconfig.test.json
           node --test .test-build/{auth,users,audit,navigation,backend-proxy,display-date,documents,dt-alerts,payroll,my-payslips,my-documents,stores,tips,tip-pools,my-tip-receipts,mobile-navigation}.test.js
+      - name: Comprobar calidad y pruebas del backend
+        run: |
+          cd backend
+          npm run lint
+          npm run format:check
+          npm run build
+          env -u DATABASE_URL -u TEST_DATABASE_URL npm test -- --maxWorkers=2 --testTimeout=30000
       - name: Levantar sistema completo con migraciones y seed reales
         run: |
           mkdir -p frontend/output/ci frontend/output/real-api/storage
@@ -77,6 +84,10 @@ jobs:
           done
           docker compose logs --no-color
           exit 1
+      - name: Verificar permisos de constancias con HTTP y PostgreSQL reales
+        run: |
+          cd backend
+          TEST_DATABASE_URL="$DATABASE_URL" npx vitest run test/my-tip-receipts.integration.spec.ts --maxWorkers=1
       - name: Preparar datos sintéticos y probar API desde el navegador
         run: |
           cd frontend
