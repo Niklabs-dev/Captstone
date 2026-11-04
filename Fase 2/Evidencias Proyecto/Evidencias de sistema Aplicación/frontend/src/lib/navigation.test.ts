@@ -42,6 +42,7 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
     { href: '/admin/alertas-dt', label: 'Alertas DT' },
     { href: '/liquidaciones', label: 'Liquidaciones' },
     { href: '/propinas/repartos', label: 'Reparto de propinas' },
+    { href: '/portal/propinas', label: 'Mis propinas' },
   ]);
 });
 
@@ -108,6 +109,19 @@ test('El portal es exclusivo del trabajador y no produce ciclos de redirección'
       );
     }
   }
+});
+
+test('Mis propinas está disponible y enlazada para cualquier rol (SPRINT-4-T01)', () => {
+  for (const role of ROLES) {
+    assert.equal(getPageRedirect(role, '/portal/propinas'), null);
+    assert.ok(
+      getNavigationItems(role).some((item) => item.href === '/portal/propinas'),
+    );
+  }
+  assert.equal(
+    getPageRedirect('CONTADOR', '/portal/propinas-falsas'),
+    '/dashboard?reason=forbidden',
+  );
 });
 
 test('Solo el administrador entra a las páginas administrativas', () => {

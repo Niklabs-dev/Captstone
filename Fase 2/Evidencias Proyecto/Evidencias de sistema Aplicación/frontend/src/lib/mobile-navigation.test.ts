@@ -37,6 +37,7 @@ test('Más conserva auditoría, alertas, liquidaciones y reparto del administrad
       '/admin/alertas-dt',
       '/liquidaciones',
       '/propinas/repartos',
+      '/portal/propinas',
     ],
   );
 });
