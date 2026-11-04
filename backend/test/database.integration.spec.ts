@@ -461,6 +461,7 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
         data: {
           storeId: store.id,
           businessDate: new Date('2026-09-24'),
+          shift: 1,
           openingCash: 50000,
           responsibleId: user.id,
         },
@@ -472,6 +473,7 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
           data: {
             storeId: store.id,
             businessDate: new Date('2026-09-24'),
+            shift: 1,
             openingCash: 50000,
             responsibleId: user.id,
           },
@@ -487,6 +489,7 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
         data: {
           storeId: store.id,
           businessDate: new Date('2026-09-24'),
+          shift: 1,
           openingCash: 50000,
           responsibleId: user.id,
         },
@@ -516,6 +519,7 @@ describe.skipIf(!databaseUrl)('Integración con PostgreSQL', () => {
         data: {
           storeId: store.id,
           businessDate: new Date('2026-09-24'),
+          shift: 1,
           openingCash: 50000,
           responsibleId: user.id,
         },
