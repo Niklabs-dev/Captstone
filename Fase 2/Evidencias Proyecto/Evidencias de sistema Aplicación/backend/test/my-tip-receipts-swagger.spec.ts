@@ -45,8 +45,8 @@ describe('Swagger de las constancias propias (SPRINT-4-T01)', () => {
   }
 
   it.each([
-    { path: LIST_PATH, statuses: ['200', '400', '401', '403'] },
-    { path: DOWNLOAD_PATH, statuses: ['200', '400', '401', '403', '404'] },
+    { path: LIST_PATH, statuses: ['200', '400', '401'] },
+    { path: DOWNLOAD_PATH, statuses: ['200', '400', '401', '404'] },
   ])(
     'GET $path documenta tag, resumen, JWT y respuestas',
     ({ path, statuses }) => {
@@ -55,6 +55,14 @@ describe('Swagger de las constancias propias (SPRINT-4-T01)', () => {
       expect(op.summary).toEqual(expect.any(String));
       expect(op.security).toEqual(expect.arrayContaining([{ bearer: [] }]));
       expect(Object.keys(op.responses).sort()).toEqual([...statuses].sort());
+    },
+  );
+
+  it.each([LIST_PATH, DOWNLOAD_PATH])(
+    'GET %s no documenta 403: cualquier rol consulta lo suyo',
+    (path) => {
+      expect(operation(path).responses).not.toHaveProperty('403');
+      expect(operation(path).description).toMatch(/cualquier usuario/i);
     },
   );
 

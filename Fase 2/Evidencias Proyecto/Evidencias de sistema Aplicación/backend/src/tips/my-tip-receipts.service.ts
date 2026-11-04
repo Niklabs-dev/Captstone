@@ -1,11 +1,6 @@
-import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { AuthUser } from '../auth/types/auth.types.js';
-import { ROLE } from '../auth/constants/roles.constants.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { formatDbDate } from '../documents/utils/document-dates.util.js';
@@ -31,15 +26,9 @@ const PERSONAL_SELECT = {
 @Injectable()
 export class MyTipReceiptsService {
   constructor(private readonly prisma: PrismaService) {}
-  private assertWorker(user: AuthUser): undefined {
-    if (user.role !== ROLE.TRABAJADOR)
-      throw new ForbiddenException(
-        'Solo el trabajador puede consultar sus constancias.',
-      );
-    return undefined;
-  }
+  // No se valida el rol: cualquier usuario ve solo lo suyo. El filtro por
+  // propietario y PAID es la barrera de privacidad y no debe quitarse.
   async list(user: AuthUser): Promise<OwnTipReceiptDto[]> {
-    this.assertWorker(user);
     const rows = await this.prisma.tipPoolReceipt.findMany({
       where: { userId: user.id, pool: { status: 'PAID' } },
       select: PERSONAL_SELECT,
@@ -69,9 +58,8 @@ export class MyTipReceiptsService {
     fileName: string;
     sha256: string;
   }> {
-    this.assertWorker(user);
     // La misma consulta exige propietario y PAID: ajenas, inexistentes y no pagadas dan 404.
-    // No depende del local actual del trabajador; conserva su historial si cambia de local.
+    // No depende del rol ni del local actual; conserva el historial si cambian.
     const r = await this.prisma.tipPoolReceipt.findFirst({
       where: { id, userId: user.id, pool: { status: 'PAID' } },
       select: {

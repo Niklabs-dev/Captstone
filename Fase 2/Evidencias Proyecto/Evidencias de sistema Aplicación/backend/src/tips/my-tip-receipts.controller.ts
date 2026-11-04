@@ -12,7 +12,6 @@ import {
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
-  ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -21,8 +20,6 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { ROLE } from '../auth/constants/roles.constants.js';
-import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import { AUDIT_ACTION } from '../audit/constants/audit-actions.constants.js';
@@ -31,16 +28,16 @@ import { setAuditContext } from '../audit/utils/audit-context.util.js';
 import { contentDisposition } from '../documents/utils/download-name.util.js';
 import { MyTipReceiptsService } from './my-tip-receipts.service.js';
 import { OwnTipReceiptDto } from './dto/own-tip-receipt.dto.js';
+// Sin @Roles a propósito: cualquier usuario autenticado consulta solo sus
+// propias constancias, sea cual sea su rol o local actual (un ascenso no le
+// quita su historial). La barrera es el filtro por propietario y PAID del
+// servicio; el acceso a constancias ajenas vive en /tip-pools/:id/receipts.
 @ApiTags('my-tip-receipts')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Sesión ausente, inválida o vencida.' })
-@ApiForbiddenResponse({
-  description: 'Solo el trabajador puede consultar su historial.',
-})
 @ApiBadRequestResponse({
   description: 'Parámetros de consulta no admitidos o ID inválido.',
 })
-@Roles(ROLE.TRABAJADOR)
 @Controller('my-tip-receipts')
 export class MyTipReceiptsController {
   constructor(private readonly receipts: MyTipReceiptsService) {}
@@ -49,7 +46,7 @@ export class MyTipReceiptsController {
   @ApiOperation({
     summary: 'Lista únicamente las constancias propias de repartos PAID',
     description:
-      'La identidad procede del JWT. No admite filtros de trabajador ni local y conserva el historial al cambiar de local.',
+      'Disponible para cualquier usuario autenticado, sea cual sea su rol. La identidad procede del JWT. No admite filtros de trabajador ni local y conserva el historial al cambiar de local o de rol. Sin constancias propias responde un listado vacío.',
   })
   @ApiOkResponse({
     description: 'Proyección personal, sin líneas de compañeros ni borradores.',
@@ -69,7 +66,7 @@ export class MyTipReceiptsController {
   @ApiOperation({
     summary: 'Descarga la constancia propia con SHA-256 de sus bytes',
     description:
-      'El PDF es el de T13: determinista y generado desde la foto del pago, sin recalcular montos.',
+      'Disponible para cualquier usuario autenticado, solo sobre sus propias constancias: el rol no da acceso a las ajenas. El PDF es el de T13: determinista y generado desde la foto del pago, sin recalcular montos.',
   })
   @ApiOkResponse({
     description: 'PDF propio y resumen SHA-256 en X-Content-SHA256.',

@@ -61,11 +61,32 @@ describe('Constancias propias (SPRINT-3-T16)', () => {
     expect(result[0]).not.toHaveProperty('detail');
     expect(result[0]).not.toHaveProperty('workerName');
   });
-  it('rechaza roles distintos del trabajador antes de consultar', async () => {
-    const { service, findMany } = setup();
-    await expect(service.list({ ...user, role: 'CONTADOR' })).rejects.toThrow();
-    expect(findMany).not.toHaveBeenCalled();
-  });
+  // SPRINT-4-T01: el rol no limita las constancias propias; solo el filtro por
+  // propietario y PAID decide qué se ve, también sin local asignado.
+  it.each([
+    { role: 'SUPERVISOR', storeId: other },
+    { role: 'CONTADOR', storeId: null },
+    { role: 'ADMINISTRADOR', storeId: null },
+    { role: 'TRABAJADOR', storeId: null },
+  ])(
+    'un $role (local $storeId) consulta solo lo suyo, sin rechazo por rol',
+    async ({ role, storeId }) => {
+      const { service, findMany, findFirst } = setup();
+      const actor = { ...user, id: other, role, storeId };
+      await expect(service.list(actor)).resolves.toHaveLength(1);
+      expect(findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: other, pool: { status: 'PAID' } },
+        }),
+      );
+      await service.download(id, actor);
+      expect(findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id, userId: other, pool: { status: 'PAID' } },
+        }),
+      );
+    },
+  );
   it('busca la descarga con ID, propietario y PAID en la misma consulta', async () => {
     const { service, findFirst } = setup();
     const file = await service.download(id, user);
