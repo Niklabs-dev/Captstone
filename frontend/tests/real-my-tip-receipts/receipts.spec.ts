@@ -401,7 +401,7 @@ test('Carga, fallo, reintento, vacío e integridad alterada sin descargar', asyn
   await cleanLayout(page);
 });
 
-test('Sesión, roles, parámetros de identidad y operaciones de escritura rechazados', async ({
+test('Sesión, parámetros de identidad y escrituras rechazados; otros roles ven solo lo suyo', async ({
   context,
   baseURL,
   page,
@@ -427,14 +427,19 @@ test('Sesión, roles, parámetros de identidad y operaciones de escritura rechaz
       })
     ).status(),
   ).toBe(405);
+  // SPRINT-4-T01: cualquier rol entra a Mis propinas, pero solo ve lo suyo.
   for (const account of [supervisor, accountant]) {
     await context.clearCookies();
     await login(context, baseURL!, account.email);
-    expect((await context.request.get('/api/my-tip-receipts')).status()).toBe(
-      403,
-    );
+    const own = await context.request.get('/api/my-tip-receipts');
+    expect(own.status()).toBe(200);
+    expect(
+      ((await own.json()) as { userId: string }[]).every(
+        (item) => item.userId === account.id,
+      ),
+    ).toBe(true);
     await page.goto('/portal/propinas');
-    await expect(page).toHaveURL(/\/dashboard\?reason=forbidden$/);
+    await expect(page).toHaveURL(/\/portal\/propinas$/);
     const auth = await request.post(backend + '/auth/login', {
       data: { email: account.email, password },
     });
@@ -446,7 +451,7 @@ test('Sesión, roles, parámetros de identidad y operaciones de escritura rechaz
           },
         })
       ).status(),
-    ).toBe(403);
+    ).toBe(200);
   }
   await context.clearCookies();
   await login(
@@ -455,7 +460,7 @@ test('Sesión, roles, parámetros de identidad y operaciones de escritura rechaz
     process.env.TEST_REAL_ADMIN_EMAIL ?? 'admin@moi-food.cl',
     process.env.TEST_REAL_ADMIN_PASSWORD ?? 'admin-cambiar-en-produccion',
   );
-  expect((await context.request.get('/api/my-tip-receipts')).status()).toBe(
-    403,
-  );
+  const adminOwn = await context.request.get('/api/my-tip-receipts');
+  expect(adminOwn.status()).toBe(200);
+  expect(Array.isArray(await adminOwn.json())).toBe(true);
 });

@@ -45,6 +45,13 @@ export function getNavigationView(pathname: string): {
   );
 }
 
+// Toda persona puede haber recibido propinas (por ejemplo, antes de un
+// ascenso), así que sus constancias propias se ofrecen a cualquier rol.
+const MY_TIPS: NavigationItem = {
+  href: '/portal/propinas',
+  label: 'Mis propinas',
+};
+
 // Una sola fuente de enlaces para todas las vistas; los permisos siguen en el servidor.
 export function getNavigationItems(
   role: Role | null,
@@ -52,7 +59,7 @@ export function getNavigationItems(
   if (role === 'TRABAJADOR')
     return [
       { href: '/portal', label: 'Inicio' },
-      { href: '/portal/propinas', label: 'Mis propinas' },
+      MY_TIPS,
       { href: '/portal/documentos', label: 'Mis documentos' },
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
     ];
@@ -61,6 +68,7 @@ export function getNavigationItems(
     return [
       home,
       { href: '/propinas/diarias', label: 'Propinas diarias' },
+      MY_TIPS,
       { href: '/portal/documentos', label: 'Mis documentos' },
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
     ];
@@ -74,12 +82,14 @@ export function getNavigationItems(
         { href: '/admin/alertas-dt', label: 'Alertas DT' },
         { href: '/liquidaciones', label: 'Liquidaciones' },
         { href: '/propinas/repartos', label: 'Reparto de propinas' },
+        MY_TIPS,
       ]
     : role === 'CONTADOR'
       ? [
           home,
           { href: '/liquidaciones', label: 'Liquidaciones' },
           { href: '/propinas/repartos', label: 'Reparto de propinas' },
+          MY_TIPS,
         ]
       : [home];
 }
@@ -91,6 +101,8 @@ export function getHomePath(role: Role): HomePath {
 // Se aplica a las páginas privadas; las API conservan su autorización propia.
 export function getPageRedirect(role: Role, pathname: string): string | null {
   const inPortal = pathname === '/portal' || pathname.startsWith('/portal/');
+  if (pathname === MY_TIPS.href || pathname.startsWith(MY_TIPS.href + '/'))
+    return null;
   if (
     role === 'SUPERVISOR' &&
     ['/portal/documentos', '/portal/liquidaciones'].some(
