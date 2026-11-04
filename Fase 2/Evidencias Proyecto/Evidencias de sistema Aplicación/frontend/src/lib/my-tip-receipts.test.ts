@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 import {
-  canReadOwnTipReceipts,
   ownReceiptPath,
   parseOwnReceipts,
   verifyReceiptBytes,
@@ -13,7 +12,6 @@ import {
   OwnReceiptError,
   downloadOwnReceipt,
 } from './my-tip-receipts-client';
-import { ROLES } from './auth';
 const id = 'a9000000-0000-4000-8000-000000000001';
 const other = 'a9000000-0000-4000-8000-000000000002';
 const receipt = {
@@ -29,10 +27,6 @@ const receipt = {
   paidByName: 'Contador',
   createdAt: '2026-01-12T12:00:00Z',
 };
-test('El portal de propinas es exclusivo del trabajador', () => {
-  for (const role of ROLES)
-    assert.equal(canReadOwnTipReceipts(role), role === 'TRABAJADOR');
-});
 test('La URL no admite identidad ni local elegidos por el cliente', () => {
   assert.equal(ownReceiptPath([], new URLSearchParams()), '/my-tip-receipts');
   assert.equal(

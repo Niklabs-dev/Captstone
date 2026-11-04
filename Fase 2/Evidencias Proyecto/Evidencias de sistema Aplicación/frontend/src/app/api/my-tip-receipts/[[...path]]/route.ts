@@ -6,7 +6,6 @@ import { getSession, clearSessionCookies } from '@/lib/session';
 import { callBackend } from '@/lib/auth-backend';
 import {
   MAX_RECEIPT_BYTES,
-  canReadOwnTipReceipts,
   ownReceiptPath,
   parseOwnReceipts,
   ownReceiptError,
@@ -30,7 +29,6 @@ export async function GET(
 ): Promise<Response> {
   const session = await getSession();
   if (!session.ok) return failure(session.status);
-  if (!canReadOwnTipReceipts(session.data.role)) return failure(403);
   const { path = [] } = await context.params;
   const query = new URL(request.url).searchParams;
   const endpoint = ownReceiptPath(path, query);
