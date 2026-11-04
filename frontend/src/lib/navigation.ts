@@ -1,4 +1,5 @@
 import type { Role } from './auth';
+import { canReadOwnTipReceipts } from './my-tip-receipts';
 
 export type HomePath = '/portal' | '/dashboard';
 
@@ -45,8 +46,7 @@ export function getNavigationView(pathname: string): {
   );
 }
 
-// Toda persona puede haber recibido propinas (por ejemplo, antes de un
-// ascenso), así que sus constancias propias se ofrecen a cualquier rol.
+// La consulta personal es exclusiva del trabajador y del supervisor.
 const MY_TIPS: NavigationItem = {
   href: '/portal/propinas',
   label: 'Mis propinas',
@@ -82,14 +82,12 @@ export function getNavigationItems(
         { href: '/admin/alertas-dt', label: 'Alertas DT' },
         { href: '/liquidaciones', label: 'Liquidaciones' },
         { href: '/propinas/repartos', label: 'Reparto de propinas' },
-        MY_TIPS,
       ]
     : role === 'CONTADOR'
       ? [
           home,
           { href: '/liquidaciones', label: 'Liquidaciones' },
           { href: '/propinas/repartos', label: 'Reparto de propinas' },
-          MY_TIPS,
         ]
       : [home];
 }
@@ -102,7 +100,7 @@ export function getHomePath(role: Role): HomePath {
 export function getPageRedirect(role: Role, pathname: string): string | null {
   const inPortal = pathname === '/portal' || pathname.startsWith('/portal/');
   if (pathname === MY_TIPS.href || pathname.startsWith(MY_TIPS.href + '/'))
-    return null;
+    return canReadOwnTipReceipts(role) ? null : '/dashboard?reason=forbidden';
   if (
     role === 'SUPERVISOR' &&
     ['/portal/documentos', '/portal/liquidaciones'].some(

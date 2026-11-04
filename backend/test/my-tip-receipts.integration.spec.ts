@@ -519,9 +519,7 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
-    // SPRINT-4-T01 (revisión del PO): cualquier usuario autenticado consulta
-    // solo sus propias constancias PAID, sea cual sea su rol o local actual.
-    describe('cualquier rol en /my-tip-receipts', () => {
+    describe('roles autorizados en /my-tip-receipts (SPRINT-4-T02)', () => {
       it('un supervisor con horas en el período lista y descarga su constancia', async () => {
         await withinRollback(
           async (f) => {
@@ -568,7 +566,7 @@ describe.skipIf(!databaseUrl)(
         );
       });
 
-      it('conserva la constancia tras un ascenso y un cambio de local con el mismo userId', async () => {
+      it('conserva el historial al pasar a supervisor de otro local y deniega al pasar a un rol global', async () => {
         await withinRollback(async (f) => {
           await pay(f);
           const receipt = await receiptOf(f, f.workerOne.id);
@@ -581,10 +579,12 @@ describe.skipIf(!databaseUrl)(
             },
           });
 
-          // Ascenso a supervisor de otro local y luego a contador sin local.
+          // El historial sigue disponible como supervisor; los roles globales
+          // conservan la gestión, pero dejan de acceder a la consulta personal.
           const steps: { role: RoleCode; storeId: string | null }[] = [
             { role: ROLE.SUPERVISOR, storeId: newStore.id },
             { role: ROLE.CONTADOR, storeId: null },
+            { role: ROLE.ADMINISTRADOR, storeId: null },
           ];
           for (const { role, storeId } of steps) {
             const { id: roleId } = await f.tx.role.upsert({
@@ -598,6 +598,15 @@ describe.skipIf(!databaseUrl)(
             });
             // JWT nuevo con el rol y el local actuales; mismo userId.
             const promoted: AuthUser = { ...f.workerOne, role, storeId };
+
+            if (role !== ROLE.SUPERVISOR) {
+              await get('/my-tip-receipts', promoted).expect(403);
+              await download(
+                `/my-tip-receipts/${receipt.id}/download`,
+                promoted,
+              ).expect(403);
+              continue;
+            }
 
             const list = await get('/my-tip-receipts', promoted).expect(200);
             expect(list.body).toEqual([
@@ -613,19 +622,20 @@ describe.skipIf(!databaseUrl)(
               promoted,
             ).expect(200);
           }
-          expect(await downloadAudits(f, receipt.id)).toHaveLength(2);
+          expect(await downloadAudits(f, receipt.id)).toHaveLength(1);
         });
       });
 
-      it('contador y administrador sin constancias propias reciben listado vacío y 404 en una ajena', async () => {
+      it('contador y administrador reciben 403 en listado y descarga personal', async () => {
         await withinRollback(async (f) => {
           await pay(f);
           const peer = await receiptOf(f, f.workerOne.id);
           for (const user of [f.accountant, f.admin]) {
-            const list = await get('/my-tip-receipts', user).expect(200);
-            expect(list.body).toEqual([]);
-            expect(list.headers['cache-control']).toBe('private, no-store');
-            await get(`/my-tip-receipts/${peer.id}/download`, user).expect(404);
+            await get('/my-tip-receipts', user).expect(403);
+            await get(`/my-tip-receipts/${peer.id}/download`, user).expect(403);
+            await get(`/my-tip-receipts/${randomUUID()}/download`, user).expect(
+              403,
+            );
           }
           expect(await downloadAudits(f, peer.id)).toEqual([]);
         });

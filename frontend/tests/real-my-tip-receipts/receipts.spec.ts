@@ -2,7 +2,11 @@ import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile } from 'node:fs/promises';
-import { navigateTo } from '../helpers/navigation';
+import {
+  navigateTo,
+  openNavigation,
+  getNavigationSurface,
+} from '../helpers/navigation';
 test.skip(
   process.env.TEST_REAL_DISPOSABLE !== 'true',
   'Requiere sistema exclusivo con datos sintéticos.',
@@ -18,8 +22,11 @@ let peer = { id: '', email: '' };
 let empty = { id: '', email: '' };
 let supervisor = { id: '', email: '' };
 let accountant = { id: '', email: '' };
+let administrator = { id: '', email: '' };
 let ownId = '';
 let peerId = '';
+let supervisorReceiptId = '';
+let paidPoolId = '';
 async function login(
   context: BrowserContext,
   baseURL: string,
@@ -74,6 +81,7 @@ test.beforeAll(async ({ request }, info) => {
     ['empty', 'TRABAJADOR', 'Clara', otherStore.id],
     ['supervisor', 'SUPERVISOR', 'Persona', store.id],
     ['accountant', 'CONTADOR', 'Contador', null],
+    ['administrator', 'ADMINISTRADOR', 'Administradora', null],
   ] as const) {
     const res = await request.post(backend + '/users', {
       headers,
@@ -97,11 +105,12 @@ test.beforeAll(async ({ request }, info) => {
     if (key === 'empty') empty = account;
     if (key === 'supervisor') supervisor = account;
     if (key === 'accountant') accountant = account;
+    if (key === 'administrator') administrator = account;
   }
   // Solo pacto y horas son antecedentes SQL en esta base exclusiva. Los estados,
   // pagos, constancias y descargas se generan por las operaciones reales de T13.
   const sql =
-    "INSERT INTO tip_agreements (name,rule,valid_from,valid_to,store_id,created_by_id,updated_at) VALUES ('Pacto T16','PROPORTIONAL_TO_HOURS','2026-01-01','2026-12-31',:'store_id',:'supervisor',now()); INSERT INTO work_hours_records (period_start,period_end,hours_worked,store_id,worker_id,recorded_by_id,updated_at) SELECT p.start_date::date,p.end_date::date,w.hours,:'store_id',w.worker::uuid,:'supervisor',now() FROM (VALUES ('2026-01-05','2026-01-11'),('2026-01-12','2026-01-18'),('2026-01-19','2026-01-25')) AS p(start_date,end_date) CROSS JOIN (VALUES (:'worker',40),(:'peer',20)) AS w(worker,hours);";
+    "INSERT INTO tip_agreements (name,rule,valid_from,valid_to,store_id,created_by_id,updated_at) VALUES ('Pacto T16','PROPORTIONAL_TO_HOURS','2026-01-01','2026-12-31',:'store_id',:'supervisor',now()); INSERT INTO work_hours_records (period_start,period_end,hours_worked,store_id,worker_id,recorded_by_id,updated_at) SELECT p.start_date::date,p.end_date::date,w.hours,:'store_id',w.worker::uuid,:'supervisor',now() FROM (VALUES ('2026-01-05','2026-01-11'),('2026-01-12','2026-01-18'),('2026-01-19','2026-01-25')) AS p(start_date,end_date) CROSS JOIN (VALUES (:'worker',40),(:'peer',20),(:'supervisor',20)) AS w(worker,hours);";
   execFileSync(
     'docker',
     [
@@ -159,6 +168,7 @@ test.beforeAll(async ({ request }, info) => {
     });
     expect(preview.status()).toBe(201);
     const pool = (await preview.json()) as { id: string; version: number };
+    if (index === 0) paidPoolId = pool.id;
     if (index === 2) continue;
     const confirm = await request.post(
       backend + '/tip-pools/' + pool.id + '/confirm',
@@ -189,6 +199,7 @@ test.beforeAll(async ({ request }, info) => {
     }[]) {
       if (r.userId === worker.id) ownId = r.id;
       if (r.userId === peer.id) peerId = r.id;
+      if (r.userId === supervisor.id) supervisorReceiptId = r.id;
     }
   }
   // El historial propio se conserva aunque el trabajador cambie de local.
@@ -237,7 +248,7 @@ test('Portal: solo PAID propio, navegación, PDF verificado y aislamiento entre 
     page.getByRole('heading', { level: 1, name: 'Mis propinas' }),
   ).toBeVisible();
   await expect(page.getByRole('listitem')).toHaveCount(1);
-  await expect(page.getByRole('main')).toContainText('$16.667');
+  await expect(page.getByRole('main')).toContainText('$12.500');
   await expect(page.getByRole('main')).toContainText('Contador Prueba T16');
   await expect(page.getByRole('main')).not.toContainText('Bruno');
   await cleanLayout(page);
@@ -310,7 +321,7 @@ test('Portal: solo PAID propio, navegación, PDF verificado y aislamiento entre 
   await login(context, baseURL!, peer.email);
   await page.goto('/portal/propinas');
   await expect(page.getByRole('listitem')).toHaveCount(1);
-  await expect(page.getByRole('main')).toContainText('$8.333');
+  await expect(page.getByRole('main')).toContainText('$6.250');
   const peerList = await context.request.get('/api/my-tip-receipts');
   expect((await peerList.json())[0].userId).toBe(peer.id);
   expect(
@@ -401,10 +412,9 @@ test('Carga, fallo, reintento, vacío e integridad alterada sin descargar', asyn
   await cleanLayout(page);
 });
 
-test('Sesión, parámetros de identidad y escrituras rechazados; otros roles ven solo lo suyo', async ({
+test('Sesión, parámetros de identidad y escrituras rechazados', async ({
   context,
   baseURL,
-  page,
   request,
 }) => {
   expect((await request.get(baseURL + '/api/my-tip-receipts')).status()).toBe(
@@ -427,40 +437,148 @@ test('Sesión, parámetros de identidad y escrituras rechazados; otros roles ven
       })
     ).status(),
   ).toBe(405);
-  // SPRINT-4-T01: cualquier rol entra a Mis propinas, pero solo ve lo suyo.
-  for (const account of [supervisor, accountant]) {
-    await context.clearCookies();
-    await login(context, baseURL!, account.email);
-    const own = await context.request.get('/api/my-tip-receipts');
-    expect(own.status()).toBe(200);
-    expect(
-      ((await own.json()) as { userId: string }[]).every(
-        (item) => item.userId === account.id,
-      ),
-    ).toBe(true);
-    await page.goto('/portal/propinas');
-    await expect(page).toHaveURL(/\/portal\/propinas$/);
-    const auth = await request.post(backend + '/auth/login', {
-      data: { email: account.email, password },
-    });
-    expect(
-      (
-        await request.get(backend + '/my-tip-receipts', {
-          headers: {
-            Authorization: 'Bearer ' + (await auth.json()).accessToken,
-          },
-        })
-      ).status(),
-    ).toBe(200);
-  }
-  await context.clearCookies();
-  await login(
-    context,
-    baseURL!,
-    process.env.TEST_REAL_ADMIN_EMAIL ?? 'admin@moi-food.cl',
-    process.env.TEST_REAL_ADMIN_PASSWORD ?? 'admin-cambiar-en-produccion',
-  );
-  const adminOwn = await context.request.get('/api/my-tip-receipts');
-  expect(adminOwn.status()).toBe(200);
-  expect(Array.isArray(await adminOwn.json())).toBe(true);
 });
+
+for (const role of [
+  'TRABAJADOR',
+  'SUPERVISOR',
+  'ADMINISTRADOR',
+  'CONTADOR',
+] as const)
+  test(
+    role + ': navegación, URL directa y APIs de constancias',
+    async ({ page, context, request, baseURL }, info) => {
+      const account = {
+        TRABAJADOR: worker,
+        SUPERVISOR: supervisor,
+        ADMINISTRADOR: administrator,
+        CONTADOR: accountant,
+      }[role];
+      const allowed = role === 'TRABAJADOR' || role === 'SUPERVISOR';
+      await login(context, baseURL!, account.email);
+      await page.goto(role === 'TRABAJADOR' ? '/portal' : '/dashboard');
+      await openNavigation(page);
+      await expect(
+        getNavigationSurface(page).getByRole('link', {
+          name: 'Mis propinas',
+          exact: true,
+        }),
+      ).toHaveCount(allowed ? 1 : 0);
+      if (!allowed)
+        await expect(
+          page.getByRole('link', { name: 'Mis propinas', exact: true }),
+        ).toHaveCount(0);
+
+      await page.goto('/portal/propinas');
+      if (allowed) {
+        await expect(page).toHaveURL(/\/portal\/propinas$/);
+        await expect(
+          page.getByRole('heading', { level: 1, name: 'Mis propinas' }),
+        ).toBeVisible();
+        await expect(page.getByRole('listitem')).toHaveCount(1);
+        const button = page.getByRole('button', {
+          name: /Descargar constancia del/,
+        });
+        const box = await button.boundingBox();
+        expect(box?.height).toBeGreaterThanOrEqual(44);
+        expect(box?.width).toBeGreaterThanOrEqual(44);
+      } else {
+        await expect(page).toHaveURL(/\/dashboard\?reason=forbidden$/);
+        await expect(page.getByRole('status')).toContainText(
+          'Tu cuenta no tiene acceso',
+        );
+        await expect(
+          page.getByRole('link', { name: 'Mis propinas', exact: true }),
+        ).toHaveCount(0);
+      }
+
+      const auth = await request.post(backend + '/auth/login', {
+        data: { email: account.email, password },
+      });
+      expect(auth.status()).toBe(200);
+      const headers = {
+        Authorization: 'Bearer ' + (await auth.json()).accessToken,
+      };
+      const receiptId = role === 'SUPERVISOR' ? supervisorReceiptId : ownId;
+      for (const path of ['', '/' + receiptId + '/download']) {
+        const bff = await context.request.get('/api/my-tip-receipts' + path);
+        const direct = await request.get(backend + '/my-tip-receipts' + path, {
+          headers,
+        });
+        expect(bff.status()).toBe(allowed ? 200 : 403);
+        expect(direct.status()).toBe(allowed ? 200 : 403);
+        if (allowed && !path) {
+          for (const response of [bff, direct])
+            expect(await response.json()).toEqual([
+              expect.objectContaining({
+                id: receiptId,
+                userId: account.id,
+                status: 'PAID',
+              }),
+            ]);
+        }
+        if (allowed && path)
+          for (const response of [bff, direct]) {
+            const bytes = await response.body();
+            expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
+            expect(response.headers()['x-content-sha256']).toBe(
+              createHash('sha256').update(bytes).digest('hex'),
+            );
+          }
+      }
+
+      if (allowed) {
+        for (const id of [peerId, randomUUID()]) {
+          expect(
+            (
+              await context.request.get(
+                '/api/my-tip-receipts/' + id + '/download',
+              )
+            ).status(),
+          ).toBe(404);
+          expect(
+            (
+              await request.get(
+                backend + '/my-tip-receipts/' + id + '/download',
+                {
+                  headers,
+                },
+              )
+            ).status(),
+          ).toBe(404);
+        }
+      } else {
+        // Los roles de gestión conservan el listado y la descarga de otras personas.
+        const management = '/tip-pools/' + paidPoolId + '/receipts';
+        for (const response of [
+          await context.request.get('/api' + management),
+          await request.get(backend + management, { headers }),
+        ]) {
+          expect(response.status()).toBe(200);
+          expect(await response.json()).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ userId: worker.id }),
+              expect.objectContaining({ userId: peer.id }),
+              expect.objectContaining({ userId: supervisor.id }),
+            ]),
+          );
+        }
+        const path = management + '/' + worker.id + '/download';
+        for (const response of [
+          await context.request.get('/api' + path),
+          await request.get(backend + path, { headers }),
+        ]) {
+          expect(response.status()).toBe(200);
+          expect((await response.body()).subarray(0, 5).toString()).toBe(
+            '%PDF-',
+          );
+        }
+      }
+      await cleanLayout(page);
+      await page.screenshot({
+        path: info.outputPath('permisos-' + role.toLowerCase() + '.png'),
+        fullPage: true,
+        scale: 'css',
+      });
+    },
+  );

@@ -436,7 +436,10 @@ responden 400, otros roles 403. No cambia montos, versiones ni estados.
 
 `GET /my-tip-receipts` lista solo constancias propias de repartos PAID.
 `GET /my-tip-receipts/:id/download` descarga su PDF con SHA-256 en
-`X-Content-SHA256`. Ambas rutas son exclusivas del trabajador y fijan el
+`X-Content-SHA256`. Según SPRINT-4-T02, ambas rutas son exclusivas de
+`TRABAJADOR` y `SUPERVISOR`; `ADMINISTRADOR` y `CONTADOR` reciben 403.
+Estos últimos conservan listado y descarga de otras personas desde
+`/tip-pools/:id/receipts`. Las rutas personales fijan el
 usuario desde el JWT; no aceptan filtros de identidad. Ajena, inexistente
 o sin reparto pagado responde 404. Descarga auditada y sin caché. El PDF
 se genera desde el snapshot de T13, conservando el historial de local.
