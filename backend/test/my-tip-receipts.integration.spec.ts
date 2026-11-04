@@ -56,6 +56,11 @@ interface Fixture {
   pool: TipPoolResponse;
 }
 
+interface FixtureOptions {
+  // Horas del supervisor en el período; sin valor no participa del reparto.
+  supervisorHours?: number;
+}
+
 function sha256(content: Buffer): string {
   return createHash('sha256').update(content).digest('hex');
 }
@@ -122,9 +127,12 @@ describe.skipIf(!databaseUrl)(
     }
 
     // Mismo escenario del reparto demo: 25.000 entre dos trabajadores con 40 y
-    // 60 horas, que da 10.000 y 15.000. El reparto queda en DRAFT.
+    // 60 horas, que da 10.000 y 15.000. El reparto queda en DRAFT. Con
+    // supervisorHours el supervisor también registra horas y recibe su línea
+    // (25 horas: 8.000 / 12.000 / 5.000).
     async function createFixture(
       tx: Prisma.TransactionClient,
+      options: FixtureOptions,
     ): Promise<Fixture> {
       const storeName = `${STORE_NAME_PREFIX} ${randomUUID()}`;
       const store = await tx.store.create({
@@ -186,6 +194,14 @@ describe.skipIf(!databaseUrl)(
         data: [
           { workerId: workerOne.id, hoursWorked: 40 },
           { workerId: workerTwo.id, hoursWorked: 60 },
+          ...(options.supervisorHours
+            ? [
+                {
+                  workerId: supervisor.id,
+                  hoursWorked: options.supervisorHours,
+                },
+              ]
+            : []),
         ].map(({ workerId, hoursWorked }) => ({
           id: randomUUID(),
           periodStart: day(PERIOD.start),
@@ -218,12 +234,13 @@ describe.skipIf(!databaseUrl)(
 
     async function withinRollback(
       fn: (f: Fixture) => Promise<void>,
+      options: FixtureOptions = {},
     ): Promise<void> {
       try {
         await prisma.$transaction(
           async (tx) => {
             switchable.use(tx);
-            await fn(await createFixture(tx));
+            await fn(await createFixture(tx, options));
             throw new Rollback();
           },
           { maxWait: 30_000, timeout: 50_000 },
@@ -489,7 +506,7 @@ describe.skipIf(!databaseUrl)(
         });
       });
 
-      it('exige sesión y el rol TRABAJADOR', async () => {
+      it('exige sesión', async () => {
         await withinRollback(async (f) => {
           await pay(f);
           const receipt = await receiptOf(f, f.workerOne.id);
@@ -497,11 +514,120 @@ describe.skipIf(!databaseUrl)(
 
           await get('/my-tip-receipts', null).expect(401);
           await get(path, null).expect(401);
-          for (const user of [f.accountant, f.admin, f.supervisor]) {
-            await get('/my-tip-receipts', user).expect(403);
-            await get(path, user).expect(403);
-          }
           expect(await downloadAudits(f, receipt.id)).toEqual([]);
+        });
+      });
+    });
+
+    // SPRINT-4-T01 (revisión del PO): cualquier usuario autenticado consulta
+    // solo sus propias constancias PAID, sea cual sea su rol o local actual.
+    describe('cualquier rol en /my-tip-receipts', () => {
+      it('un supervisor con horas en el período lista y descarga su constancia', async () => {
+        await withinRollback(
+          async (f) => {
+            await get('/my-tip-receipts', f.supervisor).expect(200, []);
+            await pay(f);
+            const receipt = await receiptOf(f, f.supervisor.id);
+
+            const list = await get('/my-tip-receipts', f.supervisor).expect(
+              200,
+            );
+            expect(list.body).toEqual([
+              expect.objectContaining({
+                id: receipt.id,
+                userId: f.supervisor.id,
+                status: 'PAID',
+                hoursWorked: '25.00',
+                amount: 5000,
+              }),
+            ]);
+
+            const file = await download(
+              `/my-tip-receipts/${receipt.id}/download`,
+              f.supervisor,
+            ).expect(200);
+            const body = file.body as Buffer;
+            expect(body.subarray(0, 4).toString('latin1')).toBe('%PDF');
+            expect(file.headers['x-content-sha256']).toBe(sha256(body));
+            expect(await downloadAudits(f, receipt.id)).toEqual([
+              expect.objectContaining({
+                detail: { userId: f.supervisor.id },
+                userId: f.supervisor.id,
+              }),
+            ]);
+
+            // Sigue sin ver la constancia de un trabajador de su local.
+            const peer = await receiptOf(f, f.workerOne.id);
+            await get(
+              `/my-tip-receipts/${peer.id}/download`,
+              f.supervisor,
+            ).expect(404);
+            expect(await downloadAudits(f, peer.id)).toEqual([]);
+          },
+          { supervisorHours: 25 },
+        );
+      });
+
+      it('conserva la constancia tras un ascenso y un cambio de local con el mismo userId', async () => {
+        await withinRollback(async (f) => {
+          await pay(f);
+          const receipt = await receiptOf(f, f.workerOne.id);
+          const newStore = await f.tx.store.create({
+            data: {
+              id: randomUUID(),
+              name: `${STORE_NAME_PREFIX} ${randomUUID()}`,
+              city: 'Calera',
+              address: 'Calle 456',
+            },
+          });
+
+          // Ascenso a supervisor de otro local y luego a contador sin local.
+          const steps: { role: RoleCode; storeId: string | null }[] = [
+            { role: ROLE.SUPERVISOR, storeId: newStore.id },
+            { role: ROLE.CONTADOR, storeId: null },
+          ];
+          for (const { role, storeId } of steps) {
+            const { id: roleId } = await f.tx.role.upsert({
+              where: { code: role },
+              update: {},
+              create: { code: role, name: role },
+            });
+            await f.tx.user.update({
+              where: { id: f.workerOne.id },
+              data: { roleId, storeId },
+            });
+            // JWT nuevo con el rol y el local actuales; mismo userId.
+            const promoted: AuthUser = { ...f.workerOne, role, storeId };
+
+            const list = await get('/my-tip-receipts', promoted).expect(200);
+            expect(list.body).toEqual([
+              expect.objectContaining({
+                id: receipt.id,
+                userId: f.workerOne.id,
+                storeName: f.storeName,
+                amount: 10000,
+              }),
+            ]);
+            await download(
+              `/my-tip-receipts/${receipt.id}/download`,
+              promoted,
+            ).expect(200);
+          }
+          expect(await downloadAudits(f, receipt.id)).toHaveLength(2);
+        });
+      });
+
+      it('contador y administrador sin constancias propias reciben listado vacío y 404 en una ajena', async () => {
+        await withinRollback(async (f) => {
+          await pay(f);
+          const peer = await receiptOf(f, f.workerOne.id);
+          for (const user of [f.accountant, f.admin]) {
+            const list = await get('/my-tip-receipts', user).expect(200);
+            expect(list.body).toEqual([]);
+            expect(list.headers['cache-control']).toBe('private, no-store');
+            await get(`/my-tip-receipts/${peer.id}/download`, user).expect(404);
+          }
+          expect(await downloadAudits(f, peer.id)).toEqual([]);
         });
       });
     });
