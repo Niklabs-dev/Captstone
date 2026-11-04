@@ -13,11 +13,11 @@
 | Núcleo | `stores`, `roles`, `users`, `refresh_tokens`, `audit_logs` | Locales, control de acceso por rol y local, autenticación JWT y auditoría inmutable |
 | Gestor Documental | `document_types`, `documents`, `document_versions`, `payslips` | Documentación laboral con hash SHA-256, versionado y conservación por 5 años; liquidaciones de sueldo con estado de publicación |
 | Propinas | `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources` | Registro diario de propinas, pacto de reparto vigente, horas trabajadas y reparto con snapshots (art. 64 CT) |
-| Ventas y Caja | `sales`, `cash_closings`, `cash_closing_lines` | Ventas por local y cierre de caja diario con responsable, desglosado por medio de pago (esperado vs. contado con diferencia por línea) |
+| Ventas y Caja | `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries` | Ventas por local y cierre de caja por local, día y turno con responsable y quién cerró, desglosado por medio de pago (esperado vs. contado con diferencia por línea), conciliado contra MrComanda y Mercado Pago con sus vouchers y vinculado solo como referencia al registro diario de propinas |
 | Inventario | `products`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Stock por libro mayor de movimientos y conteos físicos que detectan mermas |
 | Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
 
-**23 tablas y 12 enums.** El Portal del Trabajador no agrega tablas: es una vista
+**26 tablas y 13 enums.** El Portal del Trabajador no agrega tablas: es una vista
 de solo lectura sobre `users`, `documents`, `tip_pool_lines` y `sales`, con
 aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 
@@ -29,13 +29,14 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 - **Sin borrado físico**: todas las FK usan `ON DELETE RESTRICT` por defecto
   (protege la trazabilidad), `SET NULL` en auditoría (el registro sobrevive a la
   anonimización del usuario) y `CASCADE` solo en datos estrictamente hijos
-  (tokens de sesión, líneas de reparto/cierre/conteo, fuentes de reparto).
+  (tokens de sesión, líneas de reparto/cierre/conteo, fuentes de reparto,
+  vouchers y vínculos a propinas del cierre de caja).
 - **Dinero en `DECIMAL(12,2)`** (CLP) y cantidades en `DECIMAL(12,3)`: nunca
   `float`, para evitar errores de redondeo en propinas, ventas e inventario.
 - **`date` para fechas de negocio** (períodos de reparto, día de cierre) y
   **`timestamptz` para marcas de tiempo** (Chile tiene horario de verano).
-- **Restricciones de negocio en la BD**: un cierre de caja por local y día
-  (`UNIQUE(store_id, business_date)`), una línea por medio de pago por cierre
+- **Restricciones de negocio en la BD**: un cierre de caja por local, día y
+  turno (`UNIQUE(store_id, business_date, shift)`), una línea por medio de pago por cierre
   (`UNIQUE(closing_id, payment_method)`), un reparto por local y período
   (`UNIQUE(store_id, period_start, period_end)`), una línea por trabajador por
   reparto (`UNIQUE(pool_id, user_id)`), hash SHA-256 único por versión de
@@ -105,13 +106,18 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
   pacto vigente (`tip_agreements`) y las horas trabajadas
   (`work_hours_records`) se fotografían en el reparto para que modificaciones
   posteriores no alteren un cálculo ya confirmado.
-- **Cierre de caja con responsable y desglose por medio de pago**:
-  `cash_closings.responsible_id` (obligatorio) y `opening_cash` (fondo de caja)
-  en la cabecera; `cash_closing_lines` registra **una línea por medio de pago**
-  (efectivo, débito, crédito, transferencia) con lo esperado según las ventas
-  (`expected_amount`), lo contado por el supervisor (`counted_amount`) y la
-  `difference` de la línea. El fondo se suma a lo esperado de la línea CASH y
-  la diferencia total del cierre se deriva sumando las líneas.
+- **Cierre de caja por turno con responsable y desglose por medio de pago**:
+  un cierre por local, día de negocio y turno
+  (`UNIQUE(store_id, business_date, shift)`); `cash_closings.responsible_id`
+  (obligatorio), `opening_cash` (fondo de caja) y, al cerrar, quién y cuándo
+  (`closed_by_id`, `closed_at`) en la cabecera; `cash_closing_lines` registra
+  **una línea por medio de pago** (efectivo, débito, crédito, transferencia)
+  con lo esperado según las ventas (`expected_amount`), lo contado por el
+  supervisor (`counted_amount`) y la `difference` de la línea. El fondo se suma
+  a lo esperado de la línea CASH y la diferencia total del cierre se deriva
+  sumando las líneas. Si hay diferencia, el motivo (`difference_reason`) es
+  obligatorio para cerrar, y un cierre `CLOSED` es inmutable (detalle en
+  [Cierres de caja por turno](#cierres-de-caja-por-turno-sprint-4-t08)).
 
 ## Trazabilidad del Gestor Documental
 
@@ -185,6 +191,63 @@ Reglas clave:
   horas (`tip_pool_lines.hours_worked`) y monto fuente
   (`tip_pool_sources.amount`).
 
+## Cierres de caja por turno (SPRINT-4-T08)
+
+Migración `20261104010649_cierres_caja_turno_conciliacion` (reversa manual en
+su `down.sql`, que Prisma no ejecuta).
+
+| Tabla | Rol |
+| --- | --- |
+| `cash_closings` | Cierre de un local, día de negocio y turno (`shift >= 1`; cada local define cuántos turnos tiene). Guarda responsable, fondo de caja, motivo de diferencia, quién y cuándo cerró y los totales de conciliación. |
+| `cash_closing_lines` | Una línea por medio de pago: esperado vs. contado y su diferencia. |
+| `cash_closing_vouchers` | Vouchers de respaldo de la conciliación: fuente (`MRCOMANDA` o `MERCADO_PAGO`), período de corte que cubren, monto, propina incluida y referencia. Puede haber varios por fuente y turno (terminales o cortes parciales). |
+| `cash_closing_tip_entries` | Vínculo de **solo referencia** entre el cierre y el registro diario de propinas (`tip_entries`) del mismo local y día. |
+
+Reglas clave (CHECK y triggers; aplican a cualquier vía de escritura):
+
+- **Unicidad por turno**: `UNIQUE(store_id, business_date, shift)`. Los cierres
+  anteriores a la migración quedaron en el turno 1; `shift` no tiene default,
+  así que la API siempre debe indicar el turno.
+- **Montos y diferencias**: montos `>= 0` y, por línea,
+  `difference = counted_amount - expected_amount`.
+- **Conciliación MrComanda / Mercado Pago** (CHECK
+  `cash_closings_reconciliation_difference_consistent`):
+
+  ```text
+  reconciliation_difference = mercado_pago_gross_amount
+                              - mercado_pago_tip_amount
+                              - mrcomanda_net_sales
+  ```
+
+  Positiva: Mercado Pago cobró más de lo vendido. La propina de Mercado Pago no
+  puede superar su bruto. **SUPUESTO pendiente de confirmar con el PO**: (a)
+  `mrcomanda_net_sales` es solo la porción de la venta cobrada por Mercado Pago
+  y (b) todos los montos incluyen IVA.
+- **Vouchers**: período válido (`period_end > period_start`), monto y propina
+  incluida `>= 0` con propina `<= monto`, y solo Mercado Pago informa propina
+  (en MrComanda es siempre 0). Al cerrar, los tres totales de conciliación del
+  cierre deben coincidir con la suma de sus vouchers.
+- **Ciclo `OPEN` → `CLOSED`**: el cierre se crea en `OPEN` (las líneas y
+  vouchers se agregan después) y solo puede pasar a `CLOSED`; `closed_at` y
+  `closed_by_id` están informados si y solo si está `CLOSED`
+  (`cash_closings_status_consistency`). En `OPEN` no cambian el local, el día ni
+  el turno.
+- **Motivo obligatorio con diferencia**: si alguna línea o la conciliación tiene
+  diferencia distinta de 0, no se puede cerrar sin `difference_reason`, que
+  tampoco puede quedar en blanco.
+- **Propinas solo como referencia**: la propina no es venta, no se suma a lo
+  esperado de ninguna línea ni a la venta neta y no se copia al cierre;
+  `tip_entries` sigue siendo la única fuente de los repartos. El vínculo exige
+  el mismo local y día que el cierre, y como el registro es diario y el cierre
+  por turno, un mismo registro puede vincularse a varios turnos.
+- **Inmutabilidad del cierre `CLOSED`** (triggers): se rechaza todo `UPDATE` o
+  `DELETE` del cierre y de sus líneas, vouchers y vínculos a propinas; las
+  ventas (`sales`) asociadas a un cierre cerrado no se crean, modifican,
+  desligan ni eliminan, y una venta solo puede asociarse a un cierre de su
+  mismo local. `TRUNCATE` sobre `cash_closings` se rechaza siempre, y sobre las
+  tablas hijas y `sales` si hay cierres cerrados. Solo
+  `session_replication_role = replica` (superusuario) omite estas reglas.
+
 ## Cómo ver el modelo de forma visual
 
 Hay cuatro opciones; las dos primeras están listas en este archivo:
@@ -244,9 +307,13 @@ erDiagram
   STORES ||--o{ SALES : "vende"
   CASH_CLOSINGS |o--o{ SALES : "agrupa"
   CASH_CLOSINGS ||--o{ CASH_CLOSING_LINES : "desglosa por medio de pago"
+  CASH_CLOSINGS ||--o{ CASH_CLOSING_VOUCHERS : "respalda la conciliación"
+  CASH_CLOSINGS ||--o{ CASH_CLOSING_TIP_ENTRIES : "referencia propinas"
+  TIP_ENTRIES ||--o{ CASH_CLOSING_TIP_ENTRIES : "vinculado (solo referencia)"
   USERS ||--o{ SALES : "registra"
-  STORES ||--o{ CASH_CLOSINGS : "cierra"
+  STORES ||--o{ CASH_CLOSINGS : "cierra por turno"
   USERS ||--o{ CASH_CLOSINGS : "es responsable"
+  USERS |o--o{ CASH_CLOSINGS : "cierra"
 
   STORES ||--o{ PRODUCTS : "almacena (vía movimientos)"
   PRODUCTS ||--o{ INVENTORY_MOVEMENTS : "mueve"
@@ -305,6 +372,11 @@ enum SaleChannel {
 enum CashClosingStatus {
   OPEN
   CLOSED
+}
+
+enum CashClosingVoucherSource {
+  MRCOMANDA [note: 'Venta neta del punto de venta']
+  MERCADO_PAGO [note: 'Cobro bruto; incluye la propina pagada con tarjeta']
 }
 
 enum UnitOfMeasure {
@@ -626,33 +698,69 @@ Table sales {
 Table cash_closings {
   id uuid [pk, default: `gen_random_uuid()`]
   business_date date [not null]
-  opening_cash decimal(12,2) [not null, note: 'Fondo de caja: se suma a lo esperado de la línea CASH']
-  status CashClosingStatus [not null, default: 'OPEN']
+  shift smallint [not null, note: 'Número de turno (>= 1, CHECK); sin default']
+  opening_cash decimal(12,2) [not null, note: 'Fondo de caja (>= 0): se suma a lo esperado de la línea CASH']
+  status CashClosingStatus [not null, default: 'OPEN', note: 'Se crea en OPEN; CLOSED es inmutable (triggers)']
   notes varchar(255)
-  closed_at timestamptz
+  difference_reason varchar(500) [note: 'Obligatorio para cerrar si hay diferencia; no en blanco (CHECK)']
+  mrcomanda_net_sales decimal(12,2) [not null, default: 0, note: 'Suma de vouchers MRCOMANDA al cerrar']
+  mercado_pago_gross_amount decimal(12,2) [not null, default: 0, note: 'Suma de vouchers MERCADO_PAGO al cerrar']
+  mercado_pago_tip_amount decimal(12,2) [not null, default: 0, note: 'Propina incluida en el bruto; <= bruto']
+  reconciliation_difference decimal(12,2) [not null, default: 0, note: 'mp_gross - mp_tip - mrcomanda_net (CHECK)']
+  closed_at timestamptz [note: 'Informado si y solo si CLOSED (CHECK)']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null]
   store_id uuid [not null, ref: > stores.id]
   responsible_id uuid [not null, ref: > users.id, note: 'Responsable asociado (obligatorio)']
+  closed_by_id uuid [ref: > users.id, note: 'Quién cerró; informado si y solo si CLOSED (CHECK)']
 
   indexes {
-    (store_id, business_date) [unique, note: 'Un cierre por local y día']
+    (store_id, business_date, shift) [unique, note: 'Un cierre por local, día y turno']
+    closed_by_id
   }
+
+  Note: 'Conciliación: SUPUESTO pendiente con el PO (venta neta MrComanda = porción cobrada por Mercado Pago; montos con IVA)'
 }
 
 Table cash_closing_lines {
   id uuid [pk, default: `gen_random_uuid()`]
   payment_method PaymentMethod [not null]
-  expected_amount decimal(12,2) [not null, note: 'Calculado desde las ventas del medio de pago']
-  counted_amount decimal(12,2) [not null, note: 'Declarado por el supervisor']
-  difference decimal(12,2) [not null, note: 'counted - expected; el total del cierre es la suma de líneas']
-  created_at timestamptz [not null, default: `now()`]
-  updated_at timestamptz [not null]
+  expected_amount decimal(12,2) [not null, note: 'Calculado desde las ventas del medio de pago (>= 0)']
+  counted_amount decimal(12,2) [not null, note: 'Declarado por el supervisor (>= 0)']
+  difference decimal(12,2) [not null, note: 'counted - expected (CHECK); el total del cierre es la suma de líneas']
   closing_id uuid [not null, ref: > cash_closings.id]
 
   indexes {
     (closing_id, payment_method) [unique, note: 'Una línea por medio de pago por cierre']
   }
+}
+
+Table cash_closing_vouchers {
+  id uuid [pk, default: `gen_random_uuid()`]
+  source CashClosingVoucherSource [not null]
+  period_start timestamptz [not null]
+  period_end timestamptz [not null, note: '> period_start (CHECK)']
+  amount decimal(12,2) [not null, note: '>= 0']
+  tip_included_amount decimal(12,2) [not null, default: 0, note: '<= amount; solo MERCADO_PAGO puede informarla']
+  reference varchar(100)
+  created_at timestamptz [not null, default: `now()`]
+  closing_id uuid [not null, ref: > cash_closings.id]
+
+  indexes {
+    (closing_id, source)
+  }
+}
+
+Table cash_closing_tip_entries {
+  closing_id uuid [not null, ref: > cash_closings.id]
+  tip_entry_id uuid [not null, ref: > tip_entries.id]
+
+  indexes {
+    (closing_id, tip_entry_id) [pk]
+    tip_entry_id
+  }
+
+  Note: 'Solo referencia: no copia montos; exige el mismo local y día que el cierre (trigger)'
 }
 
 Table products {
