@@ -42,7 +42,6 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
     { href: '/admin/alertas-dt', label: 'Alertas DT' },
     { href: '/liquidaciones', label: 'Liquidaciones' },
     { href: '/propinas/repartos', label: 'Reparto de propinas' },
-    { href: '/portal/propinas', label: 'Mis propinas' },
   ]);
 });
 
@@ -111,11 +110,17 @@ test('El portal es exclusivo del trabajador y no produce ciclos de redirección'
   }
 });
 
-test('Mis propinas está disponible y enlazada para cualquier rol (SPRINT-4-T01)', () => {
+test('Mis propinas solo se enlaza y permite a trabajador y supervisor (SPRINT-4-T02)', () => {
   for (const role of ROLES) {
-    assert.equal(getPageRedirect(role, '/portal/propinas'), null);
-    assert.ok(
+    const allowed = role === 'TRABAJADOR' || role === 'SUPERVISOR';
+    for (const path of ['/portal/propinas', '/portal/propinas/constancia'])
+      assert.equal(
+        getPageRedirect(role, path),
+        allowed ? null : '/dashboard?reason=forbidden',
+      );
+    assert.equal(
       getNavigationItems(role).some((item) => item.href === '/portal/propinas'),
+      allowed,
     );
   }
   assert.equal(

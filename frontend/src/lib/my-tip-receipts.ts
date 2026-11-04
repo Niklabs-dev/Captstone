@@ -1,4 +1,4 @@
-import { isRecord } from './auth';
+import { isRecord, type Role } from './auth';
 import { isUuid } from './users';
 import { isTipDate } from './tips';
 export interface OwnTipReceipt {
@@ -15,6 +15,9 @@ export interface OwnTipReceipt {
   createdAt: string;
 }
 export const MAX_RECEIPT_BYTES = 1024 * 1024;
+export function canReadOwnTipReceipts(role: Role | null): boolean {
+  return role === 'TRABAJADOR' || role === 'SUPERVISOR';
+}
 export function ownReceiptPath(
   path: string[],
   query: URLSearchParams,

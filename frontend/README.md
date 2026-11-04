@@ -1,5 +1,8 @@
 # Frontend Moi-food
 
+Constancias personales exclusivas de trabajador y supervisor (SPRINT-4-T02):
+[permisos, integración y pruebas](docs/SPRINT-4-T02.md).
+
 Reparto, validación y entrega de propinas para contador (SPRINT-3-T15):
 [guía y pruebas](docs/SPRINT-3-T15.md).
 
