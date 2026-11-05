@@ -316,6 +316,33 @@ con un error de configuración. Un valor vacío calcula sin feriados. La variabl
 está documentada en `.env.example` y se propaga al contenedor mediante
 `docker-compose.yml`.
 
+## Consulta consolidada de ventas, alertas y diferencias (SPRINT-4-T13)
+
+| Endpoint | Roles | Descripción |
+| --- | --- | --- |
+| `GET /sales-dashboard?date=YYYY-MM-DD` | `ADMINISTRADOR` | `{ businessDate, timeZone, periodStart, periodEnd, calculatedAt, stores, totals }`: resumen de cada local (ordenado por nombre, incluidos los que no tienen movimientos) y totales generales. Sin `date` se usa el día actual en Chile. |
+
+Solo lee y concilia las fuentes existentes, sin copiar cifras. Por local:
+
+- **`sales`**: ventas del día de negocio en hora de Chile (`sold_at` dentro de
+  `[periodStart, periodEnd)`), en **montos netos** (`gross_amount - tip_amount`).
+  Separa lo ya conciliado en un cierre (`closed*`) de lo que aún no tiene cierre
+  (`unclosed*`), con el desglose de los cuatro medios de pago.
+- **`cardTips`**: la propina con tarjeta como **concepto aparte**, nunca sumada a
+  la venta: `registeredAmount` del registro diario de propinas (débito y
+  crédito) y `closingsAmount` de los vouchers de Mercado Pago de los cierres.
+- **`closings`**: cierres de caja del día (SPRINT-4-T09). `netSalesAmount` es lo
+  esperado sin el fondo de caja y coincide con `sales.closedNetAmount` cuando
+  todas las ventas conciliadas son del mismo día. `cashDifference` (contado menos
+  esperado) y `voucherDifference` (Mercado Pago neto menos MrComanda) se informan
+  por separado para no contar dos veces el mismo descuadre.
+- **`pendingDifferences`**: cierres del día con alguna línea descuadrada o
+  descuadre de vouchers, con su motivo. Es la misma regla que exige
+  `differenceReason` al cerrar.
+- **`alerts`**: cantidad de alertas `OVERDUE`/`UPCOMING` de registro en la DT y
+  de entrega de propinas, calculadas por sus módulos al momento de la consulta
+  (no dependen de `date`).
+
 ## Documentación interactiva (Swagger / OpenAPI)
 
 La API genera su documentación OpenAPI con `@nestjs/swagger`:
