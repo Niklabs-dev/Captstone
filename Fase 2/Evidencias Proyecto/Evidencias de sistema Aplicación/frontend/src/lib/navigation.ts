@@ -15,6 +15,7 @@ export interface NavigationItem {
     | '/liquidaciones'
     | '/propinas/diarias'
     | '/propinas/repartos'
+    | '/cierres-caja'
     | '/portal/liquidaciones'
     | '/portal/documentos'
     | '/portal/propinas';
@@ -35,6 +36,7 @@ export function getNavigationView(pathname: string): {
     { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
     { href: '/propinas/repartos', title: 'Reparto de propinas' },
     { href: '/propinas/diarias', title: 'Registro diario de propinas' },
+    { href: '/cierres-caja', title: 'Cierre de caja' },
     { href: '/dashboard', title: 'Inicio' },
     { href: '/admin/usuarios', title: 'Usuarios y roles' },
     { href: '/admin/locales', title: 'Locales' },
@@ -70,6 +72,7 @@ export function getNavigationItems(
     return [
       home,
       { href: '/propinas/diarias', label: 'Propinas diarias' },
+      { href: '/cierres-caja', label: 'Cierre de caja' },
       MY_TIPS,
       { href: '/portal/documentos', label: 'Mis documentos' },
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
@@ -117,6 +120,11 @@ export function getPageRedirect(role: Role, pathname: string): string | null {
   if (
     (pathname === '/propinas/diarias' ||
       pathname.startsWith('/propinas/diarias/')) &&
+    role !== 'SUPERVISOR'
+  )
+    return '/dashboard?reason=forbidden';
+  if (
+    (pathname === '/cierres-caja' || pathname.startsWith('/cierres-caja/')) &&
     role !== 'SUPERVISOR'
   )
     return '/dashboard?reason=forbidden';

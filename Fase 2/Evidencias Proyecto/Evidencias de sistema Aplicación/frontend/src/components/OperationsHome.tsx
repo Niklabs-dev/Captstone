@@ -51,6 +51,7 @@ const actionLabels: Partial<Record<NavigationItem['href'], string>> = {
   '/admin/documentos': 'Gestionar documentos',
   '/admin/alertas-dt': 'Abrir alertas DT',
   '/liquidaciones': 'Abrir liquidaciones',
+  '/cierres-caja': 'Registrar cierre de caja',
 };
 
 export function OperationsHome({

@@ -13,6 +13,8 @@ export function getMobileNavigation(role: Role): {
       '/admin/usuarios',
       '/admin/locales',
       '/admin/documentos',
+      '/propinas/diarias',
+      '/cierres-caja',
     ].includes(item.href),
   );
   return {
@@ -34,6 +36,7 @@ export function getNavigationIcon(href: NavigationItem['href']) {
     '/liquidaciones': 'wallet',
     '/propinas/diarias': 'tips',
     '/propinas/repartos': 'tips',
+    '/cierres-caja': 'wallet',
     '/portal/propinas': 'tips',
     '/portal/documentos': 'document',
     '/portal/liquidaciones': 'wallet',
@@ -47,5 +50,6 @@ export function getMobileLabel(item: NavigationItem): string {
   if (item.href.includes('propinas')) return 'Propinas';
   if (item.href.includes('documentos')) return 'Documentos';
   if (item.href.includes('liquidaciones')) return 'Liquidaciones';
+  if (item.href === '/cierres-caja') return 'Caja';
   return item.label;
 }

@@ -122,13 +122,18 @@ export function ClosingDetailDialog({
             </button>
           </div>
         )}
-        {state.status === 'ready' && <Detail closing={state.closing} />}
+        {state.status === 'ready' && <ClosingDetail closing={state.closing} />}
       </div>
     </dialog>
   );
 }
 
-function Detail({ closing }: { closing: CashClosing }): ReactElement {
+// Se reutiliza en la vista de cierre del supervisor (SPRINT-4-T11).
+export function ClosingDetail({
+  closing,
+}: {
+  closing: CashClosing;
+}): ReactElement {
   const balanced = isClosingBalanced(closing);
   return (
     <>
