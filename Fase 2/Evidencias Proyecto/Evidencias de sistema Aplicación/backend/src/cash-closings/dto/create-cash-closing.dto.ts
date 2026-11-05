@@ -17,15 +17,15 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import {
-  CashClosingVoucherSource,
-  PaymentMethod,
-} from '../../generated/prisma/client.js';
+import { CashClosingVoucherSource } from '../../generated/prisma/client.js';
 import { IsCalendarDate } from '../../tips/validators/calendar-date.validator.js';
 import { MAX_CASH_AMOUNT } from '../types/cash-closings.types.js';
 
 const TIMESTAMP_WITH_ZONE =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/// Código estable del catálogo de medios de pago (mayúsculas, dígitos y _).
+const PAYMENT_METHOD_CODE = /^[A-Z0-9_]+$/;
 
 function toNumber({ value }: { value: unknown }): unknown {
   if (typeof value === 'number') return value;
@@ -39,12 +39,19 @@ function trim({ value }: { value: unknown }): unknown {
 
 export class CreateCashClosingLineDto {
   @ApiProperty({
-    description: 'Medio de pago cuyo monto físico o registrado se declara.',
-    enum: PaymentMethod,
-    example: PaymentMethod.CASH,
+    description:
+      'Código del medio de pago según el catálogo (p. ej. CASH o DEBIT_CARD).',
+    example: 'CASH',
   })
-  @IsEnum(PaymentMethod, { message: 'paymentMethod debe ser un medio válido' })
-  paymentMethod: PaymentMethod;
+  @Transform(trim)
+  @IsString({ message: 'paymentMethod debe ser un código de medio válido' })
+  @IsNotEmpty({ message: 'paymentMethod no puede estar vacío' })
+  @Matches(PAYMENT_METHOD_CODE, {
+    message:
+      'paymentMethod debe ser un código en mayúsculas, dígitos y guiones bajos',
+  })
+  @MaxLength(40, { message: 'paymentMethod no puede superar 40 caracteres' })
+  paymentMethod: string;
 
   @ApiProperty({
     description: 'Monto contado por el supervisor en CLP, sin centavos.',
@@ -119,6 +126,25 @@ export class CreateCashClosingVoucherDto {
 
   @ApiPropertyOptional({
     description:
+      'Código del medio de pago que respalda el voucher. Obligatorio en ' +
+      'vouchers MrComanda nuevos; solo los medios RECONCILABLE_CARD alimentan ' +
+      'la conciliación, Junaeb y otros externos quedan fuera sin doble conteo.',
+    example: 'DEBIT_CARD',
+    nullable: true,
+  })
+  @IsOptional()
+  @Transform(trim)
+  @IsString({ message: 'paymentMethod debe ser un código de medio válido' })
+  @IsNotEmpty({ message: 'paymentMethod no puede estar vacío' })
+  @Matches(PAYMENT_METHOD_CODE, {
+    message:
+      'paymentMethod debe ser un código en mayúsculas, dígitos y guiones bajos',
+  })
+  @MaxLength(40, { message: 'paymentMethod no puede superar 40 caracteres' })
+  paymentMethod?: string;
+
+  @ApiPropertyOptional({
+    description:
       'Referencia visible en el comprobante, sin espacios sobrantes.',
     example: 'RESUMEN DE VENTAS',
     maxLength: 100,
@@ -174,7 +200,8 @@ export class CreateCashClosingDto {
 
   @ApiProperty({
     description:
-      'Montos contados, uno por cada medio CASH, DEBIT_CARD, CREDIT_CARD y TRANSFER.',
+      'Montos contados, uno por cada medio requerido: los activos del ' +
+      'catálogo más cualquier medio con ventas del período, aunque esté inactivo.',
     type: CreateCashClosingLineDto,
     isArray: true,
   })
@@ -186,7 +213,8 @@ export class CreateCashClosingDto {
 
   @ApiProperty({
     description:
-      'Vouchers originales de MrComanda y Mercado Pago para el mismo período.',
+      'Vouchers originales de MrComanda y Mercado Pago para el mismo período. ' +
+      'Los vouchers MrComanda nuevos llevan el código de su medio de pago.',
     type: CreateCashClosingVoucherDto,
     isArray: true,
   })

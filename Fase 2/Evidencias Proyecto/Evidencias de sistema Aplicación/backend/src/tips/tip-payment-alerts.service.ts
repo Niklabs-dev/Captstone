@@ -19,7 +19,7 @@ import type {
 const TIP_PAYMENT_ALERT_SELECT = {
   id: true,
   businessDate: true,
-  paymentMethod: true,
+  paymentMethod: { select: { code: true, name: true } },
   amount: true,
   store: { select: { id: true, name: true } },
   poolSource: {
@@ -56,7 +56,11 @@ export class TipPaymentAlertsService {
   async list(currentUser: AuthUser): Promise<TipPaymentAlertCollection> {
     const entries = await this.prisma.tipEntry.findMany({
       where: {
-        paymentMethod: { in: ['DEBIT_CARD', 'CREDIT_CARD'] },
+        // Medios conciliables con tarjeta (catálogo): la plata tarda en
+        // llegar y la ley exige entregar la propina a tiempo. Incluye medios
+        // desactivados con registros pendientes: el dinero adeudado no
+        // desaparece al desactivar el medio.
+        paymentMethod: { is: { behavior: 'RECONCILABLE_CARD' } },
         OR: [
           { poolSource: null },
           { poolSource: { is: { pool: { status: { not: 'PAID' } } } } },
@@ -90,7 +94,8 @@ function toTipPaymentAlert(
     tipEntryId: entry.id,
     store: entry.store,
     businessDate: businessDateText,
-    paymentMethod: entry.paymentMethod,
+    paymentMethod: entry.paymentMethod.code,
+    paymentMethodName: entry.paymentMethod.name,
     amount: Number(entry.amount),
     pool: pool
       ? {

@@ -16,6 +16,10 @@ import type {
   TipPoolResponse,
 } from '../src/tips/types/tip-pools.types.js';
 import {
+  ensureDefaultPaymentMethods,
+  paymentMethodIdOf,
+} from './helpers/payment-methods.js';
+import {
   createSwitchablePrisma,
   type SwitchablePrisma,
 } from './helpers/switchable-prisma.js';
@@ -173,22 +177,28 @@ describe.skipIf(!databaseUrl)(
           createdById: supervisor.id,
         },
       });
+      await ensureDefaultPaymentMethods(tx);
+      const cashId = await paymentMethodIdOf(tx, 'CASH');
+      const debitId = await paymentMethodIdOf(tx, 'DEBIT_CARD');
       await tx.tipEntry.createMany({
         data: [
-          { date: '2026-01-05', paymentMethod: 'CASH' as const, amount: 10000 },
           {
-            date: '2026-01-06',
-            paymentMethod: 'DEBIT_CARD' as const,
-            amount: 15000,
+            id: randomUUID(),
+            businessDate: day('2026-01-05'),
+            paymentMethodId: cashId,
+            amount: 10000,
+            storeId: store.id,
+            responsibleId: supervisor.id,
           },
-        ].map(({ date, paymentMethod, amount }) => ({
-          id: randomUUID(),
-          businessDate: day(date),
-          paymentMethod,
-          amount,
-          storeId: store.id,
-          responsibleId: supervisor.id,
-        })),
+          {
+            id: randomUUID(),
+            businessDate: day('2026-01-06'),
+            paymentMethodId: debitId,
+            amount: 15000,
+            storeId: store.id,
+            responsibleId: supervisor.id,
+          },
+        ],
       });
       await tx.workHoursRecord.createMany({
         data: [

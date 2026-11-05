@@ -82,6 +82,18 @@ describe('Swagger de cierres de caja (SPRINT-4-T09)', () => {
         'difference',
       ]),
     );
+    const lineDto = schemas.CreateCashClosingLineDto as {
+      properties: Record<string, { type?: string; $ref?: string }>;
+    };
+    expect(lineDto.properties.paymentMethod).toMatchObject({
+      type: 'string',
+    });
+    const voucherDto = schemas.CreateCashClosingVoucherDto as {
+      properties: Record<string, unknown>;
+    };
+    expect(Object.keys(voucherDto.properties)).toEqual(
+      expect.arrayContaining(['paymentMethod']),
+    );
     expect(
       Object.keys(
         (schemas.CashClosingResponseDto as { properties: object }).properties,
@@ -100,8 +112,29 @@ describe('Swagger de cierres de caja (SPRINT-4-T09)', () => {
         'reconciliationDifference',
         'tipEntries',
         'tipFundAmount',
+        'hasDifferences',
+        'isBalanced',
+        'balanceStatus',
       ]),
     );
+    const responseDto = schemas.CashClosingResponseDto as {
+      properties: Record<string, { items?: { $ref?: string } }>;
+    };
+    expect(responseDto.properties.balanceStatus).toMatchObject({
+      enum: ['CUADRADO', 'NO_CUADRADO'],
+    });
+    expect(responseDto.properties.lines).toMatchObject({
+      items: { $ref: '#/components/schemas/CashClosingLineResponseDto' },
+    });
+    const lineResponse = schemas.CashClosingLineResponseDto as {
+      properties: Record<string, { type?: string }>;
+    };
+    expect(lineResponse.properties.paymentMethod).toMatchObject({
+      type: 'string',
+    });
+    expect(lineResponse.properties.paymentMethodName).toMatchObject({
+      type: 'string',
+    });
     for (const status of ['200', '201']) {
       expect(
         operation('post', '/cash-closings').responses[status],
@@ -123,13 +156,10 @@ describe('Swagger de cierres de caja (SPRINT-4-T09)', () => {
         },
       },
     });
+    const schemas = document.components?.schemas ?? {};
     expect(
       Object.keys(
-        (
-          document.components?.schemas.CashClosingConflictDto as {
-            properties: object;
-          }
-        ).properties,
+        (schemas.CashClosingConflictDto as { properties: object }).properties,
       ),
     ).toEqual(
       expect.arrayContaining([

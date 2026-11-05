@@ -27,7 +27,7 @@ import {
 const TIP_ENTRY_SELECT = {
   id: true,
   businessDate: true,
-  paymentMethod: true,
+  paymentMethod: { select: { code: true, name: true } },
   amount: true,
   createdAt: true,
   updatedAt: true,
@@ -45,7 +45,8 @@ function toTipEntryResponse(entry: TipEntryRecord): TipEntryResponse {
   return {
     id: entry.id,
     businessDate: formatDbDate(entry.businessDate),
-    paymentMethod: entry.paymentMethod,
+    paymentMethod: entry.paymentMethod.code,
+    paymentMethodName: entry.paymentMethod.name,
     amount: Number(entry.amount),
     store: entry.store,
     responsible: {
@@ -78,15 +79,24 @@ export class TipsService {
     await this.stores.assertActive(dto.storeId);
     this.assertAmount(dto.amount);
     const businessDate = this.parseBusinessDate(dto.businessDate);
-    const existing = await this.findByNaturalKey(dto, businessDate);
+    // La resolución por código no filtra por estado: el reintento idéntico y
+    // la detección de duplicados deben funcionar también con medios
+    // desactivados (registros históricos). El estado solo se exige al crear.
+    const paymentMethod = await this.findMethod(dto.paymentMethod);
+    const existing = await this.findByNaturalKey(
+      dto,
+      businessDate,
+      paymentMethod.id,
+    );
     if (existing) return this.resolveDuplicate(existing, dto, currentUser);
+    this.assertMethodAllowsCreate(dto.paymentMethod, paymentMethod);
 
     try {
       const entry = await this.prisma.tipEntry.create({
         data: {
           storeId: dto.storeId,
           businessDate,
-          paymentMethod: dto.paymentMethod,
+          paymentMethodId: paymentMethod.id,
           amount: new Prisma.Decimal(dto.amount),
           responsibleId: currentUser.id,
         },
@@ -95,7 +105,11 @@ export class TipsService {
       return { entry: toTipEntryResponse(entry), created: true };
     } catch (error) {
       if (isPrismaError(error, 'P2002')) {
-        const concurrent = await this.findByNaturalKey(dto, businessDate);
+        const concurrent = await this.findByNaturalKey(
+          dto,
+          businessDate,
+          paymentMethod.id,
+        );
         if (concurrent) {
           return this.resolveDuplicate(concurrent, dto, currentUser);
         }
@@ -115,7 +129,7 @@ export class TipsService {
         businessDate: this.parseBusinessDate(query.businessDate),
       },
       select: TIP_ENTRY_SELECT,
-      orderBy: [{ paymentMethod: 'asc' }, { id: 'asc' }],
+      orderBy: [{ paymentMethod: { code: 'asc' } }, { id: 'asc' }],
     });
     return entries.map(toTipEntryResponse);
   }
@@ -170,16 +184,56 @@ export class TipsService {
     });
   }
 
+  // Resuelve el código contra el catálogo sin filtrar por estado, para no
+  // romper reintentos ni lecturas de registros históricos con medios
+  // desactivados.
+  private async findMethod(code: string): Promise<{
+    id: string;
+    isActive: boolean;
+    availableForTips: boolean;
+  }> {
+    const paymentMethod = await this.prisma.paymentMethod.findUnique({
+      where: { code },
+      select: { id: true, isActive: true, availableForTips: true },
+    });
+    if (!paymentMethod) {
+      throw new BadRequestException(
+        `El medio de pago "${code}" no existe en el catálogo`,
+      );
+    }
+    return paymentMethod;
+  }
+
+  // Solo las altas nuevas exigen medio activo y elegible; la lectura y la
+  // edición de registros históricos conservan sus montos y medios aunque el
+  // catálogo los desactive después.
+  private assertMethodAllowsCreate(
+    code: string,
+    paymentMethod: { isActive: boolean; availableForTips: boolean },
+  ): void {
+    if (!paymentMethod.isActive) {
+      throw new BadRequestException(
+        `El medio de pago "${code}" está desactivado y no admite registros nuevos`,
+      );
+    }
+    if (!paymentMethod.availableForTips) {
+      throw new BadRequestException(
+        `El medio de pago "${code}" no admite propinas`,
+      );
+    }
+  }
+
   private async findByNaturalKey(
     dto: CreateTipEntryDto,
     businessDate: Date,
+    paymentMethodId: string,
   ): Promise<TipEntryRecord | null> {
     return this.prisma.tipEntry.findUnique({
       where: {
-        storeId_businessDate_paymentMethod: {
+        storeId_businessDate_paymentMethodId: {
           storeId: dto.storeId,
           businessDate,
-          paymentMethod: dto.paymentMethod,
+          paymentMethodId,
         },
       },
       select: TIP_ENTRY_SELECT,

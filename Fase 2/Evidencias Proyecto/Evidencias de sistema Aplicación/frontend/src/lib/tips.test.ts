@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   TIP_INACTIVE_STORE_MESSAGE,
-  TIP_METHODS,
   MAX_TIP_AMOUNT,
   isTipDate,
   tipBusinessDate,
@@ -11,6 +10,7 @@ import {
   parseTipInput,
   parseTipEntry,
   parseTipEntries,
+  sortTipEntriesByCatalog,
   tipTotals,
   formatClp,
   tipErrorMessage,
@@ -26,11 +26,12 @@ import { createTip, loadTips, TipRequestError } from './tips-client';
 const storeId = '61000000-0000-4000-8000-000000000311';
 const input = {
   businessDate: '2026-10-26',
-  paymentMethod: 'CASH' as const,
+  paymentMethod: 'CASH',
   amount: 12500,
 };
 const entry: TipEntry = {
   ...input,
+  paymentMethodName: 'Efectivo',
   id: '62000000-0000-4000-8000-000000000311',
   store: { id: storeId, name: 'Centro' },
   responsible: {
@@ -89,7 +90,7 @@ test('Los errores identifican cada campo y un formulario válido no tiene errore
   assert.deepEqual(
     tipFieldErrors({
       businessDate: input.businessDate,
-      paymentMethod: 'CASH',
+      paymentMethod: 'JUNEB',
       amount: '0',
     }),
     {},
@@ -114,11 +115,13 @@ test('El BFF solo admite los campos tipados del formulario y nunca identidad o l
     { ...input, amount: -1 },
     { ...input, amount: 1.5 },
     { ...input, businessDate: '2026-02-30' },
-    { ...input, paymentMethod: 'OTHER' },
+    { ...input, paymentMethod: '' },
+    { ...input, paymentMethod: 'CASH\u0000' },
+    { ...input, paymentMethod: 700 },
   ])
     assert.equal(parseTipInput(bad), null);
 });
-test('La proyección conserva solo los datos públicos del registro', () => {
+test('La proyección conserva solo los datos públicos del registro con su nombre de catálogo', () => {
   assert.deepEqual(
     parseTipEntry(
       {
@@ -146,6 +149,22 @@ test('Se rechazan registros de otro local, fecha, montos inválidos o identidade
   ])
     assert.equal(parseTipEntry(bad, storeId, input.businessDate), null);
 });
+test('El nombre del medio es obligatorio para mostrar históricos aunque esté desactivado', () => {
+  for (const bad of [
+    { ...entry, paymentMethodName: '' },
+    { ...entry, paymentMethodName: '   ' },
+    { ...entry, paymentMethodName: 12 },
+  ])
+    assert.equal(parseTipEntry(bad, storeId, input.businessDate), null);
+  const historic = parseTipEntry(
+    { ...entry, paymentMethod: 'JUNEB', paymentMethodName: 'Junaeb' },
+    storeId,
+    input.businessDate,
+  );
+  assert.ok(historic);
+  assert.equal(historic.paymentMethod, 'JUNEB');
+  assert.equal(historic.paymentMethodName, 'Junaeb');
+});
 test('La colección rechaza claves diarias duplicadas e identifica listas vacías válidas', () => {
   assert.deepEqual(parseTipEntries([], storeId, input.businessDate), []);
   assert.equal(
@@ -158,7 +177,14 @@ test('La colección rechaza claves diarias duplicadas e identifica listas vacía
   );
   assert.equal(
     parseTipEntries(
-      [entry, { ...entry, paymentMethod: 'TRANSFER' }],
+      [
+        entry,
+        {
+          ...entry,
+          paymentMethod: 'TRANSFER',
+          paymentMethodName: 'Transferencia',
+        },
+      ],
       storeId,
       input.businessDate,
     ),
@@ -166,29 +192,45 @@ test('La colección rechaza claves diarias duplicadas e identifica listas vacía
   );
   assert.equal(parseTipEntries({}, storeId, input.businessDate), null);
 });
-test('Los cuatro medios se ordenan y suman en CLP sin perder cero ni precisión', () => {
-  const entries = TIP_METHODS.map((method, index) => ({
-    ...entry,
-    id: '62000000-0000-4000-8000-00000000031' + index,
-    paymentMethod: method,
-    amount: index ? MAX_TIP_AMOUNT : 0,
-  }));
-  const parsed = parseTipEntries(
-    [...entries].reverse(),
-    storeId,
-    input.businessDate,
-  );
-  assert.ok(parsed);
+test('Los totales y el orden salen del catálogo, no de una lista fija de medios', () => {
+  const catalog = [
+    { code: 'CASH', sortOrder: 1 },
+    { code: 'DEBIT_CARD', sortOrder: 2 },
+    { code: 'CREDIT_CARD', sortOrder: 3 },
+  ];
+  const entries: TipEntry[] = [
+    {
+      ...entry,
+      id: '62000000-0000-4000-8000-000000000312',
+      paymentMethod: 'JUNEB',
+      paymentMethodName: 'Junaeb',
+      amount: MAX_TIP_AMOUNT,
+    },
+    {
+      ...entry,
+      id: '62000000-0000-4000-8000-000000000313',
+      paymentMethod: 'CASH',
+      paymentMethodName: 'Efectivo',
+      amount: 0,
+    },
+    {
+      ...entry,
+      id: '62000000-0000-4000-8000-000000000314',
+      paymentMethod: 'DEBIT_CARD',
+      paymentMethodName: 'Tarjeta de débito',
+      amount: MAX_TIP_AMOUNT,
+    },
+  ];
+  const ordered = sortTipEntriesByCatalog(entries, catalog);
   assert.deepEqual(
-    parsed.map((item) => item.paymentMethod),
-    TIP_METHODS,
+    ordered.map((item) => item.paymentMethod),
+    ['CASH', 'DEBIT_CARD', 'JUNEB'],
   );
-  assert.deepEqual(tipTotals(parsed), {
-    CASH: 0,
-    DEBIT_CARD: MAX_TIP_AMOUNT,
-    CREDIT_CARD: MAX_TIP_AMOUNT,
-    TRANSFER: MAX_TIP_AMOUNT,
-  });
+  const totals = tipTotals(entries);
+  assert.equal(totals.get('CASH'), 0);
+  assert.equal(totals.get('DEBIT_CARD'), MAX_TIP_AMOUNT);
+  assert.equal(totals.get('JUNEB'), MAX_TIP_AMOUNT);
+  assert.equal(totals.has('TRANSFER'), false);
   assert.match(formatClp(12500), /12\.500/);
   assert.match(formatClp(0), /\$\s*0/);
 });

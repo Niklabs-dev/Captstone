@@ -30,7 +30,7 @@ export class SalesDashboardController {
     summary:
       'Consulta consolidada de ventas, alertas y diferencias de caja por local',
     description:
-      'Agrupa por local las ventas netas del día en hora de Chile (sin propina), la propina con tarjeta como concepto separado, las cifras de los cierres de caja del día, los cierres con diferencias pendientes y las alertas vigentes de registro en la DT y de entrega de propinas.',
+      'Agrupa por local las ventas netas del día en hora de Chile (sin propina) con desglose dinámico por medio de pago del catálogo (activos más históricos con movimientos, con código y nombre), la propina con tarjeta como concepto separado, las cifras de los cierres de caja del día, los cierres con diferencias pendientes (líneas descuadradas o descuadre de vouchers: cualquiera de ellas deja el cierre NO_CUADRADO, aunque la diferencia de caja total compense a 0) y las alertas vigentes de registro en la DT y de entrega de propinas.',
   })
   @ApiOkResponse({
     description: 'Resumen por local y totales generales del día.',

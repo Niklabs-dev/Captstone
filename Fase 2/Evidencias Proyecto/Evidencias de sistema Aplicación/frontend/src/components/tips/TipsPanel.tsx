@@ -24,24 +24,33 @@ import {
 } from '@/components/ui/styles';
 import { createTip, loadTips, TipRequestError } from '@/lib/tips-client';
 import {
-  TIP_METHODS,
-  TIP_LABELS,
   formatClp,
   isTipDate,
   parseTipAmount,
   parseTipInput,
+  sortTipEntriesByCatalog,
   tipFieldErrors,
   tipTotals,
   tipErrorMessage,
   type TipEntry,
   type TipErrors,
 } from '@/lib/tips';
+import {
+  loadPaymentMethods,
+  PaymentMethodError,
+} from '@/lib/payment-methods-client';
+import type { PaymentMethod } from '@/lib/payment-methods';
 import { formatCalendarDate } from '@/lib/display-date';
 
 type ListState =
   | { status: 'loading' | 'idle'; key: string }
   | { status: 'error'; key: string; message: string }
   | { status: 'ready'; key: string; entries: TipEntry[] };
+
+type MethodsState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; methods: PaymentMethod[] };
 
 export function TipsPanel({
   store,
@@ -54,6 +63,8 @@ export function TipsPanel({
   const [method, setMethod] = useState('');
   const [amount, setAmount] = useState('');
   const [revision, setRevision] = useState(0);
+  const [methodsRevision, setMethodsRevision] = useState(0);
+  const [methods, setMethods] = useState<MethodsState>({ status: 'loading' });
   const [list, setList] = useState<ListState>({
     status: 'loading',
     key: initialDate + ':0',
@@ -70,6 +81,30 @@ export function TipsPanel({
     : list.key === key
       ? list
       : { status: 'loading', key };
+  // Los medios elegibles salen del catálogo administrado: solo activos con propinas.
+  useEffect(() => {
+    const controller = new AbortController();
+    loadPaymentMethods(
+      { isActive: true, availableForTips: true },
+      controller.signal,
+    ).then(
+      (catalog) => {
+        if (!controller.signal.aborted)
+          setMethods({ status: 'ready', methods: catalog });
+      },
+      (cause: unknown) => {
+        if (!controller.signal.aborted)
+          setMethods({
+            status: 'error',
+            message:
+              cause instanceof PaymentMethodError
+                ? cause.message
+                : 'No se pudieron cargar los medios de pago. Intenta nuevamente.',
+          });
+      },
+    );
+    return () => controller.abort();
+  }, [methodsRevision]);
   useEffect(() => {
     if (!isTipDate(date)) return;
     const controller = new AbortController();
@@ -97,8 +132,16 @@ export function TipsPanel({
     event.preventDefault();
     if (inFlight.current || !store.isActive || current.status !== 'ready')
       return;
+    if (methods.status !== 'ready' || !methods.methods.length) return;
     const fields = { businessDate: date, paymentMethod: method, amount };
     const validation = tipFieldErrors(fields);
+    // El medio elegido debe seguir activo y elegible en el catálogo cargado.
+    if (
+      !validation.paymentMethod &&
+      !methods.methods.some((item) => item.code === method)
+    )
+      validation.paymentMethod =
+        'El medio seleccionado ya no está disponible. Selecciona otro u actualiza la página.';
     setErrors(validation);
     setFailure('');
     setNotice('');
@@ -134,6 +177,28 @@ export function TipsPanel({
   const entries = current.status === 'ready' ? current.entries : [];
   const totals = tipTotals(entries);
   const preview = parseTipAmount(amount);
+  const catalog: readonly PaymentMethod[] =
+    methods.status === 'ready' ? methods.methods : [];
+  const orderedEntries = sortTipEntriesByCatalog(entries, catalog);
+  // Totales dinámicos: primero los medios activos del catálogo y después los
+  // códigos históricos que ya no tienen medio activo, con su nombre guardado.
+  const totalRows = [
+    ...catalog.map((item) => ({
+      code: item.code,
+      name: item.name,
+      amount: totals.get(item.code) ?? 0,
+    })),
+    ...orderedEntries
+      .filter(
+        (entry) => !catalog.some((item) => item.code === entry.paymentMethod),
+      )
+      .map((entry) => ({
+        code: entry.paymentMethod,
+        name: entry.paymentMethodName,
+        amount: totals.get(entry.paymentMethod) ?? 0,
+      })),
+  ];
+  const dayTotal = entries.reduce((sum, entry) => sum + entry.amount, 0);
   return (
     <div className="min-w-0 space-y-5">
       <section aria-labelledby="tip-form-title" className={filterPanelClass}>
@@ -206,14 +271,21 @@ export function TipsPanel({
                       paymentMethod: undefined,
                     }));
                   }}
+                  disabled={methods.status !== 'ready' || !catalog.length}
                   className={`${inputClass} mt-2`}
                   aria-invalid={Boolean(errors.paymentMethod)}
-                  aria-describedby="tip-method-error"
+                  aria-describedby="tip-method-help tip-method-error"
                 >
-                  <option value="">Selecciona un medio</option>
-                  {TIP_METHODS.map((code) => (
-                    <option key={code} value={code}>
-                      {TIP_LABELS[code]}
+                  <option value="">
+                    {methods.status === 'loading'
+                      ? 'Cargando medios…'
+                      : catalog.length
+                        ? 'Selecciona un medio'
+                        : 'Sin medios disponibles'}
+                  </option>
+                  {catalog.map((item) => (
+                    <option key={item.id} value={item.code}>
+                      {item.name}
                     </option>
                   ))}
                 </select>
@@ -227,7 +299,6 @@ export function TipsPanel({
                   autoComplete="off"
                   required
                   value={amount}
-                  maxLength={20}
                   onChange={(event) => {
                     setAmount(event.target.value);
                     setErrors((value) => ({ ...value, amount: undefined }));
@@ -249,6 +320,10 @@ export function TipsPanel({
               className="text-sm text-crit"
             >
               {errors.businessDate}
+            </p>
+            <p id="tip-method-help" className="text-xs leading-5 text-ink2">
+              Los medios disponibles los administra el administrador en Medios
+              de pago.
             </p>
             <p
               id="tip-method-error"
@@ -277,6 +352,28 @@ export function TipsPanel({
               Corrige los campos indicados antes de guardar.
             </p>
           )}
+          {methods.status === 'error' && (
+            <div role="alert" className="space-y-3 text-sm text-crit">
+              <p>{methods.message}</p>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  setMethods({ status: 'loading' });
+                  setMethodsRevision((value) => value + 1);
+                }}
+                className={buttonClass}
+              >
+                Reintentar carga de medios
+              </button>
+            </div>
+          )}
+          {methods.status === 'ready' && !catalog.length && (
+            <p role="alert" className="text-sm text-warn">
+              No hay medios de pago activos para propinas. El administrador
+              puede habilitarlos en Medios de pago.
+            </p>
+          )}
           {failure && (
             <p
               role="alert"
@@ -287,7 +384,13 @@ export function TipsPanel({
           )}
           <button
             type="submit"
-            disabled={saving || !store.isActive || current.status !== 'ready'}
+            disabled={
+              saving ||
+              !store.isActive ||
+              current.status !== 'ready' ||
+              methods.status !== 'ready' ||
+              !catalog.length
+            }
             className={primaryButtonClass}
           >
             {saving ? 'Guardando…' : 'Guardar propinas'}
@@ -352,19 +455,21 @@ export function TipsPanel({
         )}
         {current.status === 'ready' && (
           <>
-            <dl
-              aria-label="Totales por medio de pago"
-              className="grid grid-cols-2 gap-4 border-b border-line p-5 xl:grid-cols-4"
-            >
-              {TIP_METHODS.map((code) => (
-                <div key={code} className="min-w-0">
-                  <dt className="text-xs text-ink2">{TIP_LABELS[code]}</dt>
-                  <dd className="mt-2 break-words text-sm font-semibold tabular-nums">
-                    {formatClp(totals[code])}
-                  </dd>
-                </div>
-              ))}
-            </dl>
+            {totalRows.length > 0 && (
+              <dl
+                aria-label="Totales por medio de pago"
+                className="grid grid-cols-2 gap-4 border-b border-line p-5 xl:grid-cols-4"
+              >
+                {totalRows.map((row) => (
+                  <div key={row.code} className="min-w-0">
+                    <dt className="text-xs text-ink2">{row.name}</dt>
+                    <dd className="mt-2 break-words text-sm font-semibold tabular-nums">
+                      {formatClp(row.amount)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
             {entries.length ? (
               <>
                 <p className="px-5 py-3 text-xs text-ink2 lg:hidden">
@@ -401,7 +506,7 @@ export function TipsPanel({
                       </tr>
                     </thead>
                     <tbody>
-                      {entries.map((entry) => (
+                      {orderedEntries.map((entry) => (
                         <tr
                           key={entry.id}
                           className="border-b border-line last:border-b-0 hover:bg-tint"
@@ -410,7 +515,7 @@ export function TipsPanel({
                             {formatCalendarDate(entry.businessDate)}
                           </td>
                           <td className={tableCellClass}>
-                            {TIP_LABELS[entry.paymentMethod]}
+                            {entry.paymentMethodName}
                           </td>
                           <td
                             className={`${tableCellClass} whitespace-nowrap font-semibold tabular-nums`}
@@ -452,9 +557,7 @@ export function TipsPanel({
               {entries.length} {entries.length === 1 ? 'registro' : 'registros'}{' '}
               · Total del día:{' '}
               <strong className="font-semibold text-ink">
-                {formatClp(
-                  Object.values(totals).reduce((sum, value) => sum + value, 0),
-                )}
+                {formatClp(dayTotal)}
               </strong>
             </p>
           </>

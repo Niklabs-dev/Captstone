@@ -11,13 +11,18 @@ import {
   formatDbDate,
   toDbDate,
 } from '../src/documents/utils/document-dates.util.js';
-import { PaymentMethod, PrismaClient } from '../src/generated/prisma/client.js';
+import { PrismaClient } from '../src/generated/prisma/client.js';
 import type {
   TipPaymentAlert,
   TipPaymentAlertCollection,
 } from '../src/tips/types/tip-payment-alerts.types.js';
 import type { TipPoolResponse } from '../src/tips/types/tip-pools.types.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
+import {
+  ensureDefaultPaymentMethods,
+  ensurePaymentMethod,
+  paymentMethodIdOf,
+} from './helpers/payment-methods.js';
 
 type App = Parameters<typeof request>[0];
 
@@ -62,6 +67,10 @@ describe.skipIf(!databaseUrl)(
         });
         await tx.tipEntry.deleteMany({
           where: { store: { name: STORE_NAME } },
+        });
+        // Medios de pago creados solo por estos tests (prefijo propio).
+        await tx.paymentMethod.deleteMany({
+          where: { code: { startsWith: 'TIPSTEST_ALERTS_' } },
         });
       });
       await purgeTestAuditLogs(prisma, {
@@ -121,13 +130,17 @@ describe.skipIf(!databaseUrl)(
 
     async function seedEntry(
       businessDate: string,
-      paymentMethod: PaymentMethod,
+      paymentMethodCode: string,
       amount: number,
     ): Promise<string> {
+      const paymentMethodId = await paymentMethodIdOf(
+        prisma,
+        paymentMethodCode,
+      );
       const entry = await prisma.tipEntry.create({
         data: {
           businessDate: day(businessDate),
-          paymentMethod,
+          paymentMethodId,
           amount,
           storeId,
           responsibleId: ids.supervisor,
@@ -183,6 +196,8 @@ describe.skipIf(!databaseUrl)(
           create: { code, name: code },
         });
       }
+      await ensureDefaultPaymentMethods(prisma);
+
       const store = await prisma.store.create({
         data: { name: STORE_NAME, city: 'Melipilla', address: 'Calle 123' },
       });
@@ -224,6 +239,7 @@ describe.skipIf(!databaseUrl)(
       expect(alerts[0]).toMatchObject({
         businessDate: '2026-10-01',
         paymentMethod: 'DEBIT_CARD',
+        paymentMethodName: 'Tarjeta de débito',
         amount: 3000,
         pool: null,
         deadline: '2026-10-13',
@@ -247,6 +263,47 @@ describe.skipIf(!databaseUrl)(
       expect(alerts[2].daysRemaining).toBeGreaterThanOrEqual(0);
       expect(alerts.map((alert) => alert.amount)).not.toContain(6000);
       expect(alerts.map((alert) => alert.amount)).not.toContain(7000);
+    });
+
+    it('sigue alertando con medios conciliables desactivados y omite externos', async () => {
+      // Tarjeta histórica desactivada: la deuda con el trabajador sigue
+      // vigente y la alerta conserva código y nombre del catálogo.
+      const legacyCard = await ensurePaymentMethod(prisma, {
+        code: 'TIPSTEST_ALERTS_CARD_HIST',
+        name: 'Tarjeta histórica',
+        behavior: 'RECONCILABLE_CARD',
+        isActive: false,
+        availableForTips: true,
+      });
+      const legacyId = await seedEntry(
+        '2026-10-03',
+        'TIPSTEST_ALERTS_CARD_HIST',
+        2500,
+      );
+
+      // Externo activo (no conciliable): nunca genera alerta de plazo.
+      await ensurePaymentMethod(prisma, {
+        code: 'TIPSTEST_ALERTS_JUNAEB',
+        name: 'Junaeb test',
+        behavior: 'EXTERNAL_OTHER',
+        isActive: true,
+        availableForTips: false,
+      });
+      await seedEntry('2026-10-03', 'TIPSTEST_ALERTS_JUNAEB', 3500);
+
+      const alerts = await ownAlerts();
+      const legacy = alerts.find((alert) => alert.tipEntryId === legacyId);
+      expect(legacy).toMatchObject({
+        paymentMethod: legacyCard.code,
+        paymentMethodName: 'Tarjeta histórica',
+        amount: 2500,
+        status: 'OVERDUE',
+      });
+      expect(alerts.map((alert) => alert.amount)).not.toContain(3500);
+
+      await prisma.tipEntry.deleteMany({
+        where: { id: { in: [legacyId] } },
+      });
     });
 
     it('mantiene DRAFT y CONFIRMED, y el pago antes del plazo elimina la alerta del reparto enterado', async () => {

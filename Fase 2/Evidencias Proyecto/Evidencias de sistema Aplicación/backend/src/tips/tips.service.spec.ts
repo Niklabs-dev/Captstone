@@ -20,7 +20,7 @@ const USER: AuthUser = {
 const ENTRY = {
   id: 'a9000000-0000-4000-8000-000000000005',
   businessDate: new Date('2026-06-15T00:00:00.000Z'),
-  paymentMethod: 'CASH' as const,
+  paymentMethod: { code: 'CASH' as const, name: 'Efectivo' },
   amount: new Prisma.Decimal(12500),
   createdAt: new Date('2026-06-15T12:00:00.000Z'),
   updatedAt: new Date('2026-06-15T12:00:00.000Z'),
@@ -42,10 +42,19 @@ const CREATE_DTO: CreateTipEntryDto = {
   amount: 12500,
 };
 
+const CASH_METHOD = {
+  id: 'b8000000-0000-4000-8000-000000000001',
+  isActive: true,
+  availableForTips: true,
+};
+
 function createService() {
   const prisma = {
     $transaction: vi.fn(),
     $queryRaw: vi.fn().mockResolvedValue([]),
+    paymentMethod: {
+      findUnique: vi.fn(),
+    },
     tipEntry: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -57,6 +66,7 @@ function createService() {
   prisma.$transaction.mockImplementation(
     (callback: (client: unknown) => Promise<unknown>) => callback(prisma),
   );
+  prisma.paymentMethod.findUnique.mockResolvedValue(CASH_METHOD);
   const stores = { assertActive: vi.fn().mockResolvedValue({}) };
   return {
     service: new TipsService(
@@ -82,14 +92,88 @@ describe('TipsService', () => {
       name: 'Supervisor Demo',
     });
     expect(stores.assertActive).toHaveBeenCalledWith(CREATE_DTO.storeId);
+    expect(prisma.paymentMethod.findUnique).toHaveBeenCalledWith({
+      where: { code: 'CASH' },
+      select: { id: true, isActive: true, availableForTips: true },
+    });
     expect(prisma.tipEntry.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           responsibleId: USER.id,
           businessDate: new Date('2026-06-15T00:00:00.000Z'),
+          paymentMethodId: CASH_METHOD.id,
         }) as Record<string, unknown>,
       }),
     );
+  });
+
+  it('resuelve el código contra el catálogo y expone código y nombre', async () => {
+    const { service, prisma } = createService();
+    prisma.tipEntry.findUnique.mockResolvedValue(null);
+    prisma.tipEntry.create.mockResolvedValue({
+      ...ENTRY,
+      paymentMethod: { code: 'DEBIT_CARD', name: 'Tarjeta de débito' },
+    });
+
+    const result = await service.create(
+      { ...CREATE_DTO, paymentMethod: 'DEBIT_CARD' },
+      USER,
+    );
+
+    expect(result.entry.paymentMethod).toBe('DEBIT_CARD');
+    expect(result.entry.paymentMethodName).toBe('Tarjeta de débito');
+  });
+
+  it('rechaza un medio desconocido, inactivo o que no admite propinas', async () => {
+    const unknown = createService();
+    unknown.prisma.paymentMethod.findUnique.mockResolvedValue(null);
+    await expect(
+      unknown.service.create(
+        { ...CREATE_DTO, paymentMethod: 'BILLETERA' },
+        USER,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(unknown.prisma.tipEntry.create).not.toHaveBeenCalled();
+
+    const inactive = createService();
+    inactive.prisma.paymentMethod.findUnique.mockResolvedValue({
+      ...CASH_METHOD,
+      isActive: false,
+    });
+    await expect(
+      inactive.service.create(CREATE_DTO, USER),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(inactive.prisma.tipEntry.create).not.toHaveBeenCalled();
+
+    const notForTips = createService();
+    notForTips.prisma.paymentMethod.findUnique.mockResolvedValue({
+      ...CASH_METHOD,
+      availableForTips: false,
+    });
+    await expect(
+      notForTips.service.create(CREATE_DTO, USER),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(notForTips.prisma.tipEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('lee y lista registros históricos con medios desactivados y su nombre', async () => {
+    const { service, prisma } = createService();
+    // La lectura no exige medio activo: se resuelve por código sin filtro.
+    prisma.tipEntry.findMany.mockResolvedValue([
+      {
+        ...ENTRY,
+        paymentMethod: { code: 'JUNAEB', name: 'Junaeb' },
+      },
+    ]);
+
+    const list = await service.findAll(
+      { storeId: USER.storeId as string, businessDate: '2026-06-15' },
+      USER,
+    );
+
+    expect(list).toHaveLength(1);
+    expect(list[0].paymentMethod).toBe('JUNAEB');
+    expect(list[0].paymentMethodName).toBe('Junaeb');
   });
 
   it('devuelve el mismo registro ante un reintento idéntico', async () => {

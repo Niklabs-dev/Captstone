@@ -28,13 +28,14 @@ test('El portal móvil no incluye rutas administrativas ni pierde constancias', 
   assert.ok(primary.every((item) => item.href.startsWith('/portal')));
   assert.ok(primary.some((item) => item.href === '/portal/propinas'));
 });
-test('Más conserva auditoría, alertas, liquidaciones y reparto del administrador', () => {
+test('Más conserva auditoría, alertas, medios de pago, liquidaciones y reparto del administrador', () => {
   const { additional } = getMobileNavigation('ADMINISTRADOR');
   assert.deepEqual(
     additional.map((item) => item.href),
     [
       '/admin/auditoria',
       '/admin/alertas-dt',
+      '/admin/medios-pago',
       '/liquidaciones',
       '/propinas/repartos',
     ],

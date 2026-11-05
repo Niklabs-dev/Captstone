@@ -48,9 +48,10 @@ $ npm run prisma:migrate          # desarrollo (también crea migraciones nuevas
 $ npm run prisma:migrate:deploy   # producción/CI (solo aplica)
 
 # datos base: roles (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR),
-# tipos de documento laboral, tres locales iniciales y administrador inicial.
-# Idempotente; no revierte los cambios administrativos de los locales ni carga
-# datos demo en producción (SEED_DEMO_DATA=false por defecto).
+# tipos de documento laboral, catálogo de medios de pago (CASH, DEBIT_CARD,
+# CREDIT_CARD y TRANSFER), tres locales iniciales y administrador inicial.
+# Idempotente; no revierte los cambios administrativos de los locales ni del
+# catálogo ni carga datos demo en producción (SEED_DEMO_DATA=false por defecto).
 $ npm run prisma:seed
 
 # opcional, solo desarrollo/pruebas: agrega usuarios, pacto, horas, entradas
@@ -184,6 +185,10 @@ Los endpoints marcados con `@Audited()` quedan registrados automáticamente (`Au
 | `PAYSLIP_PUBLISHED` | Publicación de una liquidación (detalle: trabajador, período, fecha de firma, fecha de publicación y SHA-256); el responsable es el usuario del evento. |
 | `PAYSLIP_DOWNLOADED` | Descarga de una liquidación propia por el trabajador (detalle: versión y resultado de integridad `VALID`/`ALTERED`). |
 | `TIP_ENTRY_CREATED` / `TIP_ENTRY_UPDATED` / `TIP_ENTRY_DELETED` | Creación, corrección y eliminación de propinas diarias (detalle: local, responsable, fecha, medio y monto). |
+| `PAYMENT_METHOD_CREATED` / `PAYMENT_METHOD_UPDATED` | Alta y edición de medios de pago del catálogo (detalle limitado a los campos administrables; el código estable nunca cambia). |
+| `PAYMENT_METHOD_DEACTIVATED` / `PAYMENT_METHOD_REACTIVATED` | Baja lógica y reactivación de medios de pago; desactivar no borra ni oculta el historial. |
+| `MRCOMANDA_SALES_IMPORTED` | Ingreso de totales netos de ventas MrComanda por local y período (detalle: local, período, si creó ventas y neto total); el reintento idéntico no se audita de nuevo. |
+| `CASH_CLOSING_CREATED` | Confirmación de un cierre de caja con sus totales de conciliación, fondo de propinas y motivo de diferencia. |
 
 El detalle se arma solo con campos declarados (listas blancas): nunca incluye contraseñas ni el contenido de los archivos.
 
@@ -261,7 +266,13 @@ que en la auditoría, solo se omiten con `session_replication_role = replica`
 El CRUD de propinas diarias usa `tip_entries` como única fuente de los repartos.
 `sales.tipAmount` se reconcilia con un registro mediante `sales.tipEntryId` y no
 se suma como una segunda fuente. El responsable se obtiene siempre del JWT;
-el body no acepta `responsibleId` ni datos personales del trabajador.
+el body no acepta `responsibleId` ni datos personales del trabajador. El medio
+de pago se resuelve contra el catálogo (`payment_methods`, ver
+[Catálogo de medios de pago](#catálogo-de-medios-de-pago-sprint-4-t32)): al
+crear se exige medio activo y habilitado para propinas (`availableForTips`),
+mientras que la lectura, el reintento idéntico y la edición de registros
+históricos siguen funcionando aunque el medio se desactive después, mostrando
+siempre su código y nombre.
 
 | Endpoint | Roles | Descripción |
 | --- | --- | --- |
@@ -316,6 +327,108 @@ con un error de configuración. Un valor vacío calcula sin feriados. La variabl
 está documentada en `.env.example` y se propaga al contenedor mediante
 `docker-compose.yml`.
 
+## Catálogo de medios de pago (SPRINT-4-T32)
+
+Los medios de pago viven en la tabla relacional `payment_methods`, única
+fuente para ventas, propinas, líneas de cierre y clasificación de vouchers.
+Reemplaza al enum fijo anterior: el `code` es estable e inmutable (contrato
+operativo con el frontend y los DTO) y el resto de los atributos se administra
+sin borrar historial — desactivar un medio no elimina ni oculta sus
+movimientos pasados. Cada medio tiene `behavior` (`CASH`, `RECONCILABLE_CARD`,
+`EXTERNAL_OTHER`) que decide su rol en el cierre y la conciliación, y
+`availableForTips` para habilitarlo en propinas. El seed siembra los cuatro
+medios iniciales (CASH, DEBIT_CARD, CREDIT_CARD, TRANSFER) por código, sin
+revertir la administración posterior.
+
+Las mutaciones son exclusivas del rol `ADMINISTRADOR` (403 para el resto):
+
+| Endpoint | Descripción |
+| --- | --- |
+| `GET /payment-methods` | Lista el catálogo ordenado por `sortOrder`/código. Filtros opcionales `isActive` y `availableForTips`; sin filtros incluye inactivos. |
+| `POST /payment-methods` | Crea un medio con `code` (UPPER_SNAKE, único e inmutable), `name`, `sortOrder`, `behavior` y `availableForTips`. 409 si el código ya existe. |
+| `PATCH /payment-methods/:id` | Edita `name`, `sortOrder`, `behavior` y `availableForTips`; el código no se modifica. 400 si no hay campos que actualizar. |
+| `PATCH /payment-methods/:id/deactivate` | Baja lógica: no admite cargas nuevas pero conserva su historial visible. Idempotente. |
+| `PATCH /payment-methods/:id/reactivate` | Reactiva el medio. Idempotente. |
+
+No existe borrado físico: las ventas, propinas, líneas y vouchers históricos
+siguen referenciando el medio con su código y nombre. Los cambios se
+serializan con bloqueo de fila y se auditan (`PAYMENT_METHOD_CREATED`,
+`PAYMENT_METHOD_UPDATED`, `PAYMENT_METHOD_DEACTIVATED`,
+`PAYMENT_METHOD_REACTIVATED`) sin registrar el cuerpo completo de la
+solicitud.
+
+## Ingreso de ventas MrComanda (SPRINT-4-T32)
+
+`POST /sales/mrcomanda` (`SUPERVISOR` de su local o `ADMINISTRADOR`) registra
+atómicamente los totales **netos** del punto de venta por local, período y
+medio de pago, como ventas agregadas con fuente `MRCOMANDA` (`tipAmount`
+siempre 0: PROPINAS conserva su fuente propia en `tip_entries`). El período
+debe venir con zona horaria explícita y quedar dentro de un único día de
+negocio en Chile.
+
+- El lote se serializa por local (bloqueo de la fila del local) y cada medio
+  es independiente: el solape de uno no bloquea a otro.
+- Un reintento idéntico no duplica: devuelve las ventas ya registradas con
+  `created: false` y no se audita de nuevo. Un período solapado con contenido
+  distinto responde 409.
+- Lo conciliado es inmutable: el solapamiento con ventas ya vinculadas a un
+  cierre `CLOSED` se rechaza (409); un cierre cerrado de otro turno del mismo
+  día no bloquea cargas de períodos no solapados.
+- Solo se cargan medios activos; los códigos se normalizan a mayúsculas y la
+  respuesta expone código, nombre y neto por medio, sin mezclar cobro POS ni
+  propinas.
+- **No mezclar con ventas manuales del mismo corte**: los totales MrComanda
+  agregan el período por medio, así que registrar además ventas manuales
+  (`source` MANUAL) con `soldAt` dentro del mismo corte haría que el cierre
+  de caja las sume dos veces (una como total agregado y otra como venta
+  manual). Elige una sola fuente por corte.
+- El ingreso efectivo se audita como `MRCOMANDA_SALES_IMPORTED` con local,
+  período, si creó ventas y neto total.
+
+## Cierre de caja por turno (SPRINT-4-T09, dinámico en SPRINT-4-T32)
+
+Un cierre por local, día de negocio y turno (`UNIQUE(storeId, businessDate,
+shift)`). El supervisor declara lo contado por medio en `lines` y adjunta los
+vouchers de respaldo; el sistema calcula lo esperado según las ventas del
+período y cierra en una transición única `OPEN → CLOSED`.
+
+| Endpoint | Roles | Descripción |
+| --- | --- | --- |
+| `POST /cash-closings` | `SUPERVISOR` del local | Confirma el cierre: calcula líneas y diferencias, vincula ventas y propinas, guarda vouchers y responde 201 con el detalle completo. Un reintento idéntico responde 200 con el existente y no duplica fila ni auditoría; un cierre distinto para la misma clave responde 409 con el ID consultable. |
+| `GET /cash-closings/:id` | `ADMINISTRADOR`, `SUPERVISOR`, `CONTADOR` | Detalle inmutable del cierre: líneas con código y nombre del medio, vouchers, fondo de propinas vinculado y estado de cuadre. |
+
+Reglas del cálculo (`src/cash-closings/calculation/cash-closing.calculator.ts`):
+
+- **Líneas requeridas dinámicas**: todos los medios activos del catálogo más
+  cualquier medio (aunque esté inactivo) con ventas del período, ordenadas por
+  `sortOrder`/código. Se rechazan líneas duplicadas, omitidas o no permitidas
+  y ventas agregadas parcialmente fuera del corte.
+- **Fondo de caja único**: `openingCash` se suma una sola vez, a la primera
+  línea con comportamiento `CASH` (por `sortOrder`/código), aunque el catálogo
+  tenga más de un medio CASH; las demás líneas esperan solo sus ventas.
+- **Conciliación con vouchers**: los vouchers MrComanda nuevos deben indicar
+  su medio; solo los clasificados `RECONCILABLE_CARD` alimentan
+  `mrcomandaNetSales` (`Mercado Pago bruto − PROPINAS − T. DÉBITO/T. CRÉDITO
+  MrComanda`). Junaeb, transferencias, la línea Mercado Pago de MrComanda y
+  los vouchers históricos sin clasificación quedan fuera de esa suma para no
+  contarse dos veces. Los vouchers Mercado Pago siguen guardando bruto y
+  propina por separado.
+- **Propinas**: el vínculo `tipEntryIds` es exacto y referencial: deben ser
+  del mismo local y día y sumar exactamente `mercadoPagoTipAmount`; la propina
+  nunca se suma a lo esperado de ninguna línea ni a la venta neta.
+- **Estado de cuadre**: `hasDifferences`, `isBalanced` y `balanceStatus`
+  (`CUADRADO`/`NO_CUADRADO`). Una diferencia distinta de cero en **cualquier
+  línea** o en `reconciliationDifference` implica `NO_CUADRADO`, aunque las
+  diferencias se compensen en el total.
+- Con cualquier diferencia, `differenceReason` es obligatorio para cerrar
+  (además de un CHECK en la base). La concurrencia se controla con la clave
+  única, el reintento idempotente y la vinculación transaccional de ventas
+  (`cashClosingId`), que impide usar una venta en dos cierres.
+
+Un cierre `CLOSED` es inmutable: triggers rechazan modificar o eliminar el
+cierre, sus líneas, vouchers, vínculos a propinas y ventas asociadas (para
+cualquier rol y vía de escritura), y el `TRUNCATE` de las tablas involucradas.
+
 ## Consulta consolidada de ventas, alertas y diferencias (SPRINT-4-T13)
 
 | Endpoint | Roles | Descripción |
@@ -327,7 +440,9 @@ Solo lee y concilia las fuentes existentes, sin copiar cifras. Por local:
 - **`sales`**: ventas del día de negocio en hora de Chile (`sold_at` dentro de
   `[periodStart, periodEnd)`), en **montos netos** (`gross_amount - tip_amount`).
   Separa lo ya conciliado en un cierre (`closed*`) de lo que aún no tiene cierre
-  (`unclosed*`), con el desglose de los cuatro medios de pago.
+  (`unclosed*`), con desglose dinámico por medio de pago: todos los activos del
+  catálogo más los medios históricos (inactivos) que tengan movimientos en el
+  día, cada uno con su código y nombre.
 - **`cardTips`**: la propina con tarjeta como **concepto aparte**, nunca sumada a
   la venta: `registeredAmount` del registro diario de propinas (débito y
   crédito) y `closingsAmount` de los vouchers de Mercado Pago de los cierres.
@@ -335,10 +450,14 @@ Solo lee y concilia las fuentes existentes, sin copiar cifras. Por local:
   esperado sin el fondo de caja y coincide con `sales.closedNetAmount` cuando
   todas las ventas conciliadas son del mismo día. `cashDifference` (contado menos
   esperado) y `voucherDifference` (Mercado Pago neto menos MrComanda) se informan
-  por separado para no contar dos veces el mismo descuadre.
+  por separado para no contar dos veces el mismo descuadre; `cashDifference` es
+  solo informativo y nunca determina el cuadre.
 - **`pendingDifferences`**: cierres del día con alguna línea descuadrada o
-  descuadre de vouchers, con su motivo. Es la misma regla que exige
-  `differenceReason` al cerrar.
+  descuadre de vouchers, con `lineDifferences` por medio (código, nombre,
+  esperado, contado y diferencia), `voucherDifference`, `hasDifferences`,
+  `isBalanced` y `balanceStatus` (`CUADRADO`/`NO_CUADRADO`). Es la misma regla
+  que exige `differenceReason` al cerrar: cualquier línea o conciliación
+  descuadrada deja el cierre no cuadrado aunque el total se compense.
 - **`alerts`**: cantidad de alertas `OVERDUE`/`UPCOMING` de registro en la DT y
   de entrega de propinas, calculadas por sus módulos al momento de la consulta
   (no dependen de `date`).
@@ -380,7 +499,9 @@ $ npm run test:cov
 
 Los tests de integración corren contra PostgreSQL real y se omiten si no se
 define `TEST_DATABASE_URL` (debe ser un superusuario; ver
-[Inmutabilidad del registro](#inmutabilidad-del-registro)):
+[Inmutabilidad del registro](#inmutabilidad-del-registro)). La base debe tener
+las migraciones aplicadas y el seed base (roles y catálogo de medios de pago),
+igual que el entorno de desarrollo:
 
 ```bash
 TEST_DATABASE_URL="postgresql://postgres:cambiar-en-produccion@localhost:5433/subway_gestion" npm run test
