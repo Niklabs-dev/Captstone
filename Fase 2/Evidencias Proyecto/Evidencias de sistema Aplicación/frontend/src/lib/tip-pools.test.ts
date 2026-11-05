@@ -143,6 +143,21 @@ test('Constancias verifican identidad de reparto y eliminan extras', () => {
   assert.equal(parseReceipts([{ ...receipt, poolId: 'otro' }], id), null);
   assert.equal(parseReceipts([receipt, receipt], id), null);
 });
+test('Los códigos de medios salen del catálogo y no de una lista fija (SPRINT-4-T32)', () => {
+  const dynamic = parsePool({
+    ...pool,
+    sources: [{ ...pool.sources[0], paymentMethod: 'JUNEB', amount: 5 }],
+  });
+  assert.ok(dynamic);
+  assert.equal(dynamic.sources[0].paymentMethod, 'JUNEB');
+  for (const bad of [
+    { ...pool.sources[0], paymentMethod: '' },
+    { ...pool.sources[0], paymentMethod: '   ' },
+    { ...pool.sources[0], paymentMethod: 5 },
+    { ...pool.sources[0], paymentMethod: 'CASH\u0000' },
+  ])
+    assert.equal(parsePool({ ...pool, sources: [bad] }), null);
+});
 test('Los conflictos indican recargar y los fallos no publican errores internos', () => {
   assert.match(poolError(409), /Actualiza/);
   assert.match(poolError(422), /pacto/);

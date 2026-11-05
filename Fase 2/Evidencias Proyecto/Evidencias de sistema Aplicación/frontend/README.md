@@ -257,4 +257,8 @@ Calidad: `npm run test:stores`, `npm run lint`, `npm run format:check`, `npm run
 Constancias propias de propinas enteradas (SPRINT-3-T16):
 [guía de consulta y descarga](docs/SPRINT-3-T16.md).
 
+## Medios de pago (SPRINT-4-T32)
+
+`/admin/medios-pago` permite crear, editar, desactivar y reactivar los medios de pago del sistema como administrador: nombre, orden de lista, comportamiento en el cierre (`CASH`, `RECONCILABLE_CARD`, `EXTERNAL_OTHER`) y disponibilidad para propinas. El código se normaliza a mayúsculas y guiones bajos y no se puede cambiar después de crearlo; los medios desactivados conservan su historial visible. `GET /api/payment-methods` exige sesión y solo administración lista inactivos; las mutaciones del BFF validan origen, rol, cuerpo acotado y respuesta. El registro diario de propinas carga los medios activos elegibles del catálogo (sin listas fijas) y el histórico muestra el nombre guardado aunque el medio se desactive. Pruebas: `npm run test:payment-methods` (unitarias), `npm run test:payment-methods:integration` (BFF con backend simulado) y `npm run test:payment-methods:e2e` (recorrido real con base exclusiva, igual que los demás módulos).
+
 Diseño móvil del Sprint 4: [dirección y verificación](docs/SPRINT-4-DISENO-MOVIL.md). Prueba de navegador: npm run test:mobile-design -- --headed.

@@ -1,6 +1,6 @@
 import { isRecord } from './auth';
 import { isUuid } from './users';
-import { isTipDate } from './tips';
+import { isTipDate, isTipMethodCode } from './tips';
 export const POOL_STATUS = {
   DRAFT: 'Borrador',
   CONFIRMED: 'Confirmado',
@@ -151,9 +151,7 @@ export function parsePool(v: unknown): TipPool | null {
       !isRecord(s) ||
       !isUuid(s.tipEntryId) ||
       !isTipDate(s.businessDate) ||
-      !['CASH', 'DEBIT_CARD', 'CREDIT_CARD', 'TRANSFER'].includes(
-        String(s.paymentMethod),
-      ) ||
+      !isTipMethodCode(s.paymentMethod) ||
       !money(s.amount)
     )
       return null;
