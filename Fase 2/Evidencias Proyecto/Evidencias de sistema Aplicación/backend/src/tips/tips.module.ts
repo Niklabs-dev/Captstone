@@ -25,5 +25,7 @@ import { TipsService } from './tips.service.js';
     TipPoolsService,
     TipPaymentAlertsService,
   ],
+  // La consulta consolidada (SPRINT-4-T13) reutiliza la alerta legal.
+  exports: [TipPaymentAlertsService],
 })
 export class TipsModule {}
