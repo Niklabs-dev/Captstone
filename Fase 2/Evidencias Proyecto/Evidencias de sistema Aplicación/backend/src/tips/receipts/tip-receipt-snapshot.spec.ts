@@ -42,6 +42,7 @@ const POOL: TipPoolResponse = {
   paidAt: null,
   paymentDate: null,
   receiptsCount: 0,
+  updatedAt: new Date('2026-10-21T12:00:00Z'),
 };
 
 const PAID_BY = { id: 'acc-2', name: 'Carla Contadora' };

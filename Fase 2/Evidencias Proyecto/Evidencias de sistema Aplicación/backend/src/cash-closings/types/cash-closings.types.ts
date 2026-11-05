@@ -1,10 +1,19 @@
 import type {
   CashClosingStatus,
   CashClosingVoucherSource,
-  PaymentMethod,
 } from '../../generated/prisma/client.js';
 
 export const MAX_CASH_AMOUNT = 9_999_999_999;
+
+/// Estado de cuadre de un cierre: cualquier línea o la conciliación con
+/// diferencia distinta de cero lo dejan NO_CUADRADO, aunque el total compense.
+export const BALANCE_STATUS = {
+  CUADRADO: 'CUADRADO',
+  NO_CUADRADO: 'NO_CUADRADO',
+} as const;
+
+export type BalanceStatus =
+  (typeof BALANCE_STATUS)[keyof typeof BALANCE_STATUS];
 
 export interface CashClosingPersonResponse {
   id: string;
@@ -13,7 +22,8 @@ export interface CashClosingPersonResponse {
 
 export interface CashClosingLineResponse {
   id: string;
-  paymentMethod: PaymentMethod;
+  paymentMethod: string;
+  paymentMethodName: string;
   expectedAmount: number;
   countedAmount: number;
   difference: number;
@@ -22,6 +32,8 @@ export interface CashClosingLineResponse {
 export interface CashClosingVoucherResponse {
   id: string;
   source: CashClosingVoucherSource;
+  paymentMethod: string | null;
+  paymentMethodName: string | null;
   periodStart: Date;
   periodEnd: Date;
   amount: number;
@@ -31,7 +43,8 @@ export interface CashClosingVoucherResponse {
 
 export interface CashClosingTipEntryResponse {
   id: string;
-  paymentMethod: PaymentMethod;
+  paymentMethod: string;
+  paymentMethodName: string;
   amount: number;
 }
 
@@ -65,6 +78,9 @@ export interface CashClosingResponse {
   tipEntries: CashClosingTipEntryResponse[];
   tipFundAmount: number;
   salesCount: number;
+  hasDifferences: boolean;
+  isBalanced: boolean;
+  balanceStatus: BalanceStatus;
   createdAt: Date;
   updatedAt: Date;
 }

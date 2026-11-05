@@ -1,19 +1,32 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   CashClosingVoucherSource,
-  PaymentMethod,
+  PaymentMethodBehavior,
   Prisma,
 } from '../../generated/prisma/client.js';
 import { MAX_CASH_AMOUNT } from '../types/cash-closings.types.js';
 
+/// Medio de pago tal como viene del catálogo relacional. El código es la clave
+/// estable que usan los contratos operativos; el nombre solo se muestra.
+export interface CatalogPaymentMethod {
+  id: string;
+  code: string;
+  name: string;
+  behavior: PaymentMethodBehavior;
+  sortOrder: number;
+  isActive: boolean;
+}
+
 export interface ClosingSale {
-  paymentMethod: PaymentMethod;
+  paymentMethod: string;
   grossAmount: Prisma.Decimal;
   tipAmount: Prisma.Decimal;
+  periodStart?: Date | null;
+  periodEnd?: Date | null;
 }
 
 export interface CountedLineInput {
-  paymentMethod: PaymentMethod;
+  paymentMethod: string;
   countedAmount: number;
 }
 
@@ -23,10 +36,14 @@ export interface ClosingVoucherInput {
   periodEnd: string;
   amount: number;
   tipIncludedAmount?: number;
+  reference?: string;
+  paymentMethod?: string;
 }
 
 export interface CalculatedClosingLine {
-  paymentMethod: PaymentMethod;
+  paymentMethodId: string;
+  paymentMethod: string;
+  paymentMethodName: string;
   expectedAmount: number;
   countedAmount: number;
   difference: number;
@@ -42,12 +59,10 @@ export interface VoucherSummary {
   reconciliationDifference: number;
 }
 
-const PAYMENT_METHODS = [
-  PaymentMethod.CASH,
-  PaymentMethod.DEBIT_CARD,
-  PaymentMethod.CREDIT_CARD,
-  PaymentMethod.TRANSFER,
-] as const;
+export interface ClosingCut {
+  start: Date;
+  end: Date;
+}
 
 function toAmount(value: Prisma.Decimal): number {
   const amount = value.toNumber();
@@ -72,6 +87,15 @@ function parseInstant(value: string, field: string): Date {
     throw new BadRequestException(`${field} debe ser una fecha-hora válida`);
   }
   return parsed;
+}
+
+function bySortOrder(
+  left: CatalogPaymentMethod,
+  right: CatalogPaymentMethod,
+): number {
+  return (
+    left.sortOrder - right.sortOrder || left.code.localeCompare(right.code)
+  );
 }
 
 function voucherEnvelope(
@@ -104,9 +128,16 @@ function voucherEnvelope(
   };
 }
 
+/// Resumen de vouchers para la conciliación del cierre. Los vouchers MrComanda
+/// nuevos deben indicar su medio de pago y solo los RECONCILABLE_CARD alimentan
+/// mrcomandaNetSales: Junaeb, externos y la línea Mercado Pago de MrComanda se
+/// conservan como respaldo pero no se suman dos veces.
 export function summarizeVouchers(
   vouchers: ClosingVoucherInput[],
+  methods: CatalogPaymentMethod[],
 ): VoucherSummary {
+  const byCode = new Map(methods.map((method) => [method.code, method]));
+
   for (const voucher of vouchers) {
     const start = parseInstant(voucher.periodStart, 'periodStart');
     const end = parseInstant(voucher.periodEnd, 'periodEnd');
@@ -124,6 +155,17 @@ export function summarizeVouchers(
     if (voucher.source === CashClosingVoucherSource.MRCOMANDA && tip !== 0) {
       throw new BadRequestException(
         'Los vouchers de MrComanda no pueden incluir propinas Mercado Pago',
+      );
+    }
+    if (voucher.paymentMethod !== undefined) {
+      if (!byCode.has(voucher.paymentMethod)) {
+        throw new BadRequestException(
+          `El medio ${voucher.paymentMethod} del voucher no existe en el catálogo`,
+        );
+      }
+    } else if (voucher.source === CashClosingVoucherSource.MRCOMANDA) {
+      throw new BadRequestException(
+        'Los vouchers MrComanda deben indicar su medio de pago',
       );
     }
   }
@@ -145,11 +187,14 @@ export function summarizeVouchers(
     );
   }
 
+  const isReconcilableMrcomanda = (voucher: ClosingVoucherInput): boolean =>
+    voucher.source === CashClosingVoucherSource.MRCOMANDA &&
+    byCode.get(voucher.paymentMethod ?? '')?.behavior ===
+      PaymentMethodBehavior.RECONCILABLE_CARD;
+
   const mrcomandaNetSales = sum(
     vouchers
-      .filter(
-        (voucher) => voucher.source === CashClosingVoucherSource.MRCOMANDA,
-      )
+      .filter(isReconcilableMrcomanda)
       .map((voucher) => new Prisma.Decimal(voucher.amount)),
   );
   const mercadoPagoGrossAmount = sum(
@@ -186,55 +231,102 @@ export function summarizeVouchers(
   };
 }
 
+/// Líneas requeridas del cierre: los medios activos del catálogo más cualquier
+/// medio con ventas del período, incluido un medio inactivo con movimientos.
+/// Se rechazan líneas duplicadas, omitidas o no permitidas, ventas de medios
+/// desconocidos y ventas agregadas parcialmente fuera del corte. El fondo
+/// inicial es un monto físico único: se suma una sola vez, a la primera línea
+/// con comportamiento CASH (por sortOrder/código), aunque el catálogo tenga
+/// más de un medio CASH; las demás líneas CASH esperan solo sus ventas.
 export function calculateClosingLines(
   sales: ClosingSale[],
   countedLines: CountedLineInput[],
   openingCash: number,
+  methods: CatalogPaymentMethod[],
+  cut: ClosingCut,
 ): CalculatedClosingLine[] {
-  const counted = new Map<PaymentMethod, number>();
-  for (const line of countedLines) {
-    if (counted.has(line.paymentMethod)) {
+  const byCode = new Map(methods.map((method) => [method.code, method]));
+
+  const netByCode = new Map<string, Prisma.Decimal>();
+  for (const sale of sales) {
+    const method = byCode.get(sale.paymentMethod);
+    if (!method) {
       throw new BadRequestException(
-        `El medio ${line.paymentMethod} aparece más de una vez`,
+        `El medio ${sale.paymentMethod} no existe en el catálogo`,
       );
     }
-    counted.set(line.paymentMethod, line.countedAmount);
-  }
-  const missing = PAYMENT_METHODS.filter((method) => !counted.has(method));
-  if (missing.length > 0) {
-    throw new BadRequestException(
-      `Debes informar lo contado para todos los medios: ${missing.join(', ')}`,
-    );
-  }
-
-  const expected = new Map<PaymentMethod, Prisma.Decimal>(
-    PAYMENT_METHODS.map((method) => [method, new Prisma.Decimal(0)]),
-  );
-  for (const sale of sales) {
+    if (sale.periodStart && sale.periodEnd) {
+      const startInside = sale.periodStart.getTime() >= cut.start.getTime();
+      const endInside = sale.periodEnd.getTime() <= cut.end.getTime();
+      if (!startInside || !endInside) {
+        throw new BadRequestException(
+          `La venta del medio ${sale.paymentMethod} queda parcialmente fuera del corte`,
+        );
+      }
+    }
     const netAmount = sale.grossAmount.minus(sale.tipAmount);
     if (netAmount.isNegative()) {
       throw new BadRequestException(
         'Existe una venta cuya propina supera su monto bruto',
       );
     }
-    expected.set(
+    netByCode.set(
       sale.paymentMethod,
-      expected.get(sale.paymentMethod)?.plus(netAmount) ?? netAmount,
+      netByCode.get(sale.paymentMethod)?.plus(netAmount) ?? netAmount,
     );
   }
-  expected.set(
-    PaymentMethod.CASH,
-    expected.get(PaymentMethod.CASH)?.plus(openingCash) ??
-      new Prisma.Decimal(openingCash),
-  );
 
-  return PAYMENT_METHODS.map((paymentMethod) => {
-    const expectedAmount = toAmount(
-      expected.get(paymentMethod) ?? new Prisma.Decimal(0),
+  const required = new Map<string, CatalogPaymentMethod>();
+  for (const method of methods) {
+    if (method.isActive) required.set(method.code, method);
+  }
+  for (const code of netByCode.keys()) {
+    const method = byCode.get(code);
+    if (method) required.set(code, method);
+  }
+
+  const counted = new Map<string, number>();
+  for (const line of countedLines) {
+    if (counted.has(line.paymentMethod)) {
+      throw new BadRequestException(
+        `El medio ${line.paymentMethod} aparece más de una vez`,
+      );
+    }
+    if (!byCode.has(line.paymentMethod)) {
+      throw new BadRequestException(
+        `El medio ${line.paymentMethod} no existe en el catálogo`,
+      );
+    }
+    if (!required.has(line.paymentMethod)) {
+      throw new BadRequestException(
+        `El medio ${line.paymentMethod} no admite línea de cierre: no está activo ni tuvo ventas en el período`,
+      );
+    }
+    counted.set(line.paymentMethod, line.countedAmount);
+  }
+  const missing = [...required.keys()].filter((code) => !counted.has(code));
+  if (missing.length > 0) {
+    throw new BadRequestException(
+      `Debes informar lo contado para todos los medios: ${missing.sort().join(', ')}`,
     );
-    const countedAmount = counted.get(paymentMethod) ?? 0;
+  }
+
+  const sortedRequired = [...required.values()].sort(bySortOrder);
+  // Primera línea CASH del orden del catálogo: recibe el fondo único.
+  const fundCode = sortedRequired.find(
+    (method) => method.behavior === PaymentMethodBehavior.CASH,
+  )?.code;
+  return sortedRequired.map((method) => {
+    let expected = netByCode.get(method.code) ?? new Prisma.Decimal(0);
+    if (method.code === fundCode) {
+      expected = expected.plus(openingCash);
+    }
+    const expectedAmount = toAmount(expected);
+    const countedAmount = counted.get(method.code) ?? 0;
     return {
-      paymentMethod,
+      paymentMethodId: method.id,
+      paymentMethod: method.code,
+      paymentMethodName: method.name,
       expectedAmount,
       countedAmount,
       difference: countedAmount - expectedAmount,
@@ -242,8 +334,11 @@ export function calculateClosingLines(
   });
 }
 
+/// Un cierre está descuadrado si cualquier línea o la conciliación tiene
+/// diferencia distinta de cero, aunque las diferencias se compensen en el
+/// total.
 export function hasClosingDifferences(
-  lines: CalculatedClosingLine[],
+  lines: ReadonlyArray<Pick<CalculatedClosingLine, 'difference'>>,
   reconciliationDifference: number,
 ): boolean {
   return (

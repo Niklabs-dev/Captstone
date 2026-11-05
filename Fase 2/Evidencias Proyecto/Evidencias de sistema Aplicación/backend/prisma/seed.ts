@@ -1,20 +1,22 @@
 // =============================================================
 // Seed de datos base: roles del sistema, usuario administrador
 // inicial y tipos de documento laboral (SPRINT-1-T05), los tres
-// locales de Moi-food (SPRINT-2-T26) y las fixtures sintéticas del
-// módulo de propinas (SPRINT-3-T09): pacto de reparto, entradas
-// diarias, horas trabajadas y un reparto DRAFT con sus fuentes y
-// líneas en el primer local.
+// locales de Moi-food (SPRINT-2-T26), el catálogo base de medios
+// de pago (SPRINT-4-T32) y las fixtures sintéticas del módulo de
+// propinas (SPRINT-3-T09): pacto de reparto, entradas diarias,
+// horas trabajadas y un reparto DRAFT con sus fuentes y líneas en
+// el primer local.
 //
 // Ejecución: `npm run prisma:seed` (o `npx prisma db seed`).
 // El script es idempotente: roles y tipos de documento se
-// sincronizan por `code` (upsert); locales y fixtures de propinas
-// por su UUID fijo con `update: {}` (no revierten cambios
-// administrados por la API); el administrador solo se crea si el
-// correo no existe, sin sobrescribir la contraseña de un usuario
-// ya registrado. Las fixtures de propinas se siembran solo con
-// SEED_DEMO_DATA=true y usan datos sintéticos (correos .invalid y
-// contraseñas aleatorias no divulgadas); en producción quedan apagadas.
+// sincronizan por `code` (upsert); medios de pago y locales por su
+// clave única con `update: {}` (no revierten cambios administrados
+// por la API, como renombrar, reordenar o desactivar un medio);
+// el administrador solo se crea si el correo no existe, sin
+// sobrescribir la contraseña de un usuario ya registrado. Las
+// fixtures de propinas se siembran solo con SEED_DEMO_DATA=true y
+// usan datos sintéticos (correos .invalid y contraseñas aleatorias
+// no divulgadas); en producción quedan apagadas.
 // =============================================================
 import 'dotenv/config';
 import { randomBytes } from 'node:crypto';
@@ -136,6 +138,47 @@ export const BASE_STORES = [
     name: 'Calera',
     city: 'Quillota',
     address: 'Av. Marathon 1450',
+  },
+] as const;
+
+// Medios de pago base del catálogo (SPRINT-4-T32), con los mismos códigos del
+// enum que reemplazan y UUID fijos que coinciden con la migración
+// 20261105021500_medios_pago_catalogo. El seed hace upsert por código con
+// `update: {}`: repetirlo no duplica filas ni revierte la administración del
+// catálogo (nombres, orden, comportamiento, propinas o desactivaciones). Los
+// cuatro medios iniciales aceptan propinas, tal como asumía el enum anterior.
+export const BASE_PAYMENT_METHODS = [
+  {
+    id: 'b9000000-0000-4000-8000-000000000001',
+    code: 'CASH',
+    name: 'Efectivo',
+    sortOrder: 10,
+    behavior: 'CASH' as const,
+    availableForTips: true,
+  },
+  {
+    id: 'b9000000-0000-4000-8000-000000000002',
+    code: 'DEBIT_CARD',
+    name: 'Tarjeta de débito',
+    sortOrder: 20,
+    behavior: 'RECONCILABLE_CARD' as const,
+    availableForTips: true,
+  },
+  {
+    id: 'b9000000-0000-4000-8000-000000000003',
+    code: 'CREDIT_CARD',
+    name: 'Tarjeta de crédito',
+    sortOrder: 30,
+    behavior: 'RECONCILABLE_CARD' as const,
+    availableForTips: true,
+  },
+  {
+    id: 'b9000000-0000-4000-8000-000000000004',
+    code: 'TRANSFER',
+    name: 'Transferencia',
+    sortOrder: 40,
+    behavior: 'EXTERNAL_OTHER' as const,
+    availableForTips: true,
   },
 ] as const;
 
@@ -287,6 +330,7 @@ export interface SeedResult {
   roleIds: Record<string, string>;
   documentTypeIds: Record<string, string>;
   storeIds: string[];
+  paymentMethodIds: Record<string, string>;
   adminUserId: string;
   adminCreated: boolean;
 }
@@ -340,10 +384,24 @@ export async function seedDatabase(
     storeIds.push(guardado.id);
   }
 
+  // Catálogo base de medios de pago (SPRINT-4-T32): upsert por código con
+  // `update: {}` para no revertir la administración del catálogo (la API puede
+  // renombrar, reordenar, reclasificar o desactivar medios y el seed respeta
+  // esos cambios). El mapa código → id resuelve las fixtures de propinas.
+  const paymentMethodIds: Record<string, string> = {};
+  for (const medio of BASE_PAYMENT_METHODS) {
+    const guardado = await db.paymentMethod.upsert({
+      where: { code: medio.code },
+      update: {},
+      create: { ...medio },
+    });
+    paymentMethodIds[guardado.code] = guardado.id;
+  }
+
   // Los datos demo son opt-in para no introducir usuarios, pactos ni
   // propinas artificiales en despliegues productivos.
   if (options.includeDemoData === true) {
-    await seedTipDemoFixtures(db, roleIds);
+    await seedTipDemoFixtures(db, roleIds, paymentMethodIds);
   }
 
   const existente = await db.user.findUnique({
@@ -354,6 +412,7 @@ export async function seedDatabase(
       roleIds,
       documentTypeIds,
       storeIds,
+      paymentMethodIds,
       adminUserId: existente.id,
       adminCreated: false,
     };
@@ -373,6 +432,7 @@ export async function seedDatabase(
     roleIds,
     documentTypeIds,
     storeIds,
+    paymentMethodIds,
     adminUserId: admin.id,
     adminCreated: true,
   };
@@ -382,10 +442,13 @@ export async function seedDatabase(
 // el local demo. Todo se upsertea por UUID fijo con `update: {}`: repetir el
 // seed no duplica filas ni revierte cambios administrados por la API. Los
 // usuarios demo reciben una contraseña aleatoria (bcrypt) solo al crearse y
-// jamás se divulga ni se reemplaza la de un usuario existente.
+// jamás se divulga ni se reemplaza la de un usuario existente. Las entradas
+// diarias referencian el catálogo de medios de pago por su FK (código → id
+// resuelto por seedDatabase).
 async function seedTipDemoFixtures(
   db: SeedClient,
   roleIds: Record<string, string>,
+  paymentMethodIds: Record<string, string>,
 ): Promise<void> {
   const storeId = TIP_DEMO_STORE.id;
 
@@ -429,7 +492,7 @@ async function seedTipDemoFixtures(
       create: {
         id: entrada.id,
         businessDate: entrada.businessDate,
-        paymentMethod: entrada.paymentMethod,
+        paymentMethodId: paymentMethodIds[entrada.paymentMethod],
         amount: entrada.amount,
         storeId,
         responsibleId: TIP_DEMO_IDS.supervisor,
@@ -531,6 +594,12 @@ async function main(): Promise<void> {
     );
     console.log(
       `Locales sincronizados: ${BASE_STORES.map((s) => s.name).join(', ')}.`,
+    );
+    console.log(
+      `Catálogo de medios de pago sincronizado (SPRINT-4-T32): ` +
+        `${BASE_PAYMENT_METHODS.length} medios (${BASE_PAYMENT_METHODS.map(
+          (m) => m.code,
+        ).join(', ')}).`,
     );
     if (options.includeDemoData === true) {
       console.log(
