@@ -40,6 +40,8 @@ export const AUDIT_ACTION = {
   TIP_POOL_CONFIRMED: 'TIP_POOL_CONFIRMED',
   TIP_POOL_PAID: 'TIP_POOL_PAID',
   TIP_POOL_RECEIPT_DOWNLOADED: 'TIP_POOL_RECEIPT_DOWNLOADED',
+  // Cierre de caja y conciliación por turno (SPRINT-4-T09).
+  CASH_CLOSING_CREATED: 'CASH_CLOSING_CREATED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];
