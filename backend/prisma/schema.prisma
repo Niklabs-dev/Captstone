@@ -630,7 +630,7 @@ enum CashClosingVoucherSource {
 /// líneas. opening_cash (fondo de caja) es un monto único: se suma una sola
 /// vez a lo esperado, en la primera línea cuyo medio tiene comportamiento
 /// CASH (por sort_order/código), aunque el catálogo tenga más de un medio
-/// CASH.
+/// CASH. Un fondo positivo sin una línea CASH hace que la API rechace el cierre.
 ///
 /// Conciliación con los proveedores externos (CHECK en la base):
 ///   reconciliation_difference = mercado_pago_gross_amount

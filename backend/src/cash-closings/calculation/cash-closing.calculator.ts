@@ -237,7 +237,8 @@ export function summarizeVouchers(
 /// desconocidos y ventas agregadas parcialmente fuera del corte. El fondo
 /// inicial es un monto físico único: se suma una sola vez, a la primera línea
 /// con comportamiento CASH (por sortOrder/código), aunque el catálogo tenga
-/// más de un medio CASH; las demás líneas CASH esperan solo sus ventas.
+/// más de un medio CASH; las demás líneas CASH esperan solo sus ventas. Un
+/// fondo positivo sin ninguna línea CASH se rechaza para no perderlo.
 export function calculateClosingLines(
   sales: ClosingSale[],
   countedLines: CountedLineInput[],
@@ -316,6 +317,11 @@ export function calculateClosingLines(
   const fundCode = sortedRequired.find(
     (method) => method.behavior === PaymentMethodBehavior.CASH,
   )?.code;
+  if (openingCash > 0 && fundCode === undefined) {
+    throw new BadRequestException(
+      'No se puede asignar el fondo de caja sin una línea de efectivo',
+    );
+  }
   return sortedRequired.map((method) => {
     let expected = netByCode.get(method.code) ?? new Prisma.Decimal(0);
     if (method.code === fundCode) {

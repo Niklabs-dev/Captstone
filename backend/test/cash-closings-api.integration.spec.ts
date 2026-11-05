@@ -960,6 +960,27 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
+    it('rechaza un fondo positivo si no hay una línea de efectivo', async () => {
+      await withinRollback(async (f) => {
+        await f.tx.paymentMethod.update({
+          where: { id: f.methodIdByCode.get('CASH') as string },
+          data: { isActive: false },
+        });
+
+        const response = await postClosing(
+          async () => await basePayload(f),
+          f.supervisor,
+        );
+        expect(response.status).toBe(400);
+        expect(JSON.stringify(response.body)).toContain(
+          'fondo de caja sin una línea de efectivo',
+        );
+        expect(
+          await f.tx.cashClosing.count({ where: { storeId: f.storeId } }),
+        ).toBe(0);
+      });
+    });
+
     it('exige línea de un medio inactivo con ventas y ordena por el catálogo', async () => {
       await withinRollback(async (f) => {
         await f.tx.sale.create({
