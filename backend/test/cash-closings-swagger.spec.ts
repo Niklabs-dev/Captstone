@@ -40,7 +40,7 @@ describe('Swagger de cierres de caja (SPRINT-4-T09)', () => {
     {
       method: 'post' as const,
       path: '/cash-closings',
-      statuses: ['201', '400', '401', '403', '404', '409'],
+      statuses: ['200', '201', '400', '401', '403', '404', '409'],
     },
     {
       method: 'get' as const,
@@ -102,12 +102,42 @@ describe('Swagger de cierres de caja (SPRINT-4-T09)', () => {
         'tipFundAmount',
       ]),
     );
-    expect(operation('post', '/cash-closings').responses['201']).toMatchObject({
+    for (const status of ['200', '201']) {
+      expect(
+        operation('post', '/cash-closings').responses[status],
+      ).toMatchObject({
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/CashClosingResponseDto' },
+          },
+        },
+      });
+    }
+  });
+
+  it('documenta el ID consultable ante un cierre duplicado', () => {
+    expect(operation('post', '/cash-closings').responses['409']).toMatchObject({
       content: {
         'application/json': {
-          schema: { $ref: '#/components/schemas/CashClosingResponseDto' },
+          schema: { $ref: '#/components/schemas/CashClosingConflictDto' },
         },
       },
     });
+    expect(
+      Object.keys(
+        (
+          document.components?.schemas.CashClosingConflictDto as {
+            properties: object;
+          }
+        ).properties,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        'statusCode',
+        'message',
+        'error',
+        'existingClosingId',
+      ]),
+    );
   });
 });
