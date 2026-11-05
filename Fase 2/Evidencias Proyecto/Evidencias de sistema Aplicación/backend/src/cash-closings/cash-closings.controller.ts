@@ -29,6 +29,7 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import { StoreScoped } from '../auth/decorators/store-scoped.decorator.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import { CashClosingsService } from './cash-closings.service.js';
+import { CashClosingConflictDto } from './dto/cash-closing-conflict.dto.js';
 import { CashClosingResponseDto } from './dto/cash-closing-response.dto.js';
 import { CreateCashClosingDto } from './dto/create-cash-closing.dto.js';
 import type { CashClosingResponse } from './types/cash-closings.types.js';
@@ -67,6 +68,11 @@ export class CashClosingsController {
       'Cierre confirmado con ventas, vouchers y propinas existentes conciliados.',
     type: CashClosingResponseDto,
   })
+  @ApiOkResponse({
+    description:
+      'Reintento idéntico: devuelve el cierre existente sin auditarlo de nuevo.',
+    type: CashClosingResponseDto,
+  })
   @ApiBadRequestResponse({
     description:
       'Montos, fechas, períodos, motivo o vínculo de propinas inválidos.',
@@ -78,16 +84,21 @@ export class CashClosingsController {
   @ApiNotFoundResponse({ description: 'El local indicado no existe.' })
   @ApiConflictResponse({
     description:
-      'Ya existe el cierre o alguna venta del período ya fue conciliada.',
+      'Ya existe un cierre distinto o alguna venta del período ya fue conciliada; incluye el ID consultable cuando corresponde.',
+    type: CashClosingConflictDto,
   })
   async create(
     @Body() dto: CreateCashClosingDto,
     @CurrentUser() currentUser: AuthUser,
     @Res({ passthrough: true }) res: Response,
   ): Promise<CashClosingResponse> {
-    const closing = await this.cashClosings.create(dto, currentUser);
-    setAuditContext(res, { storeId: closing.store.id });
-    return closing;
+    const result = await this.cashClosings.create(dto, currentUser);
+    res.status(result.created ? 201 : 200);
+    setAuditContext(res, {
+      storeId: result.closing.store.id,
+      skipAudit: !result.created,
+    });
+    return result.closing;
   }
 
   @Get(':id')

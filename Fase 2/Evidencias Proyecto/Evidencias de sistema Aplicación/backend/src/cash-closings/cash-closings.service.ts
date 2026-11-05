@@ -22,8 +22,10 @@ import {
   summarizeVouchers,
   type VoucherSummary,
 } from './calculation/cash-closing.calculator.js';
+import { isIdenticalCashClosingRetry } from './calculation/cash-closing-retry.js';
 import type { CreateCashClosingDto } from './dto/create-cash-closing.dto.js';
 import type {
+  CashClosingCreateResult,
   CashClosingPersonResponse,
   CashClosingResponse,
 } from './types/cash-closings.types.js';
@@ -172,16 +174,18 @@ export class CashClosingsService {
   async create(
     dto: CreateCashClosingDto,
     currentUser: AuthUser,
-  ): Promise<CashClosingResponse> {
+  ): Promise<CashClosingCreateResult> {
     this.assertStoreAccess(dto.storeId, currentUser);
     await this.stores.assertActive(dto.storeId);
     const businessDate = this.parseBusinessDate(dto.businessDate);
     const voucherSummary = summarizeVouchers(dto.vouchers);
     this.assertVoucherBusinessDate(voucherSummary, dto.businessDate);
     const differenceReason = dto.differenceReason ?? null;
+    const existing = await this.findByNaturalKey(dto, businessDate);
+    if (existing) return this.resolveDuplicate(existing, dto, currentUser);
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const closing = await this.prisma.$transaction(async (tx) => {
         const sales = await tx.sale.findMany({
           where: {
             storeId: dto.storeId,
@@ -294,14 +298,16 @@ export class CashClosingsService {
         });
         return this.read(closing.id, tx);
       });
+      return { closing, created: true };
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        throw new ConflictException(
-          'Ya existe un cierre para ese local, fecha y turno',
-        );
+        const concurrent = await this.findByNaturalKey(dto, businessDate);
+        if (concurrent) {
+          return this.resolveDuplicate(concurrent, dto, currentUser);
+        }
       }
       throw error;
     }
@@ -318,6 +324,40 @@ export class CashClosingsService {
     if (!closing) throw new NotFoundException('Cierre de caja no encontrado');
     this.assertStoreAccess(closing.store.id, currentUser);
     return toCashClosingResponse(closing);
+  }
+
+  private async findByNaturalKey(
+    dto: CreateCashClosingDto,
+    businessDate: Date,
+  ): Promise<CashClosingResponse | null> {
+    const closing = await this.prisma.cashClosing.findUnique({
+      where: {
+        storeId_businessDate_shift: {
+          storeId: dto.storeId,
+          businessDate,
+          shift: dto.shift,
+        },
+      },
+      select: CASH_CLOSING_SELECT,
+    });
+    return closing ? toCashClosingResponse(closing) : null;
+  }
+
+  private resolveDuplicate(
+    existing: CashClosingResponse,
+    dto: CreateCashClosingDto,
+    currentUser: AuthUser,
+  ): CashClosingCreateResult {
+    if (isIdenticalCashClosingRetry(existing, dto, currentUser)) {
+      return { closing: existing, created: false };
+    }
+    throw new ConflictException({
+      statusCode: 409,
+      message:
+        'Ya existe un cierre distinto para ese local, fecha y turno; consulta el existente antes de continuar',
+      error: 'Conflict',
+      existingClosingId: existing.id,
+    });
   }
 
   private async read(
