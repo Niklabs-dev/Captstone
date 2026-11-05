@@ -35,6 +35,11 @@ export interface CashClosingTipEntryResponse {
   amount: number;
 }
 
+export interface CashClosingCreateResult {
+  closing: CashClosingResponse;
+  created: boolean;
+}
+
 export interface CashClosingResponse {
   id: string;
   store: { id: string; name: string };
