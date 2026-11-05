@@ -206,12 +206,17 @@ test('Supervisor: campos, CLP, cuatro medios, totales, responsable, doble envío
   ).toHaveCount(4);
   await expect(page.getByText(/Total del día:/)).toContainText('24.750');
   const totals = page.locator('dl[aria-label="Totales por medio de pago"]');
-  await expect(totals.locator('dd')).toHaveText([
-    '$12.500',
-    '$8.750',
-    '$0',
-    '$3.500',
-  ]);
+  // SPRINT-4-T32: los totales siguen el catálogo administrado; se verifican
+  // por etiqueta y no por una lista fija de cuatro medios.
+  for (const [label, value] of [
+    ['Efectivo', '$12.500'],
+    ['Tarjeta de débito', '$8.750'],
+    ['Tarjeta de crédito', '$0'],
+    ['Transferencia', '$3.500'],
+  ])
+    await expect(
+      totals.locator('div').filter({ hasText: label }).locator('dd'),
+    ).toHaveText(value);
   expect(posts).toBe(4);
   const replay = await context.request.post('/api/tips', {
     headers: { Origin: baseURL! },

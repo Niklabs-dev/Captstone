@@ -1,28 +1,20 @@
 import { isRecord } from './auth';
 import { isUuid } from './users';
 
-export const TIP_METHODS = [
-  'CASH',
-  'DEBIT_CARD',
-  'CREDIT_CARD',
-  'TRANSFER',
-] as const;
-export type TipMethod = (typeof TIP_METHODS)[number];
-export const TIP_LABELS: Record<TipMethod, string> = {
-  CASH: 'Efectivo',
-  DEBIT_CARD: 'Tarjeta de débito',
-  CREDIT_CARD: 'Tarjeta de crédito',
-  TRANSFER: 'Transferencia',
-};
+// Los medios de pago viven en el catálogo administrable (SPRINT-4-T32): el formulario
+// consume los activos elegibles y el histórico conserva código y nombre aunque el
+// medio se desactive. Ya no hay una lista fija de medios en el cliente.
 export const TIP_INACTIVE_STORE_MESSAGE =
   'Tu local está inactivo. Consulta con el administrador para volver a registrar propinas. Puedes seguir consultando el historial.';
 export const MAX_TIP_AMOUNT = 9_999_999_999;
+export const MAX_TIP_ENTRIES_PER_DAY = 1000;
 export interface TipInput {
   businessDate: string;
-  paymentMethod: TipMethod;
+  paymentMethod: string;
   amount: number;
 }
 export interface TipEntry extends TipInput {
+  paymentMethodName: string;
   id: string;
   store: { id: string; name: string };
   responsible: { id: string; name: string };
@@ -55,8 +47,12 @@ export function tipBusinessDate(now = new Date()): string {
     .map((key) => parts.find((part) => part.type === key)?.value)
     .join('-');
 }
-export function isTipMethod(value: unknown): value is TipMethod {
-  return TIP_METHODS.some((method) => method === value);
+// El código llega del catálogo; se valida forma básica y el backend es la autoridad.
+export function isTipMethodCode(value: unknown): value is string {
+  const code = typeof value === 'string' ? value.trim() : '';
+  return (
+    code.length > 0 && code.length <= 60 && !/[\u0000-\u001f\u007f]/.test(code)
+  );
 }
 function isTipAmount(value: unknown): value is number {
   return (
@@ -77,7 +73,7 @@ export function tipFieldErrors(fields: TipFields): TipErrors {
     ...(!isTipDate(fields.businessDate)
       ? { businessDate: 'Selecciona una fecha válida.' }
       : {}),
-    ...(!isTipMethod(fields.paymentMethod)
+    ...(!isTipMethodCode(fields.paymentMethod)
       ? { paymentMethod: 'Selecciona un medio de pago.' }
       : {}),
     ...(parseTipAmount(fields.amount) === null
@@ -97,13 +93,13 @@ export function parseTipInput(value: unknown): TipInput | null {
       (key) => !['businessDate', 'paymentMethod', 'amount'].includes(key),
     ) ||
     !isTipDate(value.businessDate) ||
-    !isTipMethod(value.paymentMethod) ||
+    !isTipMethodCode(value.paymentMethod) ||
     !isTipAmount(value.amount)
   )
     return null;
   return {
     businessDate: value.businessDate,
-    paymentMethod: value.paymentMethod,
+    paymentMethod: value.paymentMethod.trim(),
     amount: value.amount,
   };
 }
@@ -133,7 +129,10 @@ export function parseTipEntry(
     !isUuid(value.id) ||
     !isTipDate(value.businessDate) ||
     value.businessDate !== date ||
-    !isTipMethod(value.paymentMethod) ||
+    !isTipMethodCode(value.paymentMethod) ||
+    typeof value.paymentMethodName !== 'string' ||
+    !value.paymentMethodName.trim() ||
+    value.paymentMethodName.length > 201 ||
     !isTipAmount(value.amount) ||
     !identity(value.store) ||
     value.store.id !== storeId ||
@@ -145,7 +144,8 @@ export function parseTipEntry(
   return {
     id: value.id,
     businessDate: value.businessDate,
-    paymentMethod: value.paymentMethod,
+    paymentMethod: value.paymentMethod.trim(),
+    paymentMethodName: value.paymentMethodName.trim(),
     amount: value.amount,
     store: { id: value.store.id, name: value.store.name },
     responsible: { id: value.responsible.id, name: value.responsible.name },
@@ -158,7 +158,8 @@ export function parseTipEntries(
   storeId: string,
   date: string,
 ): TipEntry[] | null {
-  if (!Array.isArray(value) || value.length > TIP_METHODS.length) return null;
+  if (!Array.isArray(value) || value.length > MAX_TIP_ENTRIES_PER_DAY)
+    return null;
   const entries: TipEntry[] = [];
   for (const item of value) {
     const entry = parseTipEntry(item, storeId, date);
@@ -173,22 +174,40 @@ export function parseTipEntries(
       return null;
     entries.push(entry);
   }
-  return entries.sort(
-    (a, b) =>
-      TIP_METHODS.indexOf(a.paymentMethod) -
-      TIP_METHODS.indexOf(b.paymentMethod),
+  return entries;
+}
+// Ordena por el catálogo administrado; los códigos históricos sin medio activo
+// quedan al final ordenados por código, sin perderse.
+export interface TipMethodOrder {
+  code: string;
+  sortOrder: number;
+}
+export function sortTipEntriesByCatalog(
+  entries: readonly TipEntry[],
+  catalog: readonly TipMethodOrder[],
+): TipEntry[] {
+  const order = new Map(
+    catalog.map((method) => [method.code, method.sortOrder]),
   );
+  return [...entries].sort((a, b) => {
+    const first = order.get(a.paymentMethod);
+    const second = order.get(b.paymentMethod);
+    if (first !== undefined && second !== undefined)
+      return first - second || a.paymentMethod.localeCompare(b.paymentMethod);
+    if (first !== undefined) return -1;
+    if (second !== undefined) return 1;
+    return a.paymentMethod.localeCompare(b.paymentMethod);
+  });
 }
 export function tipTotals(
   entries: readonly TipEntry[],
-): Record<TipMethod, number> {
-  const totals: Record<TipMethod, number> = {
-    CASH: 0,
-    DEBIT_CARD: 0,
-    CREDIT_CARD: 0,
-    TRANSFER: 0,
-  };
-  for (const entry of entries) totals[entry.paymentMethod] += entry.amount;
+): ReadonlyMap<string, number> {
+  const totals = new Map<string, number>();
+  for (const entry of entries)
+    totals.set(
+      entry.paymentMethod,
+      (totals.get(entry.paymentMethod) ?? 0) + entry.amount,
+    );
   return totals;
 }
 export function formatClp(amount: number): string {

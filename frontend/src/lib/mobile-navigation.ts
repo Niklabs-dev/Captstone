@@ -30,6 +30,7 @@ export function getNavigationIcon(href: NavigationItem['href']) {
     '/admin/auditoria': 'audit',
     '/admin/documentos': 'document',
     '/admin/alertas-dt': 'bell',
+    '/admin/medios-pago': 'wallet',
     '/liquidaciones': 'wallet',
     '/propinas/diarias': 'tips',
     '/propinas/repartos': 'tips',

@@ -19,6 +19,7 @@ test(
     };
     const entry = {
       ...input,
+      paymentMethodName: 'Efectivo',
       id: '62000000-0000-4000-8000-000000000311',
       store: { id: storeId, name: 'Centro' },
       responsible: { id: responsibleId, name: 'Camila Supervisora' },
