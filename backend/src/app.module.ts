@@ -9,6 +9,7 @@ import { DocumentsModule } from './documents/documents.module.js';
 import { DtAlertsModule } from './dt-alerts/dt-alerts.module.js';
 import { PayrollModule } from './payroll/payroll.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { SalesDashboardModule } from './sales-dashboard/sales-dashboard.module.js';
 import { StoresModule } from './stores/stores.module.js';
 import { TipsModule } from './tips/tips.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -26,6 +27,7 @@ import { UsersModule } from './users/users.module.js';
     PayrollModule,
     TipsModule,
     CashClosingsModule,
+    SalesDashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],

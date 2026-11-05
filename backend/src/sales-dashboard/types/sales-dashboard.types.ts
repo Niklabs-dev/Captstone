@@ -1,0 +1,121 @@
+import type {
+  CashClosingStatus,
+  PaymentMethod,
+} from '../../generated/prisma/client.js';
+
+// Contrato de la consulta consolidada de ventas, alertas y diferencias por
+// local (SPRINT-4-T13, E1-H4). Todos los montos son CLP enteros.
+//
+// Para no contar dos veces la misma plata, cada concepto es independiente:
+// - sales: ventas NETAS (gross_amount - tip_amount); la propina nunca es venta.
+// - cardTips: propina pagada con tarjeta, por separado y desde sus fuentes
+//   (registro diario de propinas y vouchers de Mercado Pago de los cierres).
+// - closings: cifras de los cierres del día; voucherDifference es el
+//   descuadre de conciliación de vouchers (Mercado Pago neto - MrComanda),
+//   distinto de la diferencia de caja contada (cashDifference).
+
+export interface SalesDashboardStore {
+  id: string;
+  name: string;
+  city: string;
+  isActive: boolean;
+}
+
+export interface PaymentMethodSales {
+  paymentMethod: PaymentMethod;
+  salesCount: number;
+  netAmount: number;
+}
+
+// Ventas del día de negocio en hora de Chile, por sold_at.
+export interface StoreSalesSummary {
+  salesCount: number;
+  netAmount: number;
+  // Parte de las ventas del día ya conciliada en un cierre de caja.
+  closedSalesCount: number;
+  closedNetAmount: number;
+  // Ventas del día que todavía no pertenecen a ningún cierre.
+  unclosedSalesCount: number;
+  unclosedNetAmount: number;
+  byPaymentMethod: PaymentMethodSales[];
+}
+
+export interface StoreCardTipsSummary {
+  // Registro diario de propinas con débito o crédito (tip_entries): la fuente
+  // de los repartos.
+  registeredAmount: number;
+  // Propina informada por los vouchers de Mercado Pago de los cierres del día.
+  closingsAmount: number;
+}
+
+export interface StoreClosingsSummary {
+  count: number;
+  shifts: number[];
+  // Ventas netas conciliadas por los cierres (lo esperado sin fondo de caja).
+  netSalesAmount: number;
+  countedAmount: number;
+  // Suma de las diferencias por medio de pago (contado - esperado).
+  cashDifference: number;
+  // Suma de los descuadres de conciliación de vouchers.
+  voucherDifference: number;
+  mrcomandaNetSales: number;
+  mercadoPagoNetSales: number;
+}
+
+// Cierre del día con diferencia de caja o descuadre de vouchers distinto de 0.
+export interface PendingClosingDifference {
+  closingId: string;
+  shift: number;
+  status: CashClosingStatus;
+  cashDifference: number;
+  voucherDifference: number;
+  differenceReason: string | null;
+  closedAt: Date | null;
+}
+
+export interface AlertCounts {
+  overdue: number;
+  upcoming: number;
+}
+
+// Alertas vigentes al momento de la consulta (no dependen de la fecha).
+export interface StoreAlertsSummary {
+  dtRegistration: AlertCounts;
+  tipPayment: AlertCounts;
+}
+
+export interface StoreDashboard {
+  store: SalesDashboardStore;
+  sales: StoreSalesSummary;
+  cardTips: StoreCardTipsSummary;
+  closings: StoreClosingsSummary;
+  pendingDifferences: PendingClosingDifference[];
+  alerts: StoreAlertsSummary;
+}
+
+export interface SalesDashboardTotals {
+  salesCount: number;
+  netAmount: number;
+  closedNetAmount: number;
+  unclosedNetAmount: number;
+  cardTipsRegisteredAmount: number;
+  cardTipsClosingsAmount: number;
+  closingsCount: number;
+  cashDifference: number;
+  voucherDifference: number;
+  pendingDifferencesCount: number;
+  dtRegistrationAlerts: AlertCounts;
+  tipPaymentAlerts: AlertCounts;
+}
+
+export interface SalesDashboard {
+  // Día de negocio consultado (YYYY-MM-DD).
+  businessDate: string;
+  timeZone: string;
+  // Instantes [periodStart, periodEnd) que cubren el día en hora de Chile.
+  periodStart: Date;
+  periodEnd: Date;
+  calculatedAt: Date;
+  stores: StoreDashboard[];
+  totals: SalesDashboardTotals;
+}
