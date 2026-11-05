@@ -8,7 +8,10 @@ import { AppModule } from '../src/app.module.js';
 import { AUDIT_ACTION } from '../src/audit/constants/audit-actions.constants.js';
 import { ROLE } from '../src/auth/constants/roles.constants.js';
 import type { AuthUser, JwtPayload } from '../src/auth/types/auth.types.js';
-import { PrismaClient } from '../src/generated/prisma/client.js';
+import {
+  PaymentMethodBehavior,
+  PrismaClient,
+} from '../src/generated/prisma/client.js';
 import type { CashClosingResponse } from '../src/cash-closings/types/cash-closings.types.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
 
@@ -35,24 +38,33 @@ interface ConflictBody {
   existingClosingId?: string;
 }
 
-function payload(storeId: string, shift = 1): Record<string, unknown> {
+async function payload(
+  prisma: PrismaClient,
+  storeId: string,
+  shift = 1,
+): Promise<Record<string, unknown>> {
+  // Líneas contadas para todos los medios activos del catálogo, así el
+  // escenario tolera medios extra que otros casos dejen activos.
+  const active = await prisma.paymentMethod.findMany({
+    where: { isActive: true },
+    orderBy: { sortOrder: 'asc' },
+  });
   return {
     storeId,
     businessDate: '2026-03-10',
     shift,
     openingCash: 0,
-    lines: [
-      { paymentMethod: 'CASH', countedAmount: 0 },
-      { paymentMethod: 'DEBIT_CARD', countedAmount: 0 },
-      { paymentMethod: 'CREDIT_CARD', countedAmount: 0 },
-      { paymentMethod: 'TRANSFER', countedAmount: 0 },
-    ],
+    lines: active.map((method) => ({
+      paymentMethod: method.code,
+      countedAmount: 0,
+    })),
     vouchers: [
       {
         source: 'MRCOMANDA',
         periodStart: START,
         periodEnd: END,
         amount: 0,
+        paymentMethod: 'DEBIT_CARD',
       },
       {
         source: 'MERCADO_PAGO',
@@ -62,6 +74,46 @@ function payload(storeId: string, shift = 1): Record<string, unknown> {
       },
     ],
   };
+}
+
+async function upsertBasePaymentMethods(prisma: PrismaClient): Promise<void> {
+  const methods = [
+    {
+      code: 'CASH',
+      name: 'Efectivo',
+      sortOrder: 1,
+      behavior: PaymentMethodBehavior.CASH,
+      isActive: true,
+    },
+    {
+      code: 'DEBIT_CARD',
+      name: 'Tarjeta de débito',
+      sortOrder: 2,
+      behavior: PaymentMethodBehavior.RECONCILABLE_CARD,
+      isActive: true,
+    },
+    {
+      code: 'CREDIT_CARD',
+      name: 'Tarjeta de crédito',
+      sortOrder: 3,
+      behavior: PaymentMethodBehavior.RECONCILABLE_CARD,
+      isActive: true,
+    },
+    {
+      code: 'TRANSFER',
+      name: 'Transferencia',
+      sortOrder: 4,
+      behavior: PaymentMethodBehavior.EXTERNAL_OTHER,
+      isActive: true,
+    },
+  ];
+  for (const method of methods) {
+    await prisma.paymentMethod.upsert({
+      where: { code: method.code },
+      update: {},
+      create: { ...method, availableForTips: true },
+    });
+  }
 }
 
 describe.skipIf(!databaseUrl)(
@@ -173,6 +225,7 @@ describe.skipIf(!databaseUrl)(
 
     beforeEach(async () => {
       await cleanup();
+      await upsertBasePaymentMethods(prisma);
       const store = await prisma.store.create({
         data: {
           name: `${STORE_PREFIX} ${randomUUID()}`,
@@ -207,7 +260,7 @@ describe.skipIf(!databaseUrl)(
     });
 
     it('un reintento idéntico devuelve el existente y un cambio ofrece consultarlo', async () => {
-      const body = payload(fixture.storeId);
+      const body = await payload(prisma, fixture.storeId);
       const first = (await post(body, fixture.supervisor).expect(201))
         .body as CashClosingResponse;
       const retry = (await post(body, fixture.supervisor).expect(200))
@@ -248,7 +301,7 @@ describe.skipIf(!databaseUrl)(
     });
 
     it('dos reintentos idénticos concurrentes crean una sola fila y una auditoría', async () => {
-      const body = payload(fixture.storeId, 2);
+      const body = await payload(prisma, fixture.storeId, 2);
       const responses = await Promise.all([
         post(body, fixture.supervisor),
         post(body, fixture.supervisor),
@@ -265,7 +318,7 @@ describe.skipIf(!databaseUrl)(
     });
 
     it('dos cierres distintos concurrentes dejan uno y el otro recibe su ID', async () => {
-      const firstBody = payload(fixture.storeId, 3);
+      const firstBody = await payload(prisma, fixture.storeId, 3);
       const secondBody = { ...firstBody, notes: 'Cierre concurrente distinto' };
       const responses = await Promise.all([
         post(firstBody, fixture.supervisor),
@@ -293,8 +346,11 @@ describe.skipIf(!databaseUrl)(
 
     it('la misma fecha y turno sí están permitidos en otro local', async () => {
       const responses = await Promise.all([
-        post(payload(fixture.storeId, 4), fixture.supervisor),
-        post(payload(fixture.otherStoreId, 4), fixture.otherSupervisor),
+        post(await payload(prisma, fixture.storeId, 4), fixture.supervisor),
+        post(
+          await payload(prisma, fixture.otherStoreId, 4),
+          fixture.otherSupervisor,
+        ),
       ]);
       for (const response of responses) {
         expect(response.status).toBe(201);

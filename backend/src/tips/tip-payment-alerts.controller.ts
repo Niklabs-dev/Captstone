@@ -29,7 +29,7 @@ export class TipPaymentAlertsController {
   @ApiOperation({
     summary: 'Lista las propinas con tarjeta pendientes de entrega',
     description:
-      'Calcula el séptimo día hábil desde cada registro con débito o crédito, excluyendo sábados, domingos y los feriados de TIP_ALERT_HOLIDAYS. Incluye registros sin reparto y repartos DRAFT o CONFIRMED; los PAID desaparecen. Primero las vencidas y luego las más próximas.',
+      'Calcula el séptimo día hábil desde cada registro cuyo medio de pago tiene comportamiento RECONCILABLE_CARD en el catálogo, excluyendo sábados, domingos y los feriados de TIP_ALERT_HOLIDAYS. Incluye registros sin reparto y repartos DRAFT o CONFIRMED; los PAID desaparecen. Los medios desactivados con registros pendientes siguen alertando. Primero las vencidas y luego las más próximas.',
   })
   @ApiOkResponse({
     description:

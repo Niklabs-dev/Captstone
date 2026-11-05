@@ -2,7 +2,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import {
   CashClosingStatus,
   CashClosingVoucherSource,
-  PaymentMethod,
+  PaymentMethodBehavior,
   Prisma,
   PrismaClient,
   SaleChannel,
@@ -32,7 +32,14 @@ class Rollback extends Error {
   }
 }
 
-interface Base {
+interface PaymentMethodRefs {
+  cashId: string;
+  debitId: string;
+  creditId: string;
+  transferId: string;
+}
+
+interface Base extends PaymentMethodRefs {
   storeId: string;
   otherStoreId: string;
   supervisorId: string;
@@ -79,7 +86,66 @@ describe.skipIf(!databaseUrl)(
       }
     }
 
+    async function createPaymentMethods(tx: Tx): Promise<PaymentMethodRefs> {
+      // La migración ya siembra los medios base: se reutilizan por código.
+      const cash = await tx.paymentMethod.upsert({
+        where: { code: 'CASH' },
+        update: {},
+        create: {
+          code: 'CASH',
+          name: 'Efectivo',
+          sortOrder: 1,
+          isActive: true,
+          behavior: PaymentMethodBehavior.CASH,
+          availableForTips: true,
+        },
+      });
+      const debit = await tx.paymentMethod.upsert({
+        where: { code: 'DEBIT_CARD' },
+        update: {},
+        create: {
+          code: 'DEBIT_CARD',
+          name: 'Tarjeta de débito',
+          sortOrder: 2,
+          isActive: true,
+          behavior: PaymentMethodBehavior.RECONCILABLE_CARD,
+          availableForTips: true,
+        },
+      });
+      const credit = await tx.paymentMethod.upsert({
+        where: { code: 'CREDIT_CARD' },
+        update: {},
+        create: {
+          code: 'CREDIT_CARD',
+          name: 'Tarjeta de crédito',
+          sortOrder: 3,
+          isActive: true,
+          behavior: PaymentMethodBehavior.RECONCILABLE_CARD,
+          availableForTips: true,
+        },
+      });
+      const transfer = await tx.paymentMethod.upsert({
+        where: { code: 'TRANSFER' },
+        update: {},
+        create: {
+          code: 'TRANSFER',
+          name: 'Transferencia',
+          sortOrder: 4,
+          isActive: true,
+          behavior: PaymentMethodBehavior.EXTERNAL_OTHER,
+          availableForTips: true,
+        },
+      });
+      return {
+        cashId: cash.id,
+        debitId: debit.id,
+        creditId: credit.id,
+        transferId: transfer.id,
+      };
+    }
+
     async function createBase(tx: Tx): Promise<Base> {
+      const methods = await createPaymentMethods(tx);
       const store = await tx.store.create({
         data: {
           name: 'Subway Cierres Test',
@@ -112,13 +178,14 @@ describe.skipIf(!databaseUrl)(
       const tipEntry = await tx.tipEntry.create({
         data: {
           businessDate: BUSINESS_DATE,
-          paymentMethod: PaymentMethod.DEBIT_CARD,
+          paymentMethodId: methods.debitId,
           amount: 5000,
           storeId: store.id,
           responsibleId: supervisor.id,
         },
       });
       return {
+        ...methods,
         storeId: store.id,
         otherStoreId: otherStore.id,
         supervisorId: supervisor.id,
@@ -165,12 +232,12 @@ describe.skipIf(!databaseUrl)(
       closingId: string,
       expectedAmount: number,
       countedAmount: number,
-      paymentMethod: PaymentMethod = PaymentMethod.DEBIT_CARD,
+      paymentMethodId: string,
     ) {
       return tx.cashClosingLine.create({
         data: {
           closingId,
-          paymentMethod,
+          paymentMethodId,
           expectedAmount,
           countedAmount,
           difference: countedAmount - expectedAmount,
@@ -207,13 +274,14 @@ describe.skipIf(!databaseUrl)(
         mercadoPagoTipAmount: 5000,
         reconciliationDifference: 0,
       });
-      const line = await addLine(tx, closing.id, 100000, 100000);
+      const line = await addLine(tx, closing.id, 100000, 100000, base.debitId);
       const voucher = await addVoucher(tx, closing.id);
       await addVoucher(tx, closing.id, {
         source: CashClosingVoucherSource.MRCOMANDA,
         amount: 100000,
         tipIncludedAmount: 0,
         reference: 'Z-0001',
+        paymentMethodId: base.debitId,
       });
       await tx.cashClosingTipEntry.create({
         data: { closingId: closing.id, tipEntryId: base.tipEntryId },
@@ -221,7 +289,7 @@ describe.skipIf(!databaseUrl)(
       const sale = await tx.sale.create({
         data: {
           soldAt: new Date('2026-03-10T13:00:00-03:00'),
-          paymentMethod: PaymentMethod.DEBIT_CARD,
+          paymentMethodId: base.debitId,
           channel: SaleChannel.IN_STORE,
           grossAmount: 100000,
           storeId: base.storeId,
@@ -274,7 +342,7 @@ describe.skipIf(!databaseUrl)(
           tx.cashClosingLine.create({
             data: {
               closingId: closing.id,
-              paymentMethod: PaymentMethod.CASH,
+              paymentMethodId: base.cashId,
               expectedAmount: 150000,
               countedAmount: 149000,
               difference: 1000,
@@ -290,9 +358,9 @@ describe.skipIf(!databaseUrl)(
         await withinRollback(async (tx) => {
           const base = await createBase(tx);
           const closing = await openClosing(tx, base);
-          await expect(addLine(tx, closing.id, 0, -500)).rejects.toThrow(
-            'cash_closing_lines_amounts_nonnegative',
-          );
+          await expect(
+            addLine(tx, closing.id, 0, -500, base.debitId),
+          ).rejects.toThrow('cash_closing_lines_amounts_nonnegative');
         });
 
         await withinRollback(async (tx) => {
@@ -397,7 +465,7 @@ describe.skipIf(!databaseUrl)(
         await withinRollback(async (tx) => {
           const base = await createBase(tx);
           const closing = await openClosing(tx, base);
-          await addLine(tx, closing.id, 150000, 149000, PaymentMethod.CASH);
+          await addLine(tx, closing.id, 150000, 149000, base.cashId);
           await expect(close(tx, closing.id, base)).rejects.toThrow(
             REASON_REQUIRED,
           );
@@ -416,6 +484,7 @@ describe.skipIf(!databaseUrl)(
             source: CashClosingVoucherSource.MRCOMANDA,
             amount: 100000,
             tipIncludedAmount: 0,
+            paymentMethodId: base.debitId,
           });
           await expect(close(tx, closing.id, base)).rejects.toThrow(
             REASON_REQUIRED,
@@ -425,7 +494,7 @@ describe.skipIf(!databaseUrl)(
         await withinRollback(async (tx) => {
           const base = await createBase(tx);
           const closing = await openClosing(tx, base);
-          await addLine(tx, closing.id, 150000, 149000, PaymentMethod.CASH);
+          await addLine(tx, closing.id, 150000, 149000, base.cashId);
           await expect(
             close(tx, closing.id, base, { differenceReason: '   ' }),
           ).rejects.toThrow('cash_closings_difference_reason_not_blank');
@@ -434,7 +503,7 @@ describe.skipIf(!databaseUrl)(
         await withinRollback(async (tx) => {
           const base = await createBase(tx);
           const closing = await openClosing(tx, base);
-          await addLine(tx, closing.id, 150000, 149000, PaymentMethod.CASH);
+          await addLine(tx, closing.id, 150000, 149000, base.cashId);
           const closed = await close(tx, closing.id, base, {
             differenceReason: 'Faltante de $1.000 por vuelto mal entregado',
           });
@@ -493,6 +562,7 @@ describe.skipIf(!databaseUrl)(
               source: CashClosingVoucherSource.MRCOMANDA,
               amount: 100000,
               tipIncludedAmount: 1000,
+              paymentMethodId: base.debitId,
             }),
           ).rejects.toThrow('cash_closing_vouchers_tip_only_mercado_pago');
         });
@@ -605,7 +675,7 @@ describe.skipIf(!databaseUrl)(
           [
             'agregar una línea',
             CLOSED_CHILD,
-            (tx, g) => addLine(tx, g.closingId, 0, 0, PaymentMethod.CASH),
+            (tx, g) => addLine(tx, g.closingId, 0, 0, g.cashId),
           ],
           [
             'editar una línea',
@@ -679,7 +749,7 @@ describe.skipIf(!databaseUrl)(
               tx.sale.create({
                 data: {
                   soldAt: new Date('2026-03-10T14:00:00-03:00'),
-                  paymentMethod: PaymentMethod.CASH,
+                  paymentMethodId: g.cashId,
                   grossAmount: 5000,
                   storeId: g.storeId,
                   registeredById: g.supervisorId,
@@ -726,7 +796,7 @@ describe.skipIf(!databaseUrl)(
             tx.sale.create({
               data: {
                 soldAt: new Date('2026-03-10T14:00:00-03:00'),
-                paymentMethod: PaymentMethod.CASH,
+                paymentMethodId: base.cashId,
                 grossAmount: 5000,
                 storeId: base.otherStoreId,
                 registeredById: base.supervisorId,
@@ -745,7 +815,7 @@ describe.skipIf(!databaseUrl)(
       await withinRollback(async (tx) => {
         const base = await createBase(tx);
         const closing = await openClosing(tx, base);
-        await addLine(tx, closing.id, 100000, 100000);
+        await addLine(tx, closing.id, 100000, 100000, base.debitId);
         await addVoucher(tx, closing.id);
         await tx.cashClosingTipEntry.create({
           data: { closingId: closing.id, tipEntryId: base.tipEntryId },

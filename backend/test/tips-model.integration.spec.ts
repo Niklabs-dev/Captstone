@@ -1,12 +1,15 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import {
-  PaymentMethod,
   Prisma,
   PrismaClient,
   SaleChannel,
   TipAgreementRule,
   TipPoolStatus,
 } from '../src/generated/prisma/client.js';
+import {
+  ensureDefaultPaymentMethods,
+  paymentMethodIdOf,
+} from './helpers/payment-methods.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -86,6 +89,8 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
 
   async function createPoolGraph(tx: Prisma.TransactionClient) {
     const base = await createBase(tx);
+    await ensureDefaultPaymentMethods(tx);
+    const cashId = await paymentMethodIdOf(tx, 'CASH');
     const agreement = await tx.tipAgreement.create({
       data: {
         name: 'Pacto demo proporcional',
@@ -99,7 +104,7 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
     const tipEntry = await tx.tipEntry.create({
       data: {
         businessDate: new Date('2026-01-05'),
-        paymentMethod: PaymentMethod.CASH,
+        paymentMethodId: cashId,
         amount: 10000,
         storeId: base.store.id,
         responsibleId: base.supervisor.id,
@@ -199,9 +204,10 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
   it('permite un solo registro diario por local, fecha y medio, y rechaza montos negativos', async () => {
     await withinRollback(async (tx) => {
       const { store, supervisor } = await createBase(tx);
+      const debitId = await paymentMethodIdOf(tx, 'DEBIT_CARD');
       const data = {
         businessDate: new Date('2026-02-03'),
-        paymentMethod: PaymentMethod.DEBIT_CARD,
+        paymentMethodId: debitId,
         storeId: store.id,
         responsibleId: supervisor.id,
       };
@@ -214,11 +220,12 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
 
     await withinRollback(async (tx) => {
       const { store, supervisor } = await createBase(tx);
+      const debitId = await paymentMethodIdOf(tx, 'DEBIT_CARD');
       await expect(
         tx.tipEntry.create({
           data: {
             businessDate: new Date('2026-02-04'),
-            paymentMethod: PaymentMethod.DEBIT_CARD,
+            paymentMethodId: debitId,
             amount: -1,
             storeId: store.id,
             responsibleId: supervisor.id,
@@ -231,10 +238,12 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
   it('reconcilia una venta solo con un registro del mismo local, día y medio', async () => {
     await withinRollback(async (tx) => {
       const graph = await createPoolGraph(tx);
+      const cashId = await paymentMethodIdOf(tx, 'CASH');
+      const debitId = await paymentMethodIdOf(tx, 'DEBIT_CARD');
       const sale = await tx.sale.create({
         data: {
           soldAt: new Date('2026-01-05T15:00:00-03:00'),
-          paymentMethod: PaymentMethod.CASH,
+          paymentMethodId: cashId,
           channel: SaleChannel.IN_STORE,
           grossAmount: 20000,
           tipAmount: 1000,
@@ -249,7 +258,7 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
         tx.sale.create({
           data: {
             soldAt: new Date('2026-01-05T16:00:00-03:00'),
-            paymentMethod: PaymentMethod.DEBIT_CARD,
+            paymentMethodId: debitId,
             channel: SaleChannel.IN_STORE,
             grossAmount: 30000,
             tipAmount: 2000,
@@ -290,6 +299,7 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
 
     await withinRollback(async (tx) => {
       const graph = await createPoolGraph(tx);
+      const cashId = await paymentMethodIdOf(tx, 'CASH');
       const outsidePool = await tx.tipPool.create({
         data: {
           periodStart: new Date('2026-02-01'),
@@ -302,7 +312,7 @@ describe.skipIf(!databaseUrl)('Modelo de propinas (SPRINT-3-T09)', () => {
       const otherEntry = await tx.tipEntry.create({
         data: {
           businessDate: new Date('2026-01-06'),
-          paymentMethod: PaymentMethod.CASH,
+          paymentMethodId: cashId,
           amount: 10000,
           storeId: graph.store.id,
           responsibleId: graph.supervisor.id,

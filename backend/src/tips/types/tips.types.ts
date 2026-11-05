@@ -1,18 +1,13 @@
-export const PAYMENT_METHODS = [
-  'CASH',
-  'DEBIT_CARD',
-  'CREDIT_CARD',
-  'TRANSFER',
-] as const;
-
-export type PaymentMethodCode = (typeof PAYMENT_METHODS)[number];
-
 export const MAX_TIP_AMOUNT = 9_999_999_999;
 
+// El medio de pago viaja siempre como código estable del catálogo (string);
+// el nombre se resuelve desde el catálogo para mostrar medios desactivados
+// sin perder la referencia histórica.
 export interface TipEntryResponse {
   id: string;
   businessDate: string;
-  paymentMethod: PaymentMethodCode;
+  paymentMethod: string;
+  paymentMethodName: string;
   amount: number;
   store: {
     id: string;

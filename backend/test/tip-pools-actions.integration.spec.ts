@@ -27,11 +27,7 @@ import {
   formatDbDate,
   toDbDate,
 } from '../src/documents/utils/document-dates.util.js';
-import {
-  PaymentMethod,
-  Prisma,
-  PrismaClient,
-} from '../src/generated/prisma/client.js';
+import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import type { PrismaService } from '../src/prisma/prisma.service.js';
 import { renderTipReceiptPdf } from '../src/tips/receipts/tip-receipt-pdf.js';
 import { StoresService } from '../src/stores/stores.service.js';
@@ -45,6 +41,10 @@ import type {
   TipPoolResponse,
 } from '../src/tips/types/tip-pools.types.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
+import {
+  ensureDefaultPaymentMethods,
+  paymentMethodIdOf,
+} from './helpers/payment-methods.js';
 
 type App = Parameters<typeof request>[0];
 
@@ -167,6 +167,7 @@ async function createUser(
 
 async function createFixture(tx: Prisma.TransactionClient): Promise<Fixture> {
   const prisma = transactionAsPrismaService(tx);
+  await ensureDefaultPaymentMethods(tx);
   const storeId = await createStore(tx);
   const accountant = await createUser(tx, ROLE.CONTADOR, null, 'Lucas');
   const supervisor = await createUser(tx, ROLE.SUPERVISOR, storeId);
@@ -197,15 +198,16 @@ async function seedPeriod(f: Fixture, zeroHoursForLast = false): Promise<void> {
       createdById: f.supervisor.id,
     },
   });
-  const entries: [string, PaymentMethod, number][] = [
+  const entries: [string, string, number][] = [
     ['2026-10-02', 'CASH', 8000],
     ['2026-10-15', 'DEBIT_CARD', 4000],
   ];
-  for (const [businessDate, paymentMethod, amount] of entries) {
+  for (const [businessDate, paymentMethodCode, amount] of entries) {
+    const paymentMethodId = await paymentMethodIdOf(f.tx, paymentMethodCode);
     await f.tx.tipEntry.create({
       data: {
         businessDate: day(businessDate),
-        paymentMethod,
+        paymentMethodId,
         amount,
         storeId: f.storeId,
         responsibleId: f.supervisor.id,
@@ -1207,18 +1209,20 @@ describe.skipIf(!databaseUrl)(
       start: string;
       end: string;
     }): Promise<void> {
+      const cashId = await paymentMethodIdOf(prisma, 'CASH');
+      const creditId = await paymentMethodIdOf(prisma, 'CREDIT_CARD');
       await prisma.tipEntry.createMany({
         data: [
           {
             businessDate: day(period.start),
-            paymentMethod: 'CASH',
+            paymentMethodId: cashId,
             amount: 7000,
             storeId,
             responsibleId: ids.supervisor,
           },
           {
             businessDate: day(period.end),
-            paymentMethod: 'CREDIT_CARD',
+            paymentMethodId: creditId,
             amount: 3001,
             storeId,
             responsibleId: ids.supervisor,
@@ -1320,6 +1324,7 @@ describe.skipIf(!databaseUrl)(
           create: { code, name: code },
         });
       }
+      await ensureDefaultPaymentMethods(prisma);
       const store = await prisma.store.create({
         data: { name: STORE_NAME, city: 'Melipilla', address: 'Calle 123' },
       });

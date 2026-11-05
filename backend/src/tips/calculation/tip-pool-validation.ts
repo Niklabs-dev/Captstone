@@ -3,7 +3,6 @@ import {
   TIP_POOL_ISSUE_CODE,
   type TipPoolIssue,
 } from '../types/tip-pools.types.js';
-import type { PaymentMethodCode } from '../types/tips.types.js';
 import { toHundredths } from './tip-distribution.calculator.js';
 
 // Validación de las fuentes de un reparto antes de calcularlo (SPRINT-3-T12).
@@ -22,7 +21,8 @@ export interface AgreementCandidate {
 export interface EntryCandidate {
   id: string;
   businessDate: string;
-  paymentMethod: PaymentMethodCode;
+  // Código del medio de pago del catálogo (texto libre, sin lista fija).
+  paymentMethod: string;
   // Reparto que ya usa el registro como fuente, si lo hay.
   usedByPoolId: string | null;
 }

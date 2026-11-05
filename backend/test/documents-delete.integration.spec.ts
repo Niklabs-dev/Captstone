@@ -15,7 +15,7 @@ import type {
   DocumentDeletionResponse,
   DocumentResponse,
 } from '../src/documents/types/documents.types.js';
-import { PrismaClient } from '../src/generated/prisma/client.js';
+import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
 
 type App = Parameters<typeof request>[0];
@@ -49,13 +49,27 @@ describe.skipIf(!databaseUrl)(
     async function cleanup(): Promise<void> {
       // Documentos en su plazo de conservación y versiones inmutables: se
       // purgan como mantenimiento con session_replication_role = replica
-      // (requiere el superusuario de TEST_DATABASE_URL).
-      await prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
-        const where = { subjectUser: { email: { endsWith: DOMAIN } } };
-        await tx.documentVersion.deleteMany({ where: { document: where } });
-        await tx.document.deleteMany({ where });
-      });
+      // (requiere el superusuario de TEST_DATABASE_URL). Bajo la carga de la
+      // suite en paralelo la transacción puede morir por deadlock con otras
+      // limpiezas: se reintenta una vez (la operación es idempotente).
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
+            const where = { subjectUser: { email: { endsWith: DOMAIN } } };
+            await tx.documentVersion.deleteMany({ where: { document: where } });
+            await tx.document.deleteMany({ where });
+          });
+          break;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '';
+          const deadlock =
+            (error instanceof Prisma.PrismaClientKnownRequestError &&
+              error.code === 'P2034') ||
+            message.includes('deadlock');
+          if (!deadlock || attempt >= 1) throw error;
+        }
+      }
       // Las operaciones del gestor documental quedan auditadas (SPRINT-2-T09)
       // y audit_logs impide borrar usuarios o locales con historial.
       await purgeTestAuditLogs(prisma, {

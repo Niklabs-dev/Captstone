@@ -83,11 +83,16 @@ const TIP_POOL_SELECT = {
     select: {
       tipEntryId: true,
       amount: true,
-      tipEntry: { select: { businessDate: true, paymentMethod: true } },
+      tipEntry: {
+        select: {
+          businessDate: true,
+          paymentMethod: { select: { code: true, name: true } },
+        },
+      },
     },
     orderBy: [
       { tipEntry: { businessDate: 'asc' } },
-      { tipEntry: { paymentMethod: 'asc' } },
+      { tipEntry: { paymentMethod: { code: 'asc' } } },
     ],
   },
 } satisfies Prisma.TipPoolSelect;
@@ -225,7 +230,8 @@ function toTipPoolResponse(pool: TipPoolRecord): TipPoolResponse {
     sources: pool.sources.map((source) => ({
       tipEntryId: source.tipEntryId,
       businessDate: formatDbDate(source.tipEntry.businessDate),
-      paymentMethod: source.tipEntry.paymentMethod,
+      paymentMethod: source.tipEntry.paymentMethod.code,
+      paymentMethodName: source.tipEntry.paymentMethod.name,
       amount: Number(source.amount),
     })),
     reconciled:
@@ -631,11 +637,11 @@ export class TipPoolsService {
       select: {
         id: true,
         businessDate: true,
-        paymentMethod: true,
+        paymentMethod: { select: { code: true } },
         amount: true,
         poolSource: { select: { poolId: true } },
       },
-      orderBy: [{ businessDate: 'asc' }, { paymentMethod: 'asc' }],
+      orderBy: [{ businessDate: 'asc' }, { paymentMethod: { code: 'asc' } }],
     });
     const agreements = await tx.tipAgreement.findMany({
       where: {
@@ -676,6 +682,8 @@ export class TipPoolsService {
       orderBy: [{ workerId: 'asc' }, { periodStart: 'asc' }],
     });
 
+    // El fondo suma todos los registros del período, incluidos los de medios
+    // desactivados: es dinero real recibido y no se crea una segunda fuente.
     const fund = entries.reduce(
       (sum, entry) => sum.plus(entry.amount),
       new Prisma.Decimal(0),
@@ -704,7 +712,7 @@ export class TipPoolsService {
       entries: entries.map((entry) => ({
         id: entry.id,
         businessDate: formatDbDate(entry.businessDate),
-        paymentMethod: entry.paymentMethod,
+        paymentMethod: entry.paymentMethod.code,
         usedByPoolId: entry.poolSource?.poolId ?? null,
       })),
       hours: hours.map((record) => ({

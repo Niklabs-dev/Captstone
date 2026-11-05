@@ -13,11 +13,11 @@
 | Núcleo | `stores`, `roles`, `users`, `refresh_tokens`, `audit_logs` | Locales, control de acceso por rol y local, autenticación JWT y auditoría inmutable |
 | Gestor Documental | `document_types`, `documents`, `document_versions`, `payslips` | Documentación laboral con hash SHA-256, versionado y conservación por 5 años; liquidaciones de sueldo con estado de publicación |
 | Propinas | `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources` | Registro diario de propinas, pacto de reparto vigente, horas trabajadas y reparto con snapshots (art. 64 CT) |
-| Ventas y Caja | `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries` | Ventas por local y cierre de caja por local, día y turno con responsable y quién cerró, desglosado por medio de pago (esperado vs. contado con diferencia por línea), conciliado contra MrComanda y Mercado Pago con sus vouchers y vinculado solo como referencia al registro diario de propinas |
+| Ventas y Caja | `payment_methods`, `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries` | Catálogo administrable de medios de pago (código estable, comportamiento y disponibilidad para propinas), ventas por local (manuales y totales netos MrComanda por período) y cierre de caja por local, día y turno con responsable y quién cerró, desglosado por medio de pago (esperado vs. contado con diferencia por línea), conciliado contra MrComanda y Mercado Pago con sus vouchers y vinculado solo como referencia al registro diario de propinas |
 | Inventario | `products`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Stock por libro mayor de movimientos y conteos físicos que detectan mermas |
 | Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
 
-**26 tablas y 13 enums.** El Portal del Trabajador no agrega tablas: es una vista
+**27 tablas y 14 enums.** El Portal del Trabajador no agrega tablas: es una vista
 de solo lectura sobre `users`, `documents`, `tip_pool_lines` y `sales`, con
 aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 
@@ -37,12 +37,16 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
   **`timestamptz` para marcas de tiempo** (Chile tiene horario de verano).
 - **Restricciones de negocio en la BD**: un cierre de caja por local, día y
   turno (`UNIQUE(store_id, business_date, shift)`), una línea por medio de pago por cierre
-  (`UNIQUE(closing_id, payment_method)`), un reparto por local y período
+  (`UNIQUE(closing_id, payment_method_id)`), un reparto por local y período
   (`UNIQUE(store_id, period_start, period_end)`), una línea por trabajador por
   reparto (`UNIQUE(pool_id, user_id)`), hash SHA-256 único por versión de
   documento, un registro de propinas por local, fecha y medio de pago
-  (`UNIQUE(store_id, business_date, payment_method)`), una fuente por registro
-  diario (`UNIQUE(tip_entry_id)` en `tip_pool_sources`), un pacto por local e
+  (`UNIQUE(store_id, business_date, payment_method_id)`), un total MrComanda
+  por local, medio y período
+  (`UNIQUE(store_id, payment_method_id, period_start, period_end)`; los
+  períodos NULL de las ventas manuales no colisionan), una fuente por registro
+  diario (`UNIQUE(tip_entry_id)` en `tip_pool_sources`), un medio de pago por
+  código (`UNIQUE(code)` en `payment_methods`), un pacto por local e
   inicio (`UNIQUE(store_id, valid_from)`) y restricciones de exclusión que impiden
   vigencias de pactos o períodos de horas solapados (`tip_agreements_no_overlap`
   y `work_hours_records_no_overlap`).
@@ -111,13 +115,14 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
   (`UNIQUE(store_id, business_date, shift)`); `cash_closings.responsible_id`
   (obligatorio), `opening_cash` (fondo de caja) y, al cerrar, quién y cuándo
   (`closed_by_id`, `closed_at`) en la cabecera; `cash_closing_lines` registra
-  **una línea por medio de pago** (efectivo, débito, crédito, transferencia)
-  con lo esperado según las ventas (`expected_amount`), lo contado por el
-  supervisor (`counted_amount`) y la `difference` de la línea. El fondo se suma
-  a lo esperado de la línea CASH y la diferencia total del cierre se deriva
-  sumando las líneas. Si hay diferencia, el motivo (`difference_reason`) es
-  obligatorio para cerrar, y un cierre `CLOSED` es inmutable (detalle en
-  [Cierres de caja por turno](#cierres-de-caja-por-turno-sprint-4-t08)).
+  **una línea por cada medio de pago del catálogo** con lo esperado según las
+  ventas (`expected_amount`), lo contado por el supervisor (`counted_amount`) y
+  la `difference` de la línea. El fondo se suma una sola vez a lo esperado, en
+  la primera línea cuyo medio tiene comportamiento `CASH` (es un monto físico
+  único, aunque el catálogo tenga más de un medio CASH), y la diferencia total
+  del cierre se deriva sumando las líneas. Si hay diferencia, el motivo
+  (`difference_reason`) es obligatorio para cerrar, y un cierre `CLOSED` es
+  inmutable (detalle en [Cierres de caja por turno](#cierres-de-caja-por-turno-sprint-4-t08)).
 
 ## Trazabilidad del Gestor Documental
 
@@ -181,7 +186,7 @@ cambian; el único cambio de estado posible es a `PUBLISHED`.
 
 Reglas clave:
 
-- Un `tip_entries` por `(store_id, business_date, payment_method)`.
+- Un `tip_entries` por `(store_id, business_date, payment_method_id)`.
 - Un `tip_pool_sources` por `tip_entry_id` (la fuente no se reutiliza en otro reparto).
 - El total de `tip_pools` se calcula sumando los `tip_entries` del período; las
   ventas aportan su `tip_amount` a través de la reconciliación con un único
@@ -191,6 +196,47 @@ Reglas clave:
   horas (`tip_pool_lines.hours_worked`) y monto fuente
   (`tip_pool_sources.amount`).
 
+## Medios de pago y ventas MrComanda (SPRINT-4-T32)
+
+Migración `20261105021500_medios_pago_catalogo` (reversa manual en su
+`down.sql`, que Prisma no ejecuta). Reemplaza al enum `PaymentMethod` por el
+catálogo relacional `payment_methods`, única fuente para ventas, propinas,
+líneas de cierre y clasificación de vouchers.
+
+| Tabla | Rol |
+| --- | --- |
+| `payment_methods` | Catálogo administrable de medios de pago: `code` único e inmutable (contrato operativo con frontend y DTO), nombre, `sort_order`, `is_active`, `behavior` y `available_for_tips`. Sin borrado físico: desactivar no elimina ni oculta el historial. |
+| `sales` | Agrega `source` (`MANUAL` o `MRCOMANDA`) y `period_start`/`period_end` (NULL en ventas manuales). Las cargas MrComanda guardan el total neto agregado por local, medio y período (`tip_amount` = 0: PROPINAS conserva su fuente propia en `tip_entries`). |
+| `cash_closing_vouchers` | Agrega `payment_method_id` opcional: clasifica vouchers MrComanda nuevos. Los vouchers históricos quedan sin clasificar (NULL) y conservan el comportamiento heredado. |
+
+Reglas clave:
+
+- **Backfill por código**: los valores históricos del enum (`CASH`,
+  `DEBIT_CARD`, `CREDIT_CARD`, `TRANSFER`) se transfieren al catálogo por su
+  texto antes de retirar las columnas y el enum; la migración falla si quedara
+  alguna fila sin mapear. Los cuatro códigos se siembran con UUID fijos
+  (catálogo de la migración y `prisma/seed.ts`, upsert idempotente por código
+  con `update: {}` que no revierte la administración vía API).
+- **Comportamiento** (`PaymentMethodBehavior`): `CASH` recibe el fondo de caja
+  y no se concilia contra vouchers; `RECONCILABLE_CARD` alimenta
+  `mrcomanda_net_sales` con los vouchers MrComanda clasificados;
+  `EXTERNAL_OTHER` (transferencias, Junaeb, etc.) queda fuera de esa
+  conciliación para no sumarse dos veces.
+- **Origen y período de la venta** (CHECK `sales_source_period_consistency` y
+  `sales_valid_period`): `source` y período van siempre juntos, con
+  `period_end > period_start`. Las ventas MrComanda no llevan propina (CHECK
+  `sales_mrcomanda_no_tip`).
+- **Idempotencia de las cargas MrComanda**:
+  `UNIQUE(store_id, payment_method_id, period_start, period_end)`; los períodos
+  NULL de las ventas manuales no colisionan (PostgreSQL trata cada NULL como
+  distinto en un índice único).
+- **Triggers actualizados**: `sales_check_tip_entry` compara los FKs del
+  catálogo (misma regla de local, medio y día de negocio en hora de Chile) y
+  la transición a `CLOSED` suma `mrcomanda_net_sales` solo con vouchers
+  MrComanda `RECONCILABLE_CARD` o sin clasificar. El backfill retira y
+  restaura solo los triggers que lo bloquearían (ventas y líneas de cierres
+  `CLOSED`), sin `session_replication_role`.
+
 ## Cierres de caja por turno (SPRINT-4-T08)
 
 Migración `20261104010649_cierres_caja_turno_conciliacion` (reversa manual en
@@ -199,8 +245,8 @@ su `down.sql`, que Prisma no ejecuta).
 | Tabla | Rol |
 | --- | --- |
 | `cash_closings` | Cierre de un local, día de negocio y turno (`shift >= 1`; cada local define cuántos turnos tiene). Guarda responsable, fondo de caja, motivo de diferencia, quién y cuándo cerró y los totales de conciliación. |
-| `cash_closing_lines` | Una línea por medio de pago: esperado vs. contado y su diferencia. |
-| `cash_closing_vouchers` | Vouchers de respaldo de la conciliación: fuente (`MRCOMANDA` o `MERCADO_PAGO`), período de corte que cubren, monto, propina incluida y referencia. Puede haber varios por fuente y turno (terminales o cortes parciales). |
+| `cash_closing_lines` | Una línea por medio de pago del catálogo: esperado vs. contado y su diferencia. |
+| `cash_closing_vouchers` | Vouchers de respaldo de la conciliación: fuente (`MRCOMANDA` o `MERCADO_PAGO`), período de corte que cubren, monto, propina incluida, referencia y, desde SPRINT-4-T32, medio de pago que clasifica los vouchers MrComanda nuevos. Puede haber varios por fuente y turno (terminales o cortes parciales). |
 | `cash_closing_tip_entries` | Vínculo de **solo referencia** entre el cierre y el registro diario de propinas (`tip_entries`) del mismo local y día. |
 
 Reglas clave (CHECK y triggers; aplican a cualquier vía de escritura):
@@ -226,7 +272,11 @@ Reglas clave (CHECK y triggers; aplican a cualquier vía de escritura):
 - **Vouchers**: período válido (`period_end > period_start`), monto y propina
   incluida `>= 0` con propina `<= monto`, y solo Mercado Pago informa propina
   (en MrComanda es siempre 0). Al cerrar, los tres totales de conciliación del
-  cierre deben coincidir con la suma de sus vouchers.
+  cierre deben coincidir con la suma de sus vouchers: `mrcomanda_net_sales`
+  solo recibe vouchers MrComanda clasificados con un medio `RECONCILABLE_CARD`
+  (los sin clasificar conservan el comportamiento heredado y siguen sumando);
+  los vouchers MrComanda de medios `CASH` u `EXTERNAL_OTHER` quedan fuera de
+  esa conciliación y no se suman dos veces.
 - **Ciclo `OPEN` → `CLOSED`**: el cierre se crea en `OPEN` (las líneas y
   vouchers se agregan después) y solo puede pasar a `CLOSED`; `closed_at` y
   `closed_by_id` están informados si y solo si está `CLOSED`
@@ -305,6 +355,10 @@ erDiagram
   USERS ||--o{ TIP_POOL_LINES : "recibe"
 
   STORES ||--o{ SALES : "vende"
+  PAYMENT_METHODS ||--o{ SALES : "cobra"
+  PAYMENT_METHODS ||--o{ TIP_ENTRIES : "recibe propinas"
+  PAYMENT_METHODS ||--o{ CASH_CLOSING_LINES : "desglosa"
+  PAYMENT_METHODS |o--o{ CASH_CLOSING_VOUCHERS : "clasifica (opcional)"
   CASH_CLOSINGS |o--o{ SALES : "agrupa"
   CASH_CLOSINGS ||--o{ CASH_CLOSING_LINES : "desglosa por medio de pago"
   CASH_CLOSINGS ||--o{ CASH_CLOSING_VOUCHERS : "respalda la conciliación"
@@ -357,11 +411,15 @@ enum TipAgreementRule {
   PROPORTIONAL_TO_HOURS
 }
 
-enum PaymentMethod {
-  CASH
-  DEBIT_CARD
-  CREDIT_CARD
-  TRANSFER
+enum PaymentMethodBehavior {
+  CASH [note: 'Recibe el fondo de caja; no se concilia contra vouchers']
+  RECONCILABLE_CARD [note: 'Alimenta mrcomanda_net_sales con vouchers MrComanda clasificados']
+  EXTERNAL_OTHER [note: 'Transferencias, Junaeb, etc.: fuera de la conciliación de vouchers']
+}
+
+enum SaleSource {
+  MANUAL [note: 'Registro del supervisor; sin período']
+  MRCOMANDA [note: 'Total neto agregado por local, medio y período; sin propina']
 }
 
 enum SaleChannel {
@@ -577,16 +635,16 @@ Table payslips {
 Table tip_entries {
   id uuid [pk, default: `gen_random_uuid()`]
   business_date date [not null]
-  payment_method PaymentMethod [not null]
   amount decimal(12,2) [not null, note: 'Monto disponible para repartir']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null]
   store_id uuid [not null, ref: > stores.id]
+  payment_method_id uuid [not null, ref: > payment_methods.id]
   responsible_id uuid [not null, ref: > users.id, note: 'Quién registró la entrada']
 
   indexes {
     (store_id, business_date)
-    (store_id, business_date, payment_method) [unique, note: 'Un registro diario por local, fecha y medio de pago']
+    (store_id, business_date, payment_method_id) [unique, note: 'Un registro diario por local, fecha y medio de pago']
   }
 }
 
@@ -675,20 +733,38 @@ Table tip_pool_sources {
   }
 }
 
+Table payment_methods {
+  id uuid [pk, default: `gen_random_uuid()`]
+  code varchar(40) [not null, unique, note: 'Estable e inmutable: contrato operativo (CASH, DEBIT_CARD, CREDIT_CARD, TRANSFER...)']
+  name varchar(100) [not null, note: 'Administrable sin reescribir montos ni vínculos históricos']
+  sort_order int [not null, note: 'Orden de presentación en formularios y cierres']
+  is_active boolean [not null, default: true, note: 'Desactivar no elimina ni oculta el historial']
+  behavior PaymentMethodBehavior [not null]
+  available_for_tips boolean [not null, default: false, note: 'Elegible para el registro diario de propinas']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+
+  Note: 'Catálogo administrable (SPRINT-4-T32); reemplaza al enum PaymentMethod. Sin borrado físico (FK Restrict)'
+}
+
 Table sales {
   id uuid [pk, default: `gen_random_uuid()`]
-  sold_at timestamptz [not null]
-  payment_method PaymentMethod [not null]
+  sold_at timestamptz [not null, note: 'Día de negocio en hora de Chile para la reconciliación']
   channel SaleChannel [not null, default: 'IN_STORE']
   gross_amount decimal(12,2) [not null]
   tip_amount decimal(12,2) [not null, default: 0, note: 'Se reconcilia con un único tip_entry; no es fuente del reparto']
+  source SaleSource [not null, default: 'MANUAL', note: 'Origen y período van siempre juntos (CHECK)']
+  period_start timestamptz [note: 'Solo MRCOMANDA: inicio del período agregado']
+  period_end timestamptz [note: 'Solo MRCOMANDA: fin del período (> inicio, CHECK)']
   created_at timestamptz [not null, default: `now()`]
   store_id uuid [not null, ref: > stores.id]
+  payment_method_id uuid [not null, ref: > payment_methods.id]
   cash_closing_id uuid [ref: > cash_closings.id]
   registered_by_id uuid [not null, ref: > users.id]
   tip_entry_id uuid [ref: > tip_entries.id, note: 'Reconciliación con el registro diario']
 
   indexes {
+    (store_id, payment_method_id, period_start, period_end) [unique, note: 'Un total MrComanda por local, medio y período; los NULL manuales no colisionan']
     (store_id, sold_at)
     cash_closing_id
     tip_entry_id
@@ -724,14 +800,14 @@ Table cash_closings {
 
 Table cash_closing_lines {
   id uuid [pk, default: `gen_random_uuid()`]
-  payment_method PaymentMethod [not null]
   expected_amount decimal(12,2) [not null, note: 'Calculado desde las ventas del medio de pago (>= 0)']
   counted_amount decimal(12,2) [not null, note: 'Declarado por el supervisor (>= 0)']
   difference decimal(12,2) [not null, note: 'counted - expected (CHECK); el total del cierre es la suma de líneas']
   closing_id uuid [not null, ref: > cash_closings.id]
+  payment_method_id uuid [not null, ref: > payment_methods.id]
 
   indexes {
-    (closing_id, payment_method) [unique, note: 'Una línea por medio de pago por cierre']
+    (closing_id, payment_method_id) [unique, note: 'Una línea por medio de pago por cierre']
   }
 }
 
@@ -745,6 +821,7 @@ Table cash_closing_vouchers {
   reference varchar(100)
   created_at timestamptz [not null, default: `now()`]
   closing_id uuid [not null, ref: > cash_closings.id]
+  payment_method_id uuid [ref: > payment_methods.id, note: 'Clasifica vouchers MrComanda nuevos; NULL = heredado (sigue sumando)']
 
   indexes {
     (closing_id, source)

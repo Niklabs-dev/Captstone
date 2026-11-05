@@ -7,9 +7,14 @@ import { AppModule } from '../src/app.module.js';
 import { AUDIT_ACTION } from '../src/audit/constants/audit-actions.constants.js';
 import { ROLE, type RoleCode } from '../src/auth/constants/roles.constants.js';
 import type { JwtPayload } from '../src/auth/types/auth.types.js';
-import { PaymentMethod, PrismaClient } from '../src/generated/prisma/client.js';
+import { PrismaClient } from '../src/generated/prisma/client.js';
 import type { TipEntryResponse } from '../src/tips/types/tips.types.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
+import {
+  ensureDefaultPaymentMethods,
+  ensurePaymentMethod,
+  paymentMethodIdOf,
+} from './helpers/payment-methods.js';
 
 type App = Parameters<typeof request>[0];
 
@@ -92,6 +97,18 @@ describe.skipIf(!databaseUrl)(
         await tx.tipAgreement.deleteMany({ where: { store: storeWhere } });
         await tx.workHoursRecord.deleteMany({ where: { store: storeWhere } });
         await tx.tipEntry.deleteMany({ where: { store: storeWhere } });
+        // Medios de pago creados solo por estos tests (prefijo propio); solo
+        // los que ninguna línea de cierre, venta o registro de propinas
+        // referencia aún (otros archivos crean líneas comprometidas con todos
+        // los medios activos y esas filas Restrict retienen el medio).
+        await tx.paymentMethod.deleteMany({
+          where: {
+            code: { startsWith: 'TIPSTEST_TIPS_' },
+            cashClosingLines: { none: {} },
+            sales: { none: {} },
+            tipEntries: { none: {} },
+          },
+        });
       });
       await purgeTestAuditLogs(prisma, {
         OR: [
@@ -171,13 +188,13 @@ describe.skipIf(!databaseUrl)(
 
     async function entryCount(
       businessDate: string,
-      paymentMethod: PaymentMethod,
+      paymentMethodCode: string,
     ): Promise<number> {
       return prisma.tipEntry.count({
         where: {
           storeId,
           businessDate: new Date(`${businessDate}T00:00:00.000Z`),
-          paymentMethod,
+          paymentMethod: { code: paymentMethodCode },
         },
       });
     }
@@ -233,6 +250,10 @@ describe.skipIf(!databaseUrl)(
       });
       otherStoreId = otherStore.id;
 
+      // Catálogo de medios de pago (los cuatro por defecto, activos y
+      // elegibles para propinas).
+      await ensureDefaultPaymentMethods(prisma);
+
       await createUser('supervisor', ROLE.SUPERVISOR, store.id);
       await createUser('supervisor2', ROLE.SUPERVISOR, store.id);
       await createUser('worker', ROLE.TRABAJADOR, store.id);
@@ -255,6 +276,7 @@ describe.skipIf(!databaseUrl)(
       expect(created).toMatchObject({
         businessDate: '2026-10-20',
         paymentMethod: 'DEBIT_CARD',
+        paymentMethodName: 'Tarjeta de débito',
         amount: 12500,
       });
       expect(typeof created.amount).toBe('number');
@@ -279,6 +301,10 @@ describe.skipIf(!databaseUrl)(
       expect(list.map((entry) => entry.paymentMethod)).toEqual([
         'CASH',
         'DEBIT_CARD',
+      ]);
+      expect(list.map((entry) => entry.paymentMethodName)).toEqual([
+        'Efectivo',
+        'Tarjeta de débito',
       ]);
       expect(
         list.some(
@@ -311,6 +337,102 @@ describe.skipIf(!databaseUrl)(
       );
       await patchTip(created.id, { amount: 1 }).expect(404);
       await deleteTip(created.id).expect(404);
+    });
+
+    it('aplica las reglas del catálogo al crear y conserva los históricos', async () => {
+      // Junaeb: medio activo pero no elegible para propinas.
+      await ensurePaymentMethod(prisma, {
+        code: 'TIPSTEST_TIPS_JUNAEB',
+        name: 'Junaeb Test',
+        behavior: 'EXTERNAL_OTHER',
+        isActive: true,
+        availableForTips: false,
+      });
+      const junaebRejected = await createTip(
+        tipPayload({
+          businessDate: '2026-11-01',
+          paymentMethod: 'TIPSTEST_TIPS_JUNAEB',
+        }),
+      ).expect(400);
+      expect(messagesOf(junaebRejected.body).join(' ')).toContain(
+        'no admite propinas',
+      );
+
+      // Medio desactivado: no admite registros nuevos.
+      const inactiveMethod = await ensurePaymentMethod(prisma, {
+        code: 'TIPSTEST_TIPS_INACTIVO',
+        name: 'Medio inactivo test',
+        behavior: 'EXTERNAL_OTHER',
+        isActive: false,
+        availableForTips: true,
+      });
+      const inactiveRejected = await createTip(
+        tipPayload({
+          businessDate: '2026-11-01',
+          paymentMethod: 'TIPSTEST_TIPS_INACTIVO',
+        }),
+      ).expect(400);
+      expect(messagesOf(inactiveRejected.body).join(' ')).toContain(
+        'desactivado',
+      );
+      expect(await entryCount('2026-11-01', 'TIPSTEST_TIPS_INACTIVO')).toBe(0);
+
+      // Histórico: el registro se creó mientras el medio estaba activo; al
+      // desactivarlo se conserva el monto y el nombre en lecturas y el
+      // reintento idéntico sigue siendo idempotente.
+      const activable = await ensurePaymentMethod(prisma, {
+        code: 'TIPSTEST_TIPS_TEMPORAL',
+        name: 'Medio temporal test',
+        behavior: 'EXTERNAL_OTHER',
+        isActive: true,
+        availableForTips: true,
+      });
+      const payload = tipPayload({
+        businessDate: '2026-11-02',
+        paymentMethod: 'TIPSTEST_TIPS_TEMPORAL',
+        amount: 4321,
+      });
+      const created = (await createTip(payload).expect(201))
+        .body as TipEntryResponse;
+      expect(created.paymentMethodName).toBe('Medio temporal test');
+
+      await prisma.paymentMethod.update({
+        where: { id: activable.id },
+        data: { isActive: false },
+      });
+      try {
+        const retry = (await createTip(payload).expect(200))
+          .body as TipEntryResponse;
+        expect(retry.id).toBe(created.id);
+        expect(retry.amount).toBe(4321);
+        expect(retry.paymentMethodName).toBe('Medio temporal test');
+
+        const list = (
+          await listTips(`?storeId=${storeId}&businessDate=2026-11-02`).expect(
+            200,
+          )
+        ).body as TipEntryResponse[];
+        expect(list).toHaveLength(1);
+        expect(list[0]).toMatchObject({
+          id: created.id,
+          paymentMethod: 'TIPSTEST_TIPS_TEMPORAL',
+          paymentMethodName: 'Medio temporal test',
+          amount: 4321,
+        });
+
+        // La corrección de monto histórico sigue permitida (no vinculado).
+        const patched = (
+          await patchTip(created.id, { amount: 4000 }).expect(200)
+        ).body as TipEntryResponse;
+        expect(patched.amount).toBe(4000);
+      } finally {
+        await prisma.paymentMethod.update({
+          where: { id: activable.id },
+          data: { isActive: true },
+        });
+      }
+      await deleteTip(created.id).expect(204);
+      expect(inactiveMethod.code).toBe('TIPSTEST_TIPS_INACTIVO');
     });
 
     it('trata el reintento idéntico como idempotente y serializa la concurrencia', async () => {
@@ -425,7 +547,13 @@ describe.skipIf(!databaseUrl)(
         tipPayload({ paymentMethod: 'BILLETERA' }),
       ).expect(400);
       expect(messagesOf(invalidMethod.body).join(' ')).toContain(
-        'paymentMethod debe ser uno de',
+        'no existe en el catálogo',
+      );
+      const malformedMethod = await createTip(
+        tipPayload({ paymentMethod: 'tarjeta debito' }),
+      ).expect(400);
+      expect(messagesOf(malformedMethod.body).join(' ')).toContain(
+        'paymentMethod debe ser un código alfanumérico',
       );
 
       // Campos no permitidos, incluido el responsable que manda el JWT.
@@ -611,10 +739,11 @@ describe.skipIf(!databaseUrl)(
           tipPayload({ businessDate: '2026-10-28', paymentMethod: 'CASH' }),
         ).expect(201)
       ).body as TipEntryResponse;
+      const cashId = await paymentMethodIdOf(prisma, 'CASH');
       await prisma.sale.create({
         data: {
           soldAt: new Date('2026-10-28T12:00:00.000Z'),
-          paymentMethod: PaymentMethod.CASH,
+          paymentMethodId: cashId,
           grossAmount: 50000,
           tipAmount: 3000,
           storeId,

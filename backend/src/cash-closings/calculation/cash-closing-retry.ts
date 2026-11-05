@@ -9,6 +9,7 @@ interface VoucherKeyInput {
   amount: number;
   tipIncludedAmount?: number;
   reference?: string | null;
+  paymentMethod?: string | null;
 }
 
 function voucherKey(voucher: VoucherKeyInput): string {
@@ -27,6 +28,7 @@ function voucherKey(voucher: VoucherKeyInput): string {
     voucher.amount,
     voucher.tipIncludedAmount ?? 0,
     voucher.reference ?? null,
+    voucher.paymentMethod ?? null,
   ]);
 }
 

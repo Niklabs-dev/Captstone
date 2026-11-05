@@ -24,11 +24,7 @@ import { AppModule } from '../src/app.module.js';
 import { AUDIT_ACTION } from '../src/audit/constants/audit-actions.constants.js';
 import { ROLE, type RoleCode } from '../src/auth/constants/roles.constants.js';
 import type { AuthUser, JwtPayload } from '../src/auth/types/auth.types.js';
-import {
-  PaymentMethod,
-  Prisma,
-  PrismaClient,
-} from '../src/generated/prisma/client.js';
+import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import type { PrismaService } from '../src/prisma/prisma.service.js';
 import { StoresService } from '../src/stores/stores.service.js';
 import { TipPoolsService } from '../src/tips/tip-pools.service.js';
@@ -40,6 +36,10 @@ import {
   type TipPoolValidationErrorBody,
 } from '../src/tips/types/tip-pools.types.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
+import {
+  ensureDefaultPaymentMethods,
+  paymentMethodIdOf,
+} from './helpers/payment-methods.js';
 
 type App = Parameters<typeof request>[0];
 
@@ -144,6 +144,7 @@ async function createUser(
 async function createFixture(tx: Prisma.TransactionClient): Promise<Fixture> {
   const prisma = transactionAsPrismaService(tx);
   const stores = new StoresService(prisma);
+  await ensureDefaultPaymentMethods(tx);
   const storeId = await createStore(tx);
   const accountant = await createUser(tx, ROLE.CONTADOR, null);
   const supervisor = await createUser(tx, ROLE.SUPERVISOR, storeId);
@@ -185,13 +186,14 @@ async function addAgreement(
 async function addEntry(
   f: Fixture,
   businessDate: string,
-  paymentMethod: PaymentMethod,
+  paymentMethodCode: string,
   amount: number,
 ): Promise<string> {
+  const paymentMethodId = await paymentMethodIdOf(f.tx, paymentMethodCode);
   const entry = await f.tx.tipEntry.create({
     data: {
       businessDate: day(businessDate),
-      paymentMethod,
+      paymentMethodId,
       amount,
       storeId: f.storeId,
       responsibleId: f.supervisor.id,
@@ -337,11 +339,13 @@ describe.skipIf(!databaseUrl)(
           expect.objectContaining({
             businessDate: '2026-10-02',
             paymentMethod: 'CASH',
+            paymentMethodName: 'Efectivo',
             amount: 8000,
           }),
           expect.objectContaining({
             businessDate: '2026-10-15',
             paymentMethod: 'DEBIT_CARD',
+            paymentMethodName: 'Tarjeta de débito',
             amount: 4000,
           }),
         ]);
@@ -378,6 +382,50 @@ describe.skipIf(!databaseUrl)(
         expect(Object.keys(stored.agreementSnapshot ?? {})).toEqual(
           expect.arrayContaining(Object.keys(TIP_DEMO_POOL.agreementSnapshot)),
         );
+      });
+    });
+
+    it('incluye en el fondo las propinas de medios desactivados, con código y nombre', async () => {
+      await withinRollback(async (f) => {
+        await addAgreement(f);
+        // Junaeb no admite propinas hoy, pero el registro histórico existe:
+        // sigue alimentando el reparto con su monto y su medio.
+        const junaeb = await f.tx.paymentMethod.create({
+          data: {
+            code: `TIPSTEST_JUNAEB_${randomUUID().replace(/-/g, '').slice(0, 8)}`,
+            name: 'Junaeb histórico',
+            behavior: 'EXTERNAL_OTHER',
+            sortOrder: 90,
+            isActive: false,
+            availableForTips: false,
+          },
+        });
+        await f.tx.tipEntry.create({
+          data: {
+            businessDate: day('2026-10-02'),
+            paymentMethodId: junaeb.id,
+            amount: 7000,
+            storeId: f.storeId,
+            responsibleId: f.supervisor.id,
+          },
+        });
+        await addEntry(f, '2026-10-15', 'CASH', 5000);
+        await addHours(f, f.workers[0], 10);
+
+        const result = await preview(f);
+        expect(result.pool.totalAmount).toBe(12000);
+        expect(result.pool.sources).toEqual([
+          expect.objectContaining({
+            paymentMethod: junaeb.code,
+            paymentMethodName: 'Junaeb histórico',
+            amount: 7000,
+          }),
+          expect.objectContaining({
+            paymentMethod: 'CASH',
+            paymentMethodName: 'Efectivo',
+            amount: 5000,
+          }),
+        ]);
       });
     });
 
@@ -810,18 +858,20 @@ describe.skipIf(!databaseUrl)(
       start: string;
       end: string;
     }): Promise<void> {
+      const cashId = await paymentMethodIdOf(prisma, 'CASH');
+      const creditId = await paymentMethodIdOf(prisma, 'CREDIT_CARD');
       await prisma.tipEntry.createMany({
         data: [
           {
             businessDate: day(period.start),
-            paymentMethod: 'CASH',
+            paymentMethodId: cashId,
             amount: 7000,
             storeId,
             responsibleId: ids.supervisor,
           },
           {
             businessDate: day(period.end),
-            paymentMethod: 'CREDIT_CARD',
+            paymentMethodId: creditId,
             amount: 3001,
             storeId,
             responsibleId: ids.supervisor,
@@ -898,6 +948,7 @@ describe.skipIf(!databaseUrl)(
           create: { code, name: code },
         });
       }
+      await ensureDefaultPaymentMethods(prisma);
       const store = await prisma.store.create({
         data: { name: STORE_NAME, city: 'Melipilla', address: 'Calle 123' },
       });

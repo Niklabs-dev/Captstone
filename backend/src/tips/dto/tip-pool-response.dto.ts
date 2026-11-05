@@ -14,10 +14,6 @@ import {
   type TipPoolStatusCode,
   type TipPoolValidationErrorBody,
 } from '../types/tip-pools.types.js';
-import {
-  PAYMENT_METHODS,
-  type PaymentMethodCode,
-} from '../types/tips.types.js';
 
 class TipPoolStoreResponseDto {
   @ApiProperty({
@@ -124,11 +120,17 @@ class TipPoolSourceResponseDto implements TipPoolSourceResponse {
   businessDate: string;
 
   @ApiProperty({
-    description: 'Medio de pago del registro.',
-    enum: PAYMENT_METHODS,
+    description: 'Código del medio de pago del registro.',
     example: 'CASH',
   })
-  paymentMethod: PaymentMethodCode;
+  paymentMethod: string;
+
+  @ApiProperty({
+    description:
+      'Nombre del medio de pago según el catálogo; se conserva aunque el medio se desactive después.',
+    example: 'Efectivo',
+  })
+  paymentMethodName: string;
 
   @ApiProperty({
     description: 'Monto usado en el reparto, en CLP (copia).',

@@ -2,9 +2,9 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   CashClosingStatus,
   CashClosingVoucherSource,
-  PaymentMethod,
 } from '../../generated/prisma/client.js';
 import type {
+  BalanceStatus,
   CashClosingLineResponse,
   CashClosingPersonResponse,
   CashClosingResponse,
@@ -45,14 +45,20 @@ class CashClosingLineResponseDto implements CashClosingLineResponse {
   id: string;
 
   @ApiProperty({
-    description: 'Medio de pago.',
-    enum: PaymentMethod,
-    example: PaymentMethod.CASH,
+    description: 'Código del medio de pago según el catálogo.',
+    example: 'CASH',
   })
-  paymentMethod: PaymentMethod;
+  paymentMethod: string;
 
   @ApiProperty({
-    description: 'Venta neta esperada; en efectivo incluye el fondo inicial.',
+    description: 'Nombre del medio de pago para mostrar.',
+    example: 'Efectivo',
+  })
+  paymentMethodName: string;
+
+  @ApiProperty({
+    description:
+      'Venta neta esperada; solo en el medio con comportamiento CASH incluye el fondo inicial.',
     example: 150000,
   })
   expectedAmount: number;
@@ -80,6 +86,21 @@ class CashClosingVoucherResponseDto implements CashClosingVoucherResponse {
     example: CashClosingVoucherSource.MERCADO_PAGO,
   })
   source: CashClosingVoucherSource;
+
+  @ApiProperty({
+    description:
+      'Código del medio de pago que respalda el voucher; null en vouchers históricos sin clasificar.',
+    example: 'DEBIT_CARD',
+    nullable: true,
+  })
+  paymentMethod: string | null;
+
+  @ApiProperty({
+    description: 'Nombre del medio de pago del voucher, si está clasificado.',
+    example: 'Tarjeta de débito',
+    nullable: true,
+  })
+  paymentMethodName: string | null;
 
   @ApiProperty({
     description: 'Inicio del período de corte.',
@@ -121,11 +142,16 @@ class CashClosingTipEntryResponseDto implements CashClosingTipEntryResponse {
   id: string;
 
   @ApiProperty({
-    description: 'Medio registrado sin inferir desgloses no respaldados.',
-    enum: PaymentMethod,
-    example: PaymentMethod.DEBIT_CARD,
+    description: 'Código del medio registrado sin inferir desgloses.',
+    example: 'DEBIT_CARD',
   })
-  paymentMethod: PaymentMethod;
+  paymentMethod: string;
+
+  @ApiProperty({
+    description: 'Nombre del medio registrado.',
+    example: 'Tarjeta de débito',
+  })
+  paymentMethodName: string;
 
   @ApiProperty({ description: 'Monto original en CLP.', example: 31602 })
   amount: number;
@@ -192,7 +218,8 @@ export class CashClosingResponseDto implements CashClosingResponse {
   closedAt: Date | null;
 
   @ApiProperty({
-    description: 'Diferencias calculadas por medio de pago.',
+    description:
+      'Diferencias calculadas por medio de pago, ordenadas por el catálogo.',
     type: CashClosingLineResponseDto,
     isArray: true,
   })
@@ -218,7 +245,8 @@ export class CashClosingResponseDto implements CashClosingResponse {
   vouchers: CashClosingVoucherResponseDto[];
 
   @ApiProperty({
-    description: 'Venta neta de tarjetas declarada por MrComanda.',
+    description:
+      'Venta neta de tarjetas conciliables declarada por MrComanda (solo medios RECONCILABLE_CARD).',
     example: 555530,
   })
   mrcomandaNetSales: number;
@@ -265,6 +293,26 @@ export class CashClosingResponseDto implements CashClosingResponse {
     example: 4,
   })
   salesCount: number;
+
+  @ApiProperty({
+    description:
+      'true si alguna línea o la conciliación tiene diferencia distinta de cero, aunque el total se compense.',
+    example: true,
+  })
+  hasDifferences: boolean;
+
+  @ApiProperty({
+    description: 'true solo cuando no existe ninguna diferencia.',
+    example: false,
+  })
+  isBalanced: boolean;
+
+  @ApiProperty({
+    description: 'Estado de cuadre explícito del cierre.',
+    enum: ['CUADRADO', 'NO_CUADRADO'],
+    example: 'NO_CUADRADO',
+  })
+  balanceStatus: BalanceStatus;
 
   @ApiProperty({
     description: 'Fecha de creación.',

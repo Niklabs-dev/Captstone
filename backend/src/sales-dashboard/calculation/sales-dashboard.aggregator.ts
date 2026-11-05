@@ -1,47 +1,53 @@
 import {
   type CashClosingStatus,
-  PaymentMethod,
   Prisma,
 } from '../../generated/prisma/client.js';
-import type {
-  AlertCounts,
-  PendingClosingDifference,
-  SalesDashboardStore,
-  SalesDashboardTotals,
-  StoreDashboard,
+import {
+  type AlertCounts,
+  type ClosingBalanceStatus,
+  type ClosingLineDifference,
+  type PendingClosingDifference,
+  type SalesDashboardStore,
+  type SalesDashboardTotals,
+  type StoreDashboard,
 } from '../types/sales-dashboard.types.js';
 
-// Consolidación por local de la consulta de ventas (SPRINT-4-T13). Funciones
-// puras, sin NestJS ni base de datos: reciben lo ya leído de cada fuente y
-// arman el resumen, para testear las reglas de conciliación directamente.
-
-const PAYMENT_METHODS = [
-  PaymentMethod.CASH,
-  PaymentMethod.DEBIT_CARD,
-  PaymentMethod.CREDIT_CARD,
-  PaymentMethod.TRANSFER,
-] as const;
+// Consolidación por local de la consulta de ventas (SPRINT-4-T13; medios de
+// pago dinámicos desde el catálogo en SPRINT-4-T32). Funciones puras, sin
+// NestJS ni base de datos: reciben lo ya leído de cada fuente y arman el
+// resumen, para testear las reglas de conciliación directamente.
 
 type Decimal = Prisma.Decimal;
+
+// Medio de pago del catálogo, ya ordenado por sortOrder/código por quien
+// consulta; el agregador lo usa para armar desgloses dinámicos.
+export interface PaymentMethodInput {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+}
 
 // Ventas del día agrupadas por local, medio de pago y si ya pertenecen a un
 // cierre (resultado de un groupBy).
 export interface SaleGroupInput {
   storeId: string;
-  paymentMethod: PaymentMethod;
+  paymentMethodId: string;
   closed: boolean;
   salesCount: number;
   grossAmount: Decimal;
   tipAmount: Decimal;
 }
 
-// Propina con tarjeta del registro diario, sumada por local.
+// Propina con medio conciliable con tarjeta del registro diario, por local.
 export interface CardTipInput {
   storeId: string;
   amount: Decimal;
 }
 
 export interface ClosingLineInput {
+  paymentMethodId: string;
   expectedAmount: Decimal;
   countedAmount: Decimal;
   difference: Decimal;
@@ -69,6 +75,7 @@ export interface StoreAlertInput {
 
 export interface SalesDashboardInput {
   stores: SalesDashboardStore[];
+  paymentMethods: PaymentMethodInput[];
   sales: SaleGroupInput[];
   cardTips: CardTipInput[];
   closings: ClosingInput[];
@@ -119,9 +126,26 @@ function summarizeClosing(closing: ClosingInput) {
   };
 }
 
+// Misma regla que exige motivo al cerrar (hasClosingDifferences de
+// SPRINT-4-T09): cualquier línea descuadrada, aunque otra la compense, o un
+// descuadre de vouchers deja el cierre NO_CUADRADO.
+function balanceStatusOf(closing: ClosingInput): {
+  status: ClosingBalanceStatus;
+  hasDifferences: boolean;
+} {
+  const hasDifferences =
+    closing.lines.some((line) => !line.difference.isZero()) ||
+    !closing.reconciliationDifference.isZero();
+  return {
+    status: hasDifferences ? 'NO_CUADRADO' : 'CUADRADO',
+    hasDifferences,
+  };
+}
+
 function buildStore(
   store: SalesDashboardStore,
   input: SalesDashboardInput,
+  methodById: Map<string, PaymentMethodInput>,
 ): StoreDashboard {
   const sales = input.sales.filter((group) => group.storeId === store.id);
   const closed = sales.filter((group) => group.closed);
@@ -137,23 +161,50 @@ function buildStore(
   const summaries = closings.map((closing) => ({
     closing,
     ...summarizeClosing(closing),
+    ...balanceStatusOf(closing),
   }));
 
-  // Misma regla que exige motivo al cerrar (hasClosingDifferences de
-  // SPRINT-4-T09): cualquier línea descuadrada, aunque otra la compense, o un
-  // descuadre de vouchers deja el cierre pendiente de revisión.
+  // Desglose dinámico del local: medios activos del catálogo más los medios
+  // históricos (inactivos) que tengan ventas en el día, en el orden del
+  // catálogo (sortOrder/código).
+  const storeMethodIds = new Set(sales.map((group) => group.paymentMethodId));
+  const storeMethods = input.paymentMethods.filter(
+    (method) => method.isActive || storeMethodIds.has(method.id),
+  );
+
   const pendingDifferences: PendingClosingDifference[] = summaries
-    .filter(
-      (summary) =>
-        summary.closing.lines.some((line) => !line.difference.isZero()) ||
-        !summary.voucherDifference.isZero(),
-    )
+    .filter((summary) => summary.hasDifferences)
     .map((summary) => ({
       closingId: summary.closing.id,
       shift: summary.closing.shift,
       status: summary.closing.status,
       cashDifference: toAmount(summary.cashDifference),
       voucherDifference: toAmount(summary.voucherDifference),
+      // Orden estable por el catálogo (sortOrder/código): el orden físico de
+      // las líneas leídas de la base no está garantizado y el contrato de la
+      // respuesta es determinista, igual que las líneas del detalle del
+      // cierre (SPRINT-4-T09).
+      lineDifferences: summary.closing.lines
+        .filter((line) => !line.difference.isZero())
+        .slice()
+        .sort((left, right) => {
+          const leftMethod = methodById.get(left.paymentMethodId);
+          const rightMethod = methodById.get(right.paymentMethodId);
+          return (
+            (leftMethod?.sortOrder ?? 0) - (rightMethod?.sortOrder ?? 0) ||
+            (leftMethod?.code ?? '').localeCompare(rightMethod?.code ?? '')
+          );
+        })
+        .map((line): ClosingLineDifference => ({
+          paymentMethod: methodById.get(line.paymentMethodId)?.code ?? '',
+          paymentMethodName: methodById.get(line.paymentMethodId)?.name ?? '',
+          expectedAmount: toAmount(line.expectedAmount),
+          countedAmount: toAmount(line.countedAmount),
+          difference: toAmount(line.difference),
+        })),
+      hasDifferences: summary.hasDifferences,
+      isBalanced: !summary.hasDifferences,
+      balanceStatus: summary.status,
       differenceReason: summary.closing.differenceReason,
       closedAt: summary.closing.closedAt,
     }));
@@ -167,12 +218,13 @@ function buildStore(
       closedNetAmount: net(closed),
       unclosedSalesCount: count(unclosed),
       unclosedNetAmount: net(unclosed),
-      byPaymentMethod: PAYMENT_METHODS.map((paymentMethod) => {
+      byPaymentMethod: storeMethods.map((method) => {
         const groups = sales.filter(
-          (group) => group.paymentMethod === paymentMethod,
+          (group) => group.paymentMethodId === method.id,
         );
         return {
-          paymentMethod,
+          paymentMethod: method.code,
+          paymentMethodName: method.name,
           salesCount: count(groups),
           netAmount: net(groups),
         };
@@ -255,6 +307,11 @@ function buildTotals(stores: StoreDashboard[]): SalesDashboardTotals {
 export function buildSalesDashboard(
   input: SalesDashboardInput,
 ): ConsolidatedDashboard {
-  const stores = input.stores.map((store) => buildStore(store, input));
+  const methodById = new Map(
+    input.paymentMethods.map((method) => [method.id, method]),
+  );
+  const stores = input.stores.map((store) =>
+    buildStore(store, input, methodById),
+  );
   return { stores, totals: buildTotals(stores) };
 }

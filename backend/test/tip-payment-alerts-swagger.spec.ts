@@ -62,6 +62,7 @@ describe('Swagger de alertas de propinas (SPRINT-3-T14)', () => {
         'store',
         'businessDate',
         'paymentMethod',
+        'paymentMethodName',
         'amount',
         'pool',
         'deadline',

@@ -42,6 +42,16 @@ export const AUDIT_ACTION = {
   TIP_POOL_RECEIPT_DOWNLOADED: 'TIP_POOL_RECEIPT_DOWNLOADED',
   // Cierre de caja y conciliación por turno (SPRINT-4-T09).
   CASH_CLOSING_CREATED: 'CASH_CLOSING_CREATED',
+  // Catálogo administrable de medios de pago (SPRINT-4-T32): alta, edición,
+  // baja lógica y reactivación; el código es estable y no se audita el
+  // cuerpo completo de las solicitudes.
+  PAYMENT_METHOD_CREATED: 'PAYMENT_METHOD_CREATED',
+  PAYMENT_METHOD_UPDATED: 'PAYMENT_METHOD_UPDATED',
+  PAYMENT_METHOD_DEACTIVATED: 'PAYMENT_METHOD_DEACTIVATED',
+  PAYMENT_METHOD_REACTIVATED: 'PAYMENT_METHOD_REACTIVATED',
+  // Ingreso de totales netos de ventas MrComanda por local y período
+  // (SPRINT-4-T32); el reintento idéntico no se audita de nuevo.
+  MRCOMANDA_SALES_IMPORTED: 'MRCOMANDA_SALES_IMPORTED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

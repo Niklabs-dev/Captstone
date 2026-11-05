@@ -3,7 +3,6 @@ import type { AuthUser } from '../../auth/types/auth.types.js';
 import {
   CashClosingStatus,
   CashClosingVoucherSource,
-  PaymentMethod,
 } from '../../generated/prisma/client.js';
 import type { CreateCashClosingDto } from '../dto/create-cash-closing.dto.js';
 import type { CashClosingResponse } from '../types/cash-closings.types.js';
@@ -23,10 +22,10 @@ function createDto(): CreateCashClosingDto {
     shift: 1,
     openingCash: 50000,
     lines: [
-      { paymentMethod: PaymentMethod.CASH, countedAmount: 149000 },
-      { paymentMethod: PaymentMethod.DEBIT_CARD, countedAmount: 511730 },
-      { paymentMethod: PaymentMethod.CREDIT_CARD, countedAmount: 43800 },
-      { paymentMethod: PaymentMethod.TRANSFER, countedAmount: 20000 },
+      { paymentMethod: 'CASH', countedAmount: 149000 },
+      { paymentMethod: 'DEBIT_CARD', countedAmount: 511730 },
+      { paymentMethod: 'CREDIT_CARD', countedAmount: 43800 },
+      { paymentMethod: 'TRANSFER', countedAmount: 20000 },
     ],
     vouchers: [
       {
@@ -36,6 +35,7 @@ function createDto(): CreateCashClosingDto {
         amount: 555530,
         tipIncludedAmount: 0,
         reference: 'VENTAS',
+        paymentMethod: 'DEBIT_CARD',
       },
       {
         source: CashClosingVoucherSource.MERCADO_PAGO,
@@ -53,15 +53,23 @@ function createDto(): CreateCashClosingDto {
 }
 
 function existing(dto: CreateCashClosingDto): CashClosingResponse {
+  const names: Record<string, string> = {
+    CASH: 'Efectivo',
+    DEBIT_CARD: 'Tarjeta de débito',
+    CREDIT_CARD: 'Tarjeta de crédito',
+    TRANSFER: 'Transferencia',
+  };
   const lines = dto.lines.map((line, index) => ({
     ...line,
     id: `linea-${index}`,
+    paymentMethodName: names[line.paymentMethod] ?? line.paymentMethod,
     expectedAmount: line.countedAmount,
     difference: 0,
   }));
   const tipEntries = (dto.tipEntryIds ?? []).map((id) => ({
     id,
-    paymentMethod: PaymentMethod.DEBIT_CARD,
+    paymentMethod: 'DEBIT_CARD',
+    paymentMethodName: 'Tarjeta de débito',
     amount: 15801,
   }));
   return {
@@ -83,6 +91,10 @@ function existing(dto: CreateCashClosingDto): CashClosingResponse {
     vouchers: dto.vouchers.map((voucher, index) => ({
       ...voucher,
       id: `voucher-${index}`,
+      paymentMethod: voucher.paymentMethod ?? null,
+      paymentMethodName: voucher.paymentMethod
+        ? (names[voucher.paymentMethod] ?? voucher.paymentMethod)
+        : null,
       periodStart: new Date(voucher.periodStart),
       periodEnd: new Date(voucher.periodEnd),
       tipIncludedAmount: voucher.tipIncludedAmount ?? 0,
@@ -96,6 +108,9 @@ function existing(dto: CreateCashClosingDto): CashClosingResponse {
     tipEntries,
     tipFundAmount: 31602,
     salesCount: 4,
+    hasDifferences: true,
+    isBalanced: false,
+    balanceStatus: 'NO_CUADRADO',
     createdAt: new Date('2026-03-10T19:59:00.000Z'),
     updatedAt: new Date('2026-03-10T20:00:00.000Z'),
   };
@@ -123,6 +138,12 @@ describe('Identificación de reintentos de cierre (SPRINT-4-T10)', () => {
       'voucher',
       (dto: CreateCashClosingDto) => {
         dto.vouchers[0].amount += 1;
+      },
+    ],
+    [
+      'medio de un voucher',
+      (dto: CreateCashClosingDto) => {
+        dto.vouchers[0].paymentMethod = 'CREDIT_CARD';
       },
     ],
     [
