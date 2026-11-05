@@ -52,7 +52,7 @@ describe('Swagger del catálogo de medios de pago (SPRINT-4-T32)', () => {
     {
       method: 'patch' as const,
       path: '/payment-methods/{id}',
-      statuses: ['200', '400', '401', '403', '404'],
+      statuses: ['200', '400', '401', '403', '404', '409'],
     },
     {
       method: 'patch' as const,

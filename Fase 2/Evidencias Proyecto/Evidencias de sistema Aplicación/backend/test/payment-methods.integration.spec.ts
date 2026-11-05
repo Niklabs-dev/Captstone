@@ -32,12 +32,16 @@ describe.skipIf(!databaseUrl)(
     let jwt: JwtService;
     let adminToken: string;
     let adminId: string;
+    let storeId: string;
     let supervisorToken: string;
     let workerToken: string;
 
     async function cleanup(): Promise<void> {
       await purgeTestAuditLogs(prisma, {
         user: { email: { endsWith: DOMAIN } },
+      });
+      await prisma.sale.deleteMany({
+        where: { paymentMethod: { code: { in: [...CODES] } } },
       });
       await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
       // Solo medios sin referencias: otros archivos crean líneas de cierre
@@ -106,6 +110,7 @@ describe.skipIf(!databaseUrl)(
           address: 'Calle de prueba 123',
         },
       });
+      storeId = store.id;
 
       const admin = await prisma.user.create({
         data: {
@@ -385,6 +390,38 @@ describe.skipIf(!databaseUrl)(
 
       const reactivated = await changeState(debit.id, 'reactivate').expect(200);
       expect(reactivated.body).toMatchObject({ isActive: true });
+    });
+
+    it('bloquea el cambio de comportamiento con historial y permite editar el nombre', async () => {
+      const debit = await prisma.paymentMethod.findUniqueOrThrow({
+        where: { code: 'PM_DEBIT' },
+      });
+      await prisma.sale.create({
+        data: {
+          soldAt: new Date('2026-11-05T12:00:00.000Z'),
+          grossAmount: 10000,
+          storeId,
+          paymentMethodId: debit.id,
+          registeredById: adminId,
+        },
+      });
+
+      const rejected = await updatePaymentMethod(debit.id, {
+        behavior: 'EXTERNAL_OTHER',
+      }).expect(409);
+      expect((rejected.body as ErrorResponse).message).toContain(
+        'historial asociado',
+      );
+      expect(
+        await prisma.paymentMethod.findUniqueOrThrow({
+          where: { id: debit.id },
+          select: { behavior: true },
+        }),
+      ).toMatchObject({ behavior: 'RECONCILABLE_CARD' });
+
+      await updatePaymentMethod(debit.id, {
+        name: 'Débito con historial',
+      }).expect(200);
     });
   },
 );

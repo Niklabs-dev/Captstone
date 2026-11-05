@@ -47,6 +47,7 @@ function createService(
       findUnique: vi.fn().mockResolvedValue(paymentMethod),
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
+      count: vi.fn().mockResolvedValue(0),
       update: vi.fn(),
     },
   };
@@ -126,7 +127,7 @@ describe('PaymentMethodsService', () => {
     expect(prisma.paymentMethod.update).not.toHaveBeenCalled();
   });
 
-  it('edita nombre, orden, comportamiento y propinas sin tocar el código', async () => {
+  it('edita nombre, orden y propinas sin consultar el historial', async () => {
     const { service, prisma } = createService();
     prisma.paymentMethod.update.mockResolvedValue({
       ...PAYMENT_METHOD,
@@ -145,6 +146,50 @@ describe('PaymentMethodsService', () => {
         data: { name: 'Tarjeta débito', availableForTips: false },
       }),
     );
+    expect(prisma.paymentMethod.count).not.toHaveBeenCalled();
+  });
+
+  it('permite cambiar el comportamiento de un medio sin historial', async () => {
+    const { service, prisma } = createService();
+    prisma.paymentMethod.update.mockResolvedValue({
+      ...PAYMENT_METHOD,
+      behavior: 'EXTERNAL_OTHER',
+    });
+
+    await expect(
+      service.update(PAYMENT_METHOD.id, { behavior: 'EXTERNAL_OTHER' }),
+    ).resolves.toMatchObject({ behavior: 'EXTERNAL_OTHER' });
+    expect(prisma.paymentMethod.count).toHaveBeenCalledWith({
+      where: {
+        id: PAYMENT_METHOD.id,
+        OR: [
+          { sales: { some: {} } },
+          { tipEntries: { some: {} } },
+          { cashClosingLines: { some: {} } },
+          { cashClosingVouchers: { some: {} } },
+        ],
+      },
+    });
+  });
+
+  it('rechaza cambiar el comportamiento de un medio con historial', async () => {
+    const { service, prisma } = createService();
+    prisma.paymentMethod.count.mockResolvedValue(1);
+
+    await expect(
+      service.update(PAYMENT_METHOD.id, { behavior: 'EXTERNAL_OTHER' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.paymentMethod.update).not.toHaveBeenCalled();
+  });
+
+  it('acepta el mismo comportamiento aunque el medio tenga historial', async () => {
+    const { service, prisma } = createService();
+    prisma.paymentMethod.update.mockResolvedValue(PAYMENT_METHOD);
+
+    await expect(
+      service.update(PAYMENT_METHOD.id, { behavior: 'RECONCILABLE_CARD' }),
+    ).resolves.toMatchObject({ behavior: 'RECONCILABLE_CARD' });
+    expect(prisma.paymentMethod.count).not.toHaveBeenCalled();
   });
 
   it('rechaza la edición de un medio inexistente', async () => {

@@ -125,6 +125,10 @@ export class PaymentMethodsController {
     description: 'Solo ADMINISTRADOR puede editar medios de pago.',
   })
   @ApiNotFoundResponse({ description: 'Medio de pago no encontrado.' })
+  @ApiConflictResponse({
+    description:
+      'No se puede cambiar el comportamiento de un medio con historial asociado.',
+  })
   async update(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdatePaymentMethodDto,

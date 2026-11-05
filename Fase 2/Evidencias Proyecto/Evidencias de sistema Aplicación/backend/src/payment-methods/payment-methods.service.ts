@@ -95,26 +95,47 @@ export class PaymentMethodsService {
     id: string,
     dto: UpdatePaymentMethodDto,
   ): Promise<PaymentMethodResponse> {
-    await this.findById(id);
-    const data: Prisma.PaymentMethodUpdateInput = {};
-    if (dto.name !== undefined) data.name = dto.name;
-    if (dto.sortOrder !== undefined) data.sortOrder = dto.sortOrder;
-    if (dto.behavior !== undefined) data.behavior = dto.behavior;
-    if (dto.availableForTips !== undefined) {
-      data.availableForTips = dto.availableForTips;
-    }
-    if (Object.keys(data).length === 0) {
-      throw new BadRequestException(
-        'Debes indicar al menos un campo para actualizar el medio de pago',
-      );
-    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM payment_methods WHERE id = ${id}::uuid FOR UPDATE`;
+      const existing = await this.findById(id, tx);
+      const data: Prisma.PaymentMethodUpdateInput = {};
+      if (dto.name !== undefined) data.name = dto.name;
+      if (dto.sortOrder !== undefined) data.sortOrder = dto.sortOrder;
+      if (dto.behavior !== undefined) data.behavior = dto.behavior;
+      if (dto.availableForTips !== undefined) {
+        data.availableForTips = dto.availableForTips;
+      }
+      if (Object.keys(data).length === 0) {
+        throw new BadRequestException(
+          'Debes indicar al menos un campo para actualizar el medio de pago',
+        );
+      }
+      if (dto.behavior !== undefined && dto.behavior !== existing.behavior) {
+        const historicalReferences = await tx.paymentMethod.count({
+          where: {
+            id,
+            OR: [
+              { sales: { some: {} } },
+              { tipEntries: { some: {} } },
+              { cashClosingLines: { some: {} } },
+              { cashClosingVouchers: { some: {} } },
+            ],
+          },
+        });
+        if (historicalReferences > 0) {
+          throw new ConflictException(
+            'No se puede cambiar el comportamiento de un medio de pago con historial asociado',
+          );
+        }
+      }
 
-    const paymentMethod = await this.prisma.paymentMethod.update({
-      where: { id },
-      data,
-      select: PAYMENT_METHOD_SELECT,
+      const paymentMethod = await tx.paymentMethod.update({
+        where: { id },
+        data,
+        select: PAYMENT_METHOD_SELECT,
+      });
+      return toPaymentMethodResponse(paymentMethod);
     });
-    return toPaymentMethodResponse(paymentMethod);
   }
 
   async deactivate(id: string): Promise<PaymentMethodStateChange> {

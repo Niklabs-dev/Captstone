@@ -360,6 +360,20 @@ describe('Cálculo de cierres de caja (SPRINT-4-T09)', () => {
     ]);
   });
 
+  it('rechaza un fondo positivo cuando el cierre no tiene una línea de efectivo', () => {
+    const withoutCash = METHODS.map((method) =>
+      method.code === 'CASH' ? { ...method, isActive: false } : method,
+    );
+    const lines = counted([0, 0, 0, 0]).slice(1);
+
+    expect(() =>
+      calculateClosingLines([], lines, 50000, withoutCash, CUT),
+    ).toThrow('fondo de caja sin una línea de efectivo');
+    expect(calculateClosingLines([], lines, 0, withoutCash, CUT)).toHaveLength(
+      3,
+    );
+  });
+
   it('exige línea de un medio inactivo con ventas del período y lo ordena por el catálogo', () => {
     const lines = calculateClosingLines(
       [sale('JUNEB', 20000, 0), sale('CASH', 5000, 0)],
