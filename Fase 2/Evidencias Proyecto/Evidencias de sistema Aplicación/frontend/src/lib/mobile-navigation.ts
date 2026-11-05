@@ -25,6 +25,7 @@ export function getNavigationIcon(href: NavigationItem['href']) {
   const icons = {
     '/dashboard': 'home',
     '/portal': 'home',
+    '/admin/panel': 'chart',
     '/admin/usuarios': 'users',
     '/admin/locales': 'store',
     '/admin/auditoria': 'audit',

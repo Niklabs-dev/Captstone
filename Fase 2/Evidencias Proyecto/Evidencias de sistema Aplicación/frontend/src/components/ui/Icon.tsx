@@ -15,6 +15,7 @@ const paths = {
   audit: 'M9 3H5v18h14V3h-4M9 2h6v4H9V2ZM8 11h8M8 15h8',
   bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4',
   more: 'M5 11v2M12 11v2M19 11v2',
+  chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   arrow: 'M5 12h14m-6-6 6 6-6 6',
   user: 'M20 21a8 8 0 0 0-16 0M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
 };

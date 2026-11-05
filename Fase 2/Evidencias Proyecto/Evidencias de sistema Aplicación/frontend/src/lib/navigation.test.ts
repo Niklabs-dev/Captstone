@@ -35,6 +35,7 @@ test('El layout identifica la vista activa y el título sin confundir prefijos d
 test('La navegación permite recorrer inicio, usuarios y auditoría al administrador', () => {
   assert.deepEqual(getNavigationItems('ADMINISTRADOR'), [
     { href: '/dashboard', label: 'Inicio' },
+    { href: '/admin/panel', label: 'Panel consolidado' },
     { href: '/admin/usuarios', label: 'Usuarios' },
     { href: '/admin/locales', label: 'Locales' },
     { href: '/admin/auditoria', label: 'Auditoría' },
@@ -246,5 +247,20 @@ test('Mis documentos y Mis liquidaciones permanecen separados para trabajadores 
         ),
         true,
       );
+  }
+});
+
+test('El panel consolidado de SPRINT-4-T15 es exclusivo del administrador', () => {
+  assert.deepEqual(getNavigationView('/admin/panel'), {
+    href: '/admin/panel',
+    title: 'Panel consolidado',
+  });
+  for (const role of ROLES) {
+    const allowed = role === 'ADMINISTRADOR';
+    assert.equal(
+      getNavigationItems(role).some((item) => item.href === '/admin/panel'),
+      allowed,
+    );
+    assert.equal(getPageRedirect(role, '/admin/panel') === null, allowed);
   }
 });

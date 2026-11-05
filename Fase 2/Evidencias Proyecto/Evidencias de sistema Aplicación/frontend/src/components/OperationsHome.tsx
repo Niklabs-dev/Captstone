@@ -16,11 +16,11 @@ const introductions: Record<
   }
 > = {
   ADMINISTRADOR: {
-    title: 'Tu equipo, al día',
+    title: 'Tus locales, al día',
     description:
-      'Gestiona las cuentas y los locales. Todo lo que necesitas para acompañar a tu equipo.',
-    href: '/admin/usuarios',
-    action: 'Ver usuarios',
+      'Revisa las ventas del día, las alertas legales y las diferencias de caja de cada local.',
+    href: '/admin/panel',
+    action: 'Abrir panel consolidado',
   },
   CONTADOR: {
     title: 'Cada reparto, en orden',

@@ -6,6 +6,7 @@ export type HomePath = '/portal' | '/dashboard';
 export interface NavigationItem {
   href:
     | HomePath
+    | '/admin/panel'
     | '/admin/locales'
     | '/admin/usuarios'
     | '/admin/auditoria'
@@ -28,6 +29,7 @@ export function getNavigationView(pathname: string): {
     { href: '/portal/propinas', title: 'Mis propinas' },
     { href: '/portal/documentos', title: 'Mis documentos' },
     { href: '/portal/liquidaciones', title: 'Mis liquidaciones' },
+    { href: '/admin/panel', title: 'Panel consolidado' },
     { href: '/admin/documentos', title: 'Gestor documental' },
     { href: '/admin/alertas-dt', title: 'Alertas de registro en la DT' },
     { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
@@ -75,6 +77,7 @@ export function getNavigationItems(
   return role === 'ADMINISTRADOR'
     ? [
         home,
+        { href: '/admin/panel', label: 'Panel consolidado' },
         { href: '/admin/usuarios', label: 'Usuarios' },
         { href: '/admin/locales', label: 'Locales' },
         { href: '/admin/auditoria', label: 'Auditoría' },
