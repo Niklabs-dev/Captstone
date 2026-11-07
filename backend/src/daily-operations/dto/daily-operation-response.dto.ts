@@ -122,6 +122,14 @@ export class DailyOperationResponseDto {
   responsible: DailyOperationPersonDto;
 
   @ApiProperty({
+    description:
+      'Trabajadores seleccionados para el reparto del día (compartidos por la ' +
+      'propina de tarjeta y la de efectivo); solo id y nombre.',
+    type: [DailyOperationPersonDto],
+  })
+  participants: DailyOperationPersonDto[];
+
+  @ApiProperty({
     description: 'Fecha y hora de creación.',
     example: '2026-03-10T20:14:30.000Z',
   })

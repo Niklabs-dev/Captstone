@@ -5,8 +5,10 @@ import {
   Header,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
+  Req,
   Res,
   StreamableFile,
   UploadedFile,
@@ -30,7 +32,7 @@ import {
   ApiUnauthorizedResponse,
   ApiUnsupportedMediaTypeResponse,
 } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { AUDIT_ACTION } from '../audit/constants/audit-actions.constants.js';
 import { Audited } from '../audit/decorators/audited.decorator.js';
 import { setAuditContext } from '../audit/utils/audit-context.util.js';
@@ -49,8 +51,16 @@ import {
   CreateDailyOperationFormDto,
 } from './dto/create-daily-operation.dto.js';
 import { DailyOperationConflictDto } from './dto/daily-operation-conflict.dto.js';
-import { DailyOperationResponseDto } from './dto/daily-operation-response.dto.js';
+import {
+  DailyOperationPersonDto,
+  DailyOperationResponseDto,
+} from './dto/daily-operation-response.dto.js';
+import { EligibleWorkersQueryDto } from './dto/eligible-workers-query.dto.js';
 import { ListDailyOperationsQueryDto } from './dto/list-daily-operations-query.dto.js';
+import {
+  UpdateDailyOperationDto,
+  UpdateDailyOperationFormDto,
+} from './dto/update-daily-operation.dto.js';
 import { MAX_VOUCHER_BYTES } from './types/daily-operations.types.js';
 import type { DailyOperationResponse } from './types/daily-operations.types.js';
 
@@ -60,11 +70,23 @@ const READER_ROLES = [
   ROLE.CONTADOR,
 ] as const;
 
-// Operación diaria del local (SPRINT-4R-T01): un único registro por local y
-// fecha de negocio con la propina de tarjeta (y su voucher fotográfico
-// privado), la propina en efectivo y la diferencia de efectivo declarada.
-// Reemplaza al flujo previo de cierres por turno/conciliación y a la captura
-// separada de propinas, que quedaron solo de lectura histórica.
+// El interceptor de auditoría lee el cuerpo crudo de la solicitud, no el DTO
+// ya transformado: con un solo participantIds repetido Multer entrega un
+// string, no un arreglo. Se normaliza aquí para que la auditoría siempre
+// registre un arreglo de UUIDs con la selección enviada.
+function normalizeParticipantIdsForAudit(req: Request): void {
+  const body = req.body as { participantIds?: unknown } | undefined;
+  if (typeof body?.participantIds === 'string') {
+    body.participantIds = [body.participantIds];
+  }
+}
+
+// Operación diaria del local (SPRINT-4R-T01 y SPRINT-4R-T03): un único
+// registro por local y fecha de negocio con la propina de tarjeta (y su
+// voucher fotográfico privado), la propina en efectivo, la diferencia de
+// efectivo declarada y la selección de trabajadores que participan del
+// reparto. Reemplaza al flujo previo de cierres por turno/conciliación y a
+// la captura separada de propinas, que quedaron solo de lectura histórica.
 @ApiTags('daily-operations')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
@@ -85,7 +107,7 @@ export class DailyOperationsController {
     action: AUDIT_ACTION.DAILY_OPERATION_CREATED,
     entityType: 'daily_operations',
     entityIdFrom: 'response.id',
-    detailFromBody: ['storeId', 'businessDate'],
+    detailFromBody: ['storeId', 'businessDate', 'participantIds'],
     detailFromResponse: {
       cardTipAmount: 'cardTipAmount',
       cashTipAmount: 'cashTipAmount',
@@ -99,15 +121,18 @@ export class DailyOperationsController {
   @ApiBody({ type: CreateDailyOperationFormDto })
   @ApiOperation({
     summary:
-      'Registra la operación diaria del local: propinas de tarjeta y efectivo, diferencia de efectivo y voucher',
+      'Registra la operación diaria del local: propinas, diferencia de efectivo, voucher y participantes del reparto',
     description:
       'Una sola operación por local y fecha de negocio. La foto del voucher ' +
       '(JPEG, PNG o WebP, máximo 5 MiB) es obligatoria cuando hay propina de ' +
       'tarjeta y se almacena en el volumen privado; se descarga solo por ' +
-      'GET /daily-operations/{id}/voucher. Un reintento idéntico (mismos ' +
-      'montos, motivo y mismo voucher por su hash) devuelve la operación ' +
-      'existente con 200; un contenido distinto responde 409 con el ID ' +
-      'consultable.',
+      'GET /daily-operations/{id}/voucher. Con fondo de propinas (tarjeta + ' +
+      'efectivo) mayor que 0 se exige al menos un participantIds (campo ' +
+      'repetido, IDs del catálogo GET /daily-operations/eligible-workers) y ' +
+      'propinas y selección se guardan en la misma transacción. Un reintento ' +
+      'idéntico (mismos montos, motivo, mismo voucher por su hash y misma ' +
+      'selección sin importar el orden) devuelve la operación existente con ' +
+      '200; un contenido distinto responde 409 con el ID consultable.',
   })
   @ApiCreatedResponse({
     description: 'Operación diaria registrada con su voucher.',
@@ -120,7 +145,7 @@ export class DailyOperationsController {
   })
   @ApiBadRequestResponse({
     description:
-      'Campos inválidos, falta el voucher con propina de tarjeta, voucher enviado sin propina de tarjeta, o falta el motivo con diferencia distinta de cero.',
+      'Campos inválidos, falta el voucher con propina de tarjeta, voucher enviado sin propina de tarjeta, falta el motivo con diferencia distinta de cero, participantIds vacío con fondo mayor que 0, repetidos, inválidos o no elegibles para el local.',
   })
   @ApiForbiddenResponse({
     description:
@@ -147,8 +172,10 @@ export class DailyOperationsController {
     @Body() dto: CreateDailyOperationDto,
     @UploadedFile() file: DailyOperationVoucherFile | undefined,
     @CurrentUser() currentUser: AuthUser,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<DailyOperationResponse> {
+    normalizeParticipantIdsForAudit(req);
     const result = await this.dailyOperations.create(dto, file, currentUser);
     res.status(result.created ? 201 : 200);
     setAuditContext(res, {
@@ -156,6 +183,85 @@ export class DailyOperationsController {
       skipAudit: !result.created,
     });
     return result.operation;
+  }
+
+  @Patch(':id')
+  @Roles(ROLE.SUPERVISOR, ROLE.ADMINISTRADOR)
+  // Mismo criterio que el POST: sin @StoreScoped (el cuerpo multipart aún no
+  // está parseado cuando corren los guards); el alcance por local lo aplica
+  // el servicio contra la operación existente.
+  @UseInterceptors(
+    FileInterceptor('voucher', { limits: { fileSize: MAX_VOUCHER_BYTES } }),
+  )
+  @Audited({
+    action: AUDIT_ACTION.DAILY_OPERATION_UPDATED,
+    entityType: 'daily_operations',
+    entityIdFrom: 'params.id',
+    detailFromBody: [
+      'cardTipAmount',
+      'cashTipAmount',
+      'cashDifference',
+      'differenceReason',
+      'participantIds',
+    ],
+    detailFromResponse: {
+      cardTipAmount: 'cardTipAmount',
+      cashTipAmount: 'cashTipAmount',
+      tipFundAmount: 'tipFundAmount',
+      cashDifference: 'cashDifference',
+      differenceReason: 'differenceReason',
+      voucherSha256: 'voucher.sha256Hash',
+    },
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ type: UpdateDailyOperationFormDto })
+  @ApiOperation({
+    summary:
+      'Corrige la operación diaria: montos, diferencia, motivo, voucher y/o participantes del reparto',
+    description:
+      'Corrige solo lo enviado: local, fecha y responsable original no ' +
+      'cambian. participantIds repetido reemplaza la selección completa ' +
+      '(omítelo para conservarla; con fondo resultante 0 queda vacía). El ' +
+      'voucher se conserva si la tarjeta sigue mayor que 0 y no hay ' +
+      'reemplazo; si la tarjeta queda en 0 se retiran archivo y metadatos ' +
+      'del anterior. Con diferencia resultante distinta de cero el motivo es ' +
+      'obligatorio (enviado o ya registrado). Los triggers de la base ' +
+      'impiden corregir montos o selección de una operación que alimentó un ' +
+      'reparto CONFIRMED o PAID: ese rechazo responde 409 con el mensaje de ' +
+      'la base. El actor de la corrección queda en auditoría.',
+  })
+  @ApiOkResponse({
+    description: 'Operación diaria corregida con su selección actualizada.',
+    type: DailyOperationResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Solicitud vacía, campos inválidos, voucher enviado con tarjeta resultante 0, tarjeta mayor que 0 sin voucher registrado, o selección inválida para el fondo resultante (vacía con fondo mayor que 0 o informada con fondo 0).',
+  })
+  @ApiForbiddenResponse({
+    description: 'El rol o el local asignado no permite corregir la operación.',
+  })
+  @ApiNotFoundResponse({ description: 'Operación diaria no encontrada.' })
+  @ApiConflictResponse({
+    description:
+      'La operación alimenta un reparto CONFIRMED o PAID: la base rechaza corregir sus montos o su selección.',
+  })
+  @ApiPayloadTooLargeResponse({
+    description: 'El voucher supera los 5 MiB permitidos.',
+  })
+  @ApiUnsupportedMediaTypeResponse({
+    description:
+      'El voucher no es JPEG, PNG ni WebP, o su tipo declarado no coincide.',
+  })
+  update(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateDailyOperationDto,
+    @UploadedFile() file: DailyOperationVoucherFile | undefined,
+    @CurrentUser() currentUser: AuthUser,
+    @Req() req: Request,
+  ): Promise<DailyOperationResponse> {
+    normalizeParticipantIdsForAudit(req);
+    return this.dailyOperations.update(id, dto, file, currentUser);
   }
 
   @Get()
@@ -183,6 +289,37 @@ export class DailyOperationsController {
     @CurrentUser() currentUser: AuthUser,
   ): Promise<DailyOperationResponse[]> {
     return this.dailyOperations.findAll(query, currentUser);
+  }
+
+  @Get('eligible-workers')
+  @Roles(ROLE.SUPERVISOR, ROLE.ADMINISTRADOR)
+  // Sin @StoreScoped a propósito: así el pipe valida el UUID del local con
+  // 400 antes de cualquier chequeo de alcance, y el alcance por local lo
+  // aplica el servicio (403 si no corresponde).
+  @ApiOperation({
+    summary:
+      'Lista los trabajadores elegibles para el reparto del local (catálogo acotado)',
+    description:
+      'TRABAJADOR activos del local ordenados alfabéticamente. Solo expone ' +
+      'id y nombre: jamás RUT, correo, teléfono ni credenciales. Un ' +
+      'supervisor solo lista su local; el ADMINISTRADOR (rol global) cualquier ' +
+      'local dentro de su alcance. Los IDs devueltos son los únicos válidos ' +
+      'para participantIds al crear o corregir la operación diaria.',
+  })
+  @ApiOkResponse({
+    description: 'Arreglo de trabajadores elegibles (posiblemente vacío).',
+    type: DailyOperationPersonDto,
+    isArray: true,
+  })
+  @ApiBadRequestResponse({ description: 'El local no es un UUID válido.' })
+  @ApiForbiddenResponse({
+    description: 'El rol o el local asignado no permite consultar el catálogo.',
+  })
+  findEligibleWorkers(
+    @Query() query: EligibleWorkersQueryDto,
+    @CurrentUser() currentUser: AuthUser,
+  ): Promise<DailyOperationPersonDto[]> {
+    return this.dailyOperations.findEligibleWorkers(query.storeId, currentUser);
   }
 
   @Get(':id')

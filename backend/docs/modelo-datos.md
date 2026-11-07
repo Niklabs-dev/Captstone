@@ -396,8 +396,10 @@ una única selección cubre la propina de tarjeta y la de efectivo del mismo
 local y día (la operación ya acumula ambas en `tip_fund_amount`), así que
 consultar o corregir la operación siempre recupera la misma selección. Agrega
 la regla equitativa explícita al pacto y la fuente de reparto alimentada por la
-operación, sin tocar los históricos proporcionales. **No agrega endpoints:** la
-API de participantes es SPRINT-4R-T03 y el cálculo diario equitativo es
+operación, sin tocar los históricos proporcionales. **No agrega endpoints por sí
+sola:** la API de participantes es SPRINT-4R-T03 (ya implementada: catálogo
+acotado de elegibles, `participantIds` repetido en el alta y corrección
+multipart de la operación diaria) y el cálculo diario equitativo es
 SPRINT-4R-T04; ambos consumen este modelo.
 
 | Entidad | Rol |
@@ -452,10 +454,12 @@ Reglas clave (CHECK y triggers; aplican a cualquier vía de escritura):
   verdadero: la constancia de un reparto equitativo cuadra consigo misma y
   sigue siendo inmutable.
 
-Sucesores: SPRINT-4R-T03 expone la API de participantes (consulta y corrección
-de la selección) y SPRINT-4R-T04 calcula el reparto diario equitativo
-reutilizando `tip_pool_lines` para el monto final, sin inventar horas; este
-modelo es el contrato que ambos consumen.
+Sucesores: SPRINT-4R-T03 expuso la API de participantes (catálogo
+`GET /daily-operations/eligible-workers`, `participantIds` repetido en el alta
+y corrección multipart de la selección, con la selección comparada como
+conjunto en la idempotencia) y SPRINT-4R-T04 calcula el reparto diario
+equitativo reutilizando `tip_pool_lines` para el monto final, sin inventar
+horas; este modelo es el contrato que ambos consumen.
 
 ## Cómo ver el modelo de forma visual
 

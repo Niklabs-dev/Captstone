@@ -14,6 +14,11 @@ export interface DailyOperationPersonResponse {
   name: string;
 }
 
+// Trabajador elegible para el reparto del día, tal como lo expone el catálogo
+// acotado (GET /daily-operations/eligible-workers): solo id y nombre, nunca
+// RUT, correo, teléfono ni credenciales (Ley N°21.719).
+export type EligibleWorkerResponse = DailyOperationPersonResponse;
+
 /// Metadatos del voucher fotográfico tal como se entregan por la API. El
 /// archivo en sí solo se descarga por GET /daily-operations/:id/voucher.
 export interface DailyOperationVoucherResponse {
@@ -36,6 +41,9 @@ export interface DailyOperationResponse {
   differenceReason: string | null;
   voucher: DailyOperationVoucherResponse | null;
   responsible: DailyOperationPersonResponse;
+  // Selección compartida por la propina de tarjeta y la de efectivo del
+  // mismo local/día (SPRINT-4R-T03); solo id y nombre de cada trabajador.
+  participants: DailyOperationPersonResponse[];
   createdAt: Date;
   updatedAt: Date;
 }
