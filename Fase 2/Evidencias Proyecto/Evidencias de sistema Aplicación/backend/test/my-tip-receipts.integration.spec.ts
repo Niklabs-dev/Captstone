@@ -15,6 +15,7 @@ import type {
   TipPoolReceiptResponse,
   TipPoolResponse,
 } from '../src/tips/types/tip-pools.types.js';
+import { createDailyOperation } from './helpers/daily-operations.js';
 import {
   ensureDefaultPaymentMethods,
   paymentMethodIdOf,
@@ -58,11 +59,6 @@ interface Fixture {
   workerOne: AuthUser;
   workerTwo: AuthUser;
   pool: TipPoolResponse;
-}
-
-interface FixtureOptions {
-  // Horas del supervisor en el período; sin valor no participa del reparto.
-  supervisorHours?: number;
 }
 
 function sha256(content: Buffer): string {
@@ -130,13 +126,12 @@ describe.skipIf(!databaseUrl)(
       return get(path, user).responseType('blob');
     }
 
-    // Mismo escenario del reparto demo: 25.000 entre dos trabajadores con 40 y
-    // 60 horas, que da 10.000 y 15.000. El reparto queda en DRAFT. Con
-    // supervisorHours el supervisor también registra horas y recibe su línea
-    // (25 horas: 8.000 / 12.000 / 5.000).
+    // Mismos montos del reparto demo con la regla equitativa (SPRINT-4R-T04):
+    // el 05-01 los dos trabajadores se reparten 20.000 (15.000 de tarjeta y
+    // 5.000 en efectivo) y el 06-01 solo el segundo recibe 5.000 en efectivo:
+    // 10.000 y 15.000, total 25.000. El reparto queda en DRAFT.
     async function createFixture(
       tx: Prisma.TransactionClient,
-      options: FixtureOptions,
     ): Promise<Fixture> {
       const storeName = `${STORE_NAME_PREFIX} ${randomUUID()}`;
       const store = await tx.store.create({
@@ -167,60 +162,20 @@ describe.skipIf(!databaseUrl)(
         store.id,
         'Trabajador Dos',
       );
-      await tx.tipAgreement.create({
-        data: {
-          id: randomUUID(),
-          name: 'Pacto constancias test',
-          rule: 'PROPORTIONAL_TO_HOURS',
-          validFrom: day('2026-01-01'),
-          storeId: store.id,
-          createdById: supervisor.id,
-        },
+      await createDailyOperation(tx, {
+        storeId: store.id,
+        responsibleId: supervisor.id,
+        businessDate: '2026-01-05',
+        cardTipAmount: 15000,
+        cashTipAmount: 5000,
+        participantIds: [workerOne.id, workerTwo.id],
       });
-      await ensureDefaultPaymentMethods(tx);
-      const cashId = await paymentMethodIdOf(tx, 'CASH');
-      const debitId = await paymentMethodIdOf(tx, 'DEBIT_CARD');
-      await tx.tipEntry.createMany({
-        data: [
-          {
-            id: randomUUID(),
-            businessDate: day('2026-01-05'),
-            paymentMethodId: cashId,
-            amount: 10000,
-            storeId: store.id,
-            responsibleId: supervisor.id,
-          },
-          {
-            id: randomUUID(),
-            businessDate: day('2026-01-06'),
-            paymentMethodId: debitId,
-            amount: 15000,
-            storeId: store.id,
-            responsibleId: supervisor.id,
-          },
-        ],
-      });
-      await tx.workHoursRecord.createMany({
-        data: [
-          { workerId: workerOne.id, hoursWorked: 40 },
-          { workerId: workerTwo.id, hoursWorked: 60 },
-          ...(options.supervisorHours
-            ? [
-                {
-                  workerId: supervisor.id,
-                  hoursWorked: options.supervisorHours,
-                },
-              ]
-            : []),
-        ].map(({ workerId, hoursWorked }) => ({
-          id: randomUUID(),
-          periodStart: day(PERIOD.start),
-          periodEnd: day(PERIOD.end),
-          hoursWorked,
-          storeId: store.id,
-          workerId,
-          recordedById: supervisor.id,
-        })),
+      await createDailyOperation(tx, {
+        storeId: store.id,
+        responsibleId: supervisor.id,
+        businessDate: '2026-01-06',
+        cashTipAmount: 5000,
+        participantIds: [workerTwo.id],
       });
       const { pool } = await app.get(TipPoolsService).preview(
         {
@@ -242,15 +197,92 @@ describe.skipIf(!databaseUrl)(
       };
     }
 
+    // Reparto proporcional histórico (anterior a SPRINT-4R-T04) en otro
+    // período del mismo local, construido directamente en la base como lo
+    // dejaba el motor anterior: pacto, registros diarios, horas 40/60 y
+    // líneas 10.000/15.000. Queda en DRAFT para confirmarlo y pagarlo por la
+    // API.
+    async function createLegacyPool(f: Fixture): Promise<TipPoolResponse> {
+      const legacy = { start: '2025-12-01', end: '2025-12-07' } as const;
+      const storeId = f.pool.store.id;
+      const agreement = await f.tx.tipAgreement.create({
+        data: {
+          id: randomUUID(),
+          name: 'Pacto constancias histórico',
+          rule: 'PROPORTIONAL_TO_HOURS',
+          validFrom: day('2025-01-01'),
+          storeId,
+          createdById: f.supervisor.id,
+        },
+      });
+      await ensureDefaultPaymentMethods(f.tx);
+      const cashId = await paymentMethodIdOf(f.tx, 'CASH');
+      const debitId = await paymentMethodIdOf(f.tx, 'DEBIT_CARD');
+      const entries = [
+        {
+          id: randomUUID(),
+          date: '2025-12-01',
+          methodId: cashId,
+          amount: 10000,
+        },
+        {
+          id: randomUUID(),
+          date: '2025-12-02',
+          methodId: debitId,
+          amount: 15000,
+        },
+      ];
+      await f.tx.tipEntry.createMany({
+        data: entries.map((entry) => ({
+          id: entry.id,
+          businessDate: day(entry.date),
+          paymentMethodId: entry.methodId,
+          amount: entry.amount,
+          storeId,
+          responsibleId: f.supervisor.id,
+        })),
+      });
+      const pool = await f.tx.tipPool.create({
+        data: {
+          storeId,
+          periodStart: day(legacy.start),
+          periodEnd: day(legacy.end),
+          totalAmount: 25000,
+          agreementId: agreement.id,
+          agreementSnapshot: {
+            id: agreement.id,
+            name: agreement.name,
+            rule: 'PROPORTIONAL_TO_HOURS',
+            validFrom: '2025-01-01',
+            validTo: null,
+          },
+          calculatedById: f.accountant.id,
+          sources: {
+            create: entries.map((entry) => ({
+              tipEntryId: entry.id,
+              amount: entry.amount,
+            })),
+          },
+          lines: {
+            create: [
+              { userId: f.workerOne.id, hoursWorked: 40, amount: 10000 },
+              { userId: f.workerTwo.id, hoursWorked: 60, amount: 15000 },
+            ],
+          },
+        },
+        select: { id: true },
+      });
+      return app.get(TipPoolsService).findOne(pool.id, f.accountant);
+    }
+
     async function withinRollback(
       fn: (f: Fixture) => Promise<void>,
-      options: FixtureOptions = {},
     ): Promise<void> {
       try {
         await prisma.$transaction(
           async (tx) => {
             switchable.use(tx);
-            await fn(await createFixture(tx, options));
+            await fn(await createFixture(tx));
             throw new Rollback();
           },
           { maxWait: 30_000, timeout: 50_000 },
@@ -359,7 +391,7 @@ describe.skipIf(!databaseUrl)(
               storeName: f.storeName,
               periodStart: PERIOD.start,
               periodEnd: PERIOD.end,
-              hoursWorked: '40.00',
+              hoursWorked: null,
               amount: 10000,
               paymentDate: PAYMENT_DATE,
               paidByName: 'Contador Constancias',
@@ -470,15 +502,16 @@ describe.skipIf(!databaseUrl)(
               storeName: pool.store.name,
               periodStart: day(pool.periodStart),
               periodEnd: day(pool.periodEnd),
-              hoursWorked: new Prisma.Decimal('40.00'),
+              hoursWorked: null,
               amount: new Prisma.Decimal(10000),
               paymentDate: day(PAYMENT_DATE),
               paidById: f.accountant.id,
               paidByName: 'Contador Constancias',
               detail: {
+                rule: 'EQUAL_SHARES',
                 agreementSnapshot: null,
                 totalAmount: 25000,
-                totalHours: '100.00',
+                totalHours: null,
                 lines: [],
               },
             },
@@ -529,51 +562,137 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
-    describe('roles autorizados en /my-tip-receipts (SPRINT-4-T02)', () => {
-      it('un supervisor con horas en el período lista y descarga su constancia', async () => {
-        await withinRollback(
-          async (f) => {
-            await get('/my-tip-receipts', f.supervisor).expect(200, []);
-            await pay(f);
-            const receipt = await receiptOf(f, f.supervisor.id);
+    describe('compatibilidad con repartos proporcionales históricos (SPRINT-4R-T04)', () => {
+      it('la constancia proporcional conserva sus horas y su PDF se descarga', async () => {
+        await withinRollback(async (f) => {
+          const legacy = await createLegacyPool(f);
+          expect(legacy.rule).toBe('PROPORTIONAL_TO_HOURS');
+          expect(legacy.totalHours).toBe('100.00');
+          const service = app.get(TipPoolsService);
+          const ready = await service.confirm(
+            legacy.id,
+            { expectedVersion: legacy.version },
+            f.accountant,
+          );
+          await service.pay(
+            ready.id,
+            { expectedVersion: ready.version, paymentDate: PAYMENT_DATE },
+            f.accountant,
+          );
 
-            const list = await get('/my-tip-receipts', f.supervisor).expect(
+          const list = await get('/my-tip-receipts', f.workerOne).expect(200);
+          expect(list.body).toEqual([
+            expect.objectContaining({
+              userId: f.workerOne.id,
+              periodStart: '2025-12-01',
+              periodEnd: '2025-12-07',
+              hoursWorked: '40.00',
+              amount: 10000,
+            }),
+          ]);
+          const [own] = list.body as { id: string }[];
+          const file = await download(
+            `/my-tip-receipts/${own.id}/download`,
+            f.workerOne,
+          ).expect(200);
+          const body = file.body as Buffer;
+          expect(body.subarray(0, 4).toString('latin1')).toBe('%PDF');
+          expect(file.headers['x-content-sha256']).toBe(sha256(body));
+
+          const receipts = (
+            await get(`/tip-pools/${legacy.id}/receipts`, f.accountant).expect(
               200,
-            );
-            expect(list.body).toEqual([
-              expect.objectContaining({
-                id: receipt.id,
-                userId: f.supervisor.id,
-                status: 'PAID',
-                hoursWorked: '25.00',
-                amount: 5000,
-              }),
-            ]);
+            )
+          ).body as TipPoolReceiptResponse[];
+          expect(
+            receipts.map((receipt) => [
+              receipt.userId,
+              receipt.hoursWorked,
+              receipt.detail.rule,
+              receipt.detail.totalHours,
+            ]),
+          ).toEqual(
+            expect.arrayContaining([
+              [f.workerOne.id, '40.00', 'PROPORTIONAL_TO_HOURS', '100.00'],
+              [f.workerTwo.id, '60.00', 'PROPORTIONAL_TO_HOURS', '100.00'],
+            ]),
+          );
+        });
+      });
 
-            const file = await download(
-              `/my-tip-receipts/${receipt.id}/download`,
-              f.supervisor,
-            ).expect(200);
-            const body = file.body as Buffer;
-            expect(body.subarray(0, 4).toString('latin1')).toBe('%PDF');
-            expect(file.headers['x-content-sha256']).toBe(sha256(body));
-            expect(await downloadAudits(f, receipt.id)).toEqual([
-              expect.objectContaining({
-                detail: { userId: f.supervisor.id },
-                userId: f.supervisor.id,
-              }),
-            ]);
+      it('la constancia equitativa no inventa horas y declara su regla', async () => {
+        await withinRollback(async (f) => {
+          await pay(f);
+          const receipts = (
+            await get(`/tip-pools/${f.pool.id}/receipts`, f.accountant).expect(
+              200,
+            )
+          ).body as TipPoolReceiptResponse[];
+          expect(receipts).toHaveLength(2);
+          for (const receipt of receipts) {
+            expect(receipt.hoursWorked).toBeNull();
+            expect(receipt.detail.rule).toBe('EQUAL_SHARES');
+            expect(receipt.detail.totalHours).toBeNull();
+            expect(receipt.detail.totalAmount).toBe(25000);
+          }
+        });
+      });
+    });
 
-            // Sigue sin ver la constancia de un trabajador de su local.
-            const peer = await receiptOf(f, f.workerOne.id);
-            await get(
-              `/my-tip-receipts/${peer.id}/download`,
-              f.supervisor,
-            ).expect(404);
-            expect(await downloadAudits(f, peer.id)).toEqual([]);
-          },
-          { supervisorHours: 25 },
-        );
+    describe('roles autorizados en /my-tip-receipts (SPRINT-4-T02)', () => {
+      it('un trabajador que pasa a supervisor del mismo local lista y descarga su constancia', async () => {
+        // Un SUPERVISOR no participa del reparto equitativo (los participantes
+        // son TRABAJADOR activos del local al registrar el día): la constancia
+        // se emite como trabajador y se conserva tras el cambio de rol.
+        await withinRollback(async (f) => {
+          await get('/my-tip-receipts', f.supervisor).expect(200, []);
+          await pay(f);
+          const receipt = await receiptOf(f, f.workerOne.id);
+          const { id: roleId } = await f.tx.role.upsert({
+            where: { code: ROLE.SUPERVISOR },
+            update: {},
+            create: { code: ROLE.SUPERVISOR, name: ROLE.SUPERVISOR },
+          });
+          await f.tx.user.update({
+            where: { id: f.workerOne.id },
+            data: { roleId },
+          });
+          const promoted: AuthUser = { ...f.workerOne, role: ROLE.SUPERVISOR };
+
+          const list = await get('/my-tip-receipts', promoted).expect(200);
+          expect(list.body).toEqual([
+            expect.objectContaining({
+              id: receipt.id,
+              userId: f.workerOne.id,
+              status: 'PAID',
+              hoursWorked: null,
+              amount: 10000,
+            }),
+          ]);
+
+          const file = await download(
+            `/my-tip-receipts/${receipt.id}/download`,
+            promoted,
+          ).expect(200);
+          const body = file.body as Buffer;
+          expect(body.subarray(0, 4).toString('latin1')).toBe('%PDF');
+          expect(file.headers['x-content-sha256']).toBe(sha256(body));
+          expect(await downloadAudits(f, receipt.id)).toEqual([
+            expect.objectContaining({
+              detail: { userId: f.workerOne.id },
+              userId: f.workerOne.id,
+            }),
+          ]);
+
+          // Sigue sin ver la constancia de un trabajador de su local, y el
+          // supervisor que no participó no tiene constancia propia.
+          const peer = await receiptOf(f, f.workerTwo.id);
+          await get(`/my-tip-receipts/${peer.id}/download`, promoted).expect(
+            404,
+          );
+          expect(await downloadAudits(f, peer.id)).toEqual([]);
+          await get('/my-tip-receipts', f.supervisor).expect(200, []);
+        });
       });
 
       it('conserva el historial al pasar a supervisor de otro local y deniega al pasar a un rol global', async () => {

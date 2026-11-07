@@ -16,12 +16,19 @@ import {
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { StoresService } from '../stores/stores.service.js';
-import { calculateTipDistribution } from './calculation/tip-distribution.calculator.js';
 import {
-  validateTipPoolSources,
-  type AgreementCandidate,
-} from './calculation/tip-pool-validation.js';
-import type { PreviewTipPoolDto } from './dto/preview-tip-pool.dto.js';
+  calculateEqualDailyDistribution,
+  EqualDistributionError,
+  type EqualDailyDistributionResult,
+} from './calculation/equal-daily-distribution.calculator.js';
+import {
+  validateEqualPoolSources,
+  type DailyOperationCandidate,
+} from './calculation/equal-pool-validation.js';
+import type {
+  CalculateTipPoolDto,
+  PreviewTipPoolDto,
+} from './dto/preview-tip-pool.dto.js';
 import type {
   ConfirmTipPoolDto,
   ObserveTipPoolDto,
@@ -36,15 +43,17 @@ import {
   buildTipPoolReceipts,
   parseReceiptDetail,
 } from './receipts/tip-receipt-snapshot.js';
-import type {
-  TipAgreementSnapshot,
-  TipPoolConflictBody,
-  TipPoolPersonResponse,
-  TipPoolPreviewResult,
-  TipPoolReceiptResponse,
-  TipPoolResponse,
-  TipPoolStatusCode,
-  TipPoolValidationErrorBody,
+import {
+  EQUAL_SHARES_RULE_NAME,
+  type TipAgreementSnapshot,
+  type TipPoolConflictBody,
+  type TipPoolPersonResponse,
+  type TipPoolPreviewResult,
+  type TipPoolReceiptResponse,
+  type TipPoolResponse,
+  type TipPoolRule,
+  type TipPoolStatusCode,
+  type TipPoolValidationErrorBody,
 } from './types/tip-pools.types.js';
 
 const PERSON_SELECT = {
@@ -95,6 +104,21 @@ const TIP_POOL_SELECT = {
       { tipEntry: { paymentMethod: { code: 'asc' } } },
     ],
   },
+  // Fuentes del reparto equitativo (SPRINT-4R-T04): una por operación diaria.
+  dailyOperationSources: {
+    select: {
+      operationId: true,
+      amount: true,
+      operation: {
+        select: {
+          businessDate: true,
+          cardTipAmount: true,
+          cashTipAmount: true,
+        },
+      },
+    },
+    orderBy: { operation: { businessDate: 'asc' } },
+  },
 } satisfies Prisma.TipPoolSelect;
 
 type TipPoolRecord = Prisma.TipPoolGetPayload<{
@@ -131,6 +155,14 @@ interface LockedPoolRow {
   version: number;
 }
 
+// Fila de tip_pools leída antes de recalcular un borrador.
+interface ExistingPoolRow {
+  id: string;
+  status: TipPoolStatusCode;
+  version: number;
+  notes: string | null;
+}
+
 const STATUS_LABEL: Record<TipPoolStatusCode, string> = {
   DRAFT: 'en borrador',
   CONFIRMED: 'confirmado',
@@ -139,6 +171,9 @@ const STATUS_LABEL: Record<TipPoolStatusCode, string> = {
 
 export const VERSION_CONFLICT_MESSAGE =
   'El reparto cambió desde que lo revisaste; recarga y vuelve a intentarlo';
+
+export const STALE_POOL_MESSAGE =
+  'El reparto quedó desactualizado: cambiaron las operaciones diarias o los participantes del período; recalcúlalo antes de confirmar';
 
 export interface TipPoolReceiptFile {
   receiptId: string;
@@ -197,8 +232,31 @@ function parseAgreementSnapshot(
   };
 }
 
+// La regla aplicada se lee desde la foto: solo los repartos equitativos
+// (SPRINT-4R-T04) guardan rule = EQUAL_SHARES; los históricos, con o sin
+// snapshot, son proporcionales (misma resolución que los triggers de T02).
+function resolveRule(snapshot: Prisma.JsonValue): TipPoolRule {
+  return typeof snapshot === 'object' &&
+    snapshot !== null &&
+    !Array.isArray(snapshot) &&
+    snapshot.rule === 'EQUAL_SHARES'
+    ? 'EQUAL_SHARES'
+    : 'PROPORTIONAL_TO_HOURS';
+}
+
+// Foto de la regla equitativa guardada en agreement_snapshot: no hay pacto
+// (agreement_id NULL), así que solo registra la regla y el instante.
+function equalSharesSnapshot(): Prisma.InputJsonObject {
+  return {
+    rule: 'EQUAL_SHARES',
+    name: EQUAL_SHARES_RULE_NAME,
+    capturedAt: new Date().toISOString(),
+  };
+}
+
 function toTipPoolResponse(pool: TipPoolRecord): TipPoolResponse {
   const zero = new Prisma.Decimal(0);
+  const rule = resolveRule(pool.agreementSnapshot);
   const linesTotal = pool.lines.reduce(
     (sum, line) => sum.plus(line.amount),
     zero,
@@ -207,10 +265,17 @@ function toTipPoolResponse(pool: TipPoolRecord): TipPoolResponse {
     (sum, source) => sum.plus(source.amount),
     zero,
   );
-  const totalHours = pool.lines.reduce(
-    (sum, line) => sum.plus(line.hoursWorked),
+  const dailySourcesTotal = pool.dailyOperationSources.reduce(
+    (sum, source) => sum.plus(source.amount.toString()),
     zero,
   );
+  // El reparto equitativo no usa horas: su total es null, no 0.
+  const totalHours =
+    rule === 'EQUAL_SHARES'
+      ? null
+      : pool.lines
+          .reduce((sum, line) => sum.plus(line.hoursWorked ?? zero), zero)
+          .toFixed(2);
   return {
     id: pool.id,
     status: pool.status,
@@ -218,13 +283,14 @@ function toTipPoolResponse(pool: TipPoolRecord): TipPoolResponse {
     store: pool.store,
     periodStart: formatDbDate(pool.periodStart),
     periodEnd: formatDbDate(pool.periodEnd),
+    rule,
     agreement: parseAgreementSnapshot(pool.agreementSnapshot),
     totalAmount: Number(pool.totalAmount),
-    totalHours: totalHours.toFixed(2),
+    totalHours,
     lines: pool.lines.map((line) => ({
       userId: line.userId,
       workerName: fullName(line.user),
-      hoursWorked: line.hoursWorked.toFixed(2),
+      hoursWorked: line.hoursWorked?.toFixed(2) ?? null,
       amount: Number(line.amount),
     })),
     sources: pool.sources.map((source) => ({
@@ -234,9 +300,16 @@ function toTipPoolResponse(pool: TipPoolRecord): TipPoolResponse {
       paymentMethodName: source.tipEntry.paymentMethod.name,
       amount: Number(source.amount),
     })),
+    dailySources: pool.dailyOperationSources.map((source) => ({
+      operationId: source.operationId,
+      businessDate: formatDbDate(source.operation.businessDate),
+      cardTipAmount: Number(source.operation.cardTipAmount),
+      cashTipAmount: Number(source.operation.cashTipAmount),
+      amount: Number(source.amount),
+    })),
     reconciled:
       linesTotal.equals(pool.totalAmount) &&
-      sourcesTotal.equals(pool.totalAmount),
+      sourcesTotal.plus(dailySourcesTotal).equals(pool.totalAmount),
     calculatedBy: {
       id: pool.calculatedBy.id,
       name: fullName(pool.calculatedBy),
@@ -264,17 +337,13 @@ function toReceiptResponse(
     store: { id: receipt.storeId, name: receipt.storeName },
     periodStart: formatDbDate(receipt.periodStart),
     periodEnd: formatDbDate(receipt.periodEnd),
-    hoursWorked: receipt.hoursWorked.toFixed(2),
+    hoursWorked: receipt.hoursWorked?.toFixed(2) ?? null,
     amount: Number(receipt.amount),
     paymentDate: formatDbDate(receipt.paymentDate),
     paidBy: { id: receipt.paidById, name: receipt.paidByName },
     detail: parseReceiptDetail(receipt.detail),
     createdAt: receipt.createdAt,
   };
-}
-
-function toSnapshot(agreement: AgreementCandidate): TipAgreementSnapshot {
-  return { ...agreement, capturedAt: new Date().toISOString() };
 }
 
 // 409 de una acción con el estado y la versión actuales del reparto.
@@ -294,11 +363,13 @@ function isPrismaError(error: unknown, code: string): boolean {
   );
 }
 
-// Cálculo y vista previa del reparto de propinas (SPRINT-3-T12). Genera la
-// foto del reparto en estado DRAFT a partir del pacto vigente, los registros
-// diarios del período y las horas trabajadas. El contador la observa, la
-// confirma y la marca como pagada, lo que emite una constancia por trabajador
-// (SPRINT-3-T13).
+// Cálculo y vista previa del reparto de propinas (SPRINT-3-T12, regla
+// equitativa desde SPRINT-4R-T04). Genera la foto del reparto en estado DRAFT
+// a partir de las operaciones diarias del período: el fondo de cada día se
+// divide entre sus participantes y se acumula por trabajador. El contador la
+// observa, la confirma y la marca como pagada, lo que emite una constancia
+// por trabajador (SPRINT-3-T13). Los repartos proporcionales históricos se
+// conservan y siguen su ciclo sin recalcularse con la regla antigua.
 @Injectable()
 export class TipPoolsService {
   constructor(
@@ -307,7 +378,7 @@ export class TipPoolsService {
   ) {}
 
   async preview(
-    dto: PreviewTipPoolDto,
+    dto: CalculateTipPoolDto,
     currentUser: AuthUser,
   ): Promise<TipPoolPreviewResult> {
     if (!canAccessStore(currentUser, dto.storeId)) {
@@ -317,7 +388,13 @@ export class TipPoolsService {
     await this.stores.assertActive(dto.storeId);
     try {
       return await this.prisma.$transaction((tx) =>
-        this.calculateAndSave(tx, dto.storeId, period, currentUser),
+        this.calculateAndSave(
+          tx,
+          dto.storeId,
+          period,
+          dto.expectedVersion,
+          currentUser,
+        ),
       );
     } catch (error) {
       // Respaldo de los bloqueos: un índice único violado por un cálculo
@@ -398,6 +475,9 @@ export class TipPoolsService {
           'El reparto no está conciliado: la suma de las líneas o de las fuentes no coincide con el total; recalcúlalo antes de confirmar',
         );
       }
+      if (current.rule === 'EQUAL_SHARES') {
+        await this.assertEqualPoolCurrent(tx, current);
+      }
       return this.updateAndRead(tx, id, {
         status: 'CONFIRMED',
         confirmedAt: new Date(),
@@ -455,7 +535,10 @@ export class TipPoolsService {
           storeName: receipt.storeName,
           periodStart: dbDay(receipt.periodStart),
           periodEnd: dbDay(receipt.periodEnd),
-          hoursWorked: new Prisma.Decimal(receipt.hoursWorked),
+          hoursWorked:
+            receipt.hoursWorked === null
+              ? null
+              : new Prisma.Decimal(receipt.hoursWorked),
           amount: new Prisma.Decimal(receipt.amount),
           paymentDate: dbDay(receipt.paymentDate),
           paidById: receipt.paidById,
@@ -589,47 +672,68 @@ export class TipPoolsService {
     }
   }
 
-  private async calculateAndSave(
+  // Confirmar exige que la foto equitativa siga vigente: recalcula con las
+  // operaciones diarias del período (bloqueadas FOR UPDATE, igual que la
+  // corrección de la operación) y compara fuentes y líneas. Una operación
+  // corregida, agregada o con otra selección desde el cálculo hace que la
+  // foto ya no corresponda: se pide recalcular en vez de confirmar montos
+  // obsoletos. Desde CONFIRMED los triggers de T02 congelan esas fuentes.
+  private async assertEqualPoolCurrent(
+    tx: Prisma.TransactionClient,
+    pool: TipPoolResponse,
+  ): Promise<void> {
+    const operations = await this.loadPeriodOperations(tx, pool.store.id, {
+      start: pool.periodStart,
+      end: pool.periodEnd,
+      startDate: dbDay(pool.periodStart),
+      endDate: dbDay(pool.periodEnd),
+    });
+    const issues = validateEqualPoolSources({
+      periodStart: pool.periodStart,
+      periodEnd: pool.periodEnd,
+      currentPoolId: pool.id,
+      operations,
+    });
+    if (issues.length > 0) {
+      throw new UnprocessableEntityException(STALE_POOL_MESSAGE);
+    }
+    const distribution = this.distribute(operations);
+    const sameSources =
+      distribution.days.length === pool.dailySources.length &&
+      distribution.days.every((day) =>
+        pool.dailySources.some(
+          (source) =>
+            source.operationId === day.operationId &&
+            source.amount === day.fundAmount,
+        ),
+      );
+    const sameLines =
+      distribution.lines.length === pool.lines.length &&
+      distribution.lines.every((line) =>
+        pool.lines.some(
+          (current) =>
+            current.userId === line.userId && current.amount === line.amount,
+        ),
+      );
+    if (!sameSources || !sameLines) {
+      throw new UnprocessableEntityException(STALE_POOL_MESSAGE);
+    }
+  }
+
+  // Bloquea y lee las operaciones diarias del período con su selección. La
+  // corrección de una operación (PATCH /daily-operations/:id) bloquea la
+  // misma fila, así que no cambian entre la lectura y la foto.
+  private async loadPeriodOperations(
     tx: Prisma.TransactionClient,
     storeId: string,
     period: PoolPeriod,
-    currentUser: AuthUser,
-  ): Promise<TipPoolPreviewResult> {
-    // Serializa los cálculos del local: dos vistas previas simultáneas (del
-    // mismo período o de períodos solapados) se ejecutan una tras otra.
-    // NO KEY UPDATE no bloquea a quien solo referencia el local (ej. T10).
-    await tx.$queryRaw`SELECT id FROM stores WHERE id = ${storeId}::uuid FOR NO KEY UPDATE`;
+  ): Promise<DailyOperationCandidate[]> {
     await tx.$queryRaw`
-      SELECT id FROM tip_pools
-      WHERE store_id = ${storeId}::uuid
-        AND period_start = ${period.start}::date
-        AND period_end = ${period.end}::date
-      FOR UPDATE`;
-    const existing = await tx.tipPool.findUnique({
-      where: {
-        storeId_periodStart_periodEnd: {
-          storeId,
-          periodStart: period.startDate,
-          periodEnd: period.endDate,
-        },
-      },
-      select: { id: true, status: true, notes: true },
-    });
-    if (existing && existing.status !== 'DRAFT') {
-      throw new ConflictException(
-        `El reparto del período ya está ${existing.status === 'PAID' ? 'pagado' : 'confirmado'} y no puede recalcularse`,
-      );
-    }
-
-    // Bloquea los registros diarios del período: T10 los bloquea igual antes
-    // de editarlos, así que no pueden cambiar entre la lectura y la foto.
-    await tx.$queryRaw`
-      SELECT id FROM tip_entries
+      SELECT id FROM daily_operations
       WHERE store_id = ${storeId}::uuid
         AND business_date BETWEEN ${period.start}::date AND ${period.end}::date
       FOR UPDATE`;
-    // Lecturas en serie: una transacción usa una sola conexión.
-    const entries = await tx.tipEntry.findMany({
+    const operations = await tx.dailyOperation.findMany({
       where: {
         storeId,
         businessDate: { gte: period.startDate, lte: period.endDate },
@@ -637,130 +741,124 @@ export class TipPoolsService {
       select: {
         id: true,
         businessDate: true,
-        paymentMethod: { select: { code: true } },
-        amount: true,
+        tipFundAmount: true,
+        participants: { select: { workerId: true } },
         poolSource: { select: { poolId: true } },
       },
-      orderBy: [{ businessDate: 'asc' }, { paymentMethod: { code: 'asc' } }],
+      orderBy: { businessDate: 'asc' },
     });
-    const agreements = await tx.tipAgreement.findMany({
-      where: {
-        storeId,
-        validFrom: { lte: period.endDate },
-        OR: [{ validTo: null }, { validTo: { gte: period.startDate } }],
-      },
-      select: {
-        id: true,
-        name: true,
-        rule: true,
-        validFrom: true,
-        validTo: true,
-      },
-      orderBy: { validFrom: 'asc' },
-    });
-    const hours = await tx.workHoursRecord.findMany({
-      where: {
-        storeId,
-        periodStart: { lte: period.endDate },
-        periodEnd: { gte: period.startDate },
-      },
-      select: {
-        id: true,
-        periodStart: true,
-        periodEnd: true,
-        hoursWorked: true,
-        worker: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            storeId: true,
-            isActive: true,
-          },
-        },
-      },
-      orderBy: [{ workerId: 'asc' }, { periodStart: 'asc' }],
-    });
+    return operations.map((operation) => ({
+      id: operation.id,
+      businessDate: formatDbDate(operation.businessDate),
+      tipFundAmount: Number(operation.tipFundAmount),
+      participantIds: operation.participants.map(
+        (participant) => participant.workerId,
+      ),
+      usedByPoolId: operation.poolSource?.poolId ?? null,
+    }));
+  }
 
-    // El fondo suma todos los registros del período, incluidos los de medios
-    // desactivados: es dinero real recibido y no se crea una segunda fuente.
-    const fund = entries.reduce(
-      (sum, entry) => sum.plus(entry.amount),
-      new Prisma.Decimal(0),
-    );
-    // T10 solo acepta montos enteros: decimales aquí son datos corruptos.
-    if (!fund.isInteger()) {
-      throw new Error(
-        `El fondo del período no es un entero CLP: ${fund.toString()}`,
+  // La validación previa ya descartó los días sin participantes: un error del
+  // calculador aquí es un dato inconsistente, no un caso de negocio.
+  private distribute(
+    operations: readonly DailyOperationCandidate[],
+  ): EqualDailyDistributionResult {
+    try {
+      return calculateEqualDailyDistribution(
+        operations.map((operation) => ({
+          operationId: operation.id,
+          businessDate: operation.businessDate,
+          fundAmount: operation.tipFundAmount,
+          participantIds: operation.participantIds,
+        })),
+      );
+    } catch (error) {
+      if (error instanceof EqualDistributionError) {
+        throw new UnprocessableEntityException(error.message);
+      }
+      throw error;
+    }
+  }
+
+  private async calculateAndSave(
+    tx: Prisma.TransactionClient,
+    storeId: string,
+    period: PoolPeriod,
+    expectedVersion: number | undefined,
+    currentUser: AuthUser,
+  ): Promise<TipPoolPreviewResult> {
+    // Serializa los cálculos del local: dos vistas previas simultáneas (del
+    // mismo período o de períodos solapados) se ejecutan una tras otra.
+    // NO KEY UPDATE no bloquea a quien solo referencia el local, pero sí
+    // espera al alta de una operación diaria (que bloquea el local FOR
+    // UPDATE), así que una operación nueva no queda fuera de la foto.
+    await tx.$queryRaw`SELECT id FROM stores WHERE id = ${storeId}::uuid FOR NO KEY UPDATE`;
+    const locked = await tx.$queryRaw<ExistingPoolRow[]>`
+      SELECT id, status::text AS status, version, notes FROM tip_pools
+      WHERE store_id = ${storeId}::uuid
+        AND period_start = ${period.start}::date
+        AND period_end = ${period.end}::date
+      FOR UPDATE`;
+    const existing = locked.at(0) ?? null;
+    if (existing && existing.status !== 'DRAFT') {
+      throw new ConflictException(
+        `El reparto del período ya está ${existing.status === 'PAID' ? 'pagado' : 'confirmado'} y no puede recalcularse`,
       );
     }
-    const fundAmount = fund.toNumber();
+    // Recalcular con control de versión: quien revisó una foto anterior no
+    // la reemplaza a ciegas (expectedVersion es opcional para no romper a
+    // los clientes que aún no lo envían; la versión sube igual).
+    if (
+      existing &&
+      expectedVersion !== undefined &&
+      existing.version !== expectedVersion
+    ) {
+      throw conflict(VERSION_CONFLICT_MESSAGE, {
+        id: existing.id,
+        store_id: storeId,
+        status: existing.status,
+        version: existing.version,
+      });
+    }
 
-    const validation = validateTipPoolSources({
-      storeId,
+    const operations = await this.loadPeriodOperations(tx, storeId, period);
+    const issues = validateEqualPoolSources({
       periodStart: period.start,
       periodEnd: period.end,
       currentPoolId: existing?.id ?? null,
-      fundAmount,
-      agreements: agreements.map((agreement) => ({
-        id: agreement.id,
-        name: agreement.name,
-        rule: agreement.rule,
-        validFrom: formatDbDate(agreement.validFrom),
-        validTo: agreement.validTo ? formatDbDate(agreement.validTo) : null,
-      })),
-      entries: entries.map((entry) => ({
-        id: entry.id,
-        businessDate: formatDbDate(entry.businessDate),
-        paymentMethod: entry.paymentMethod.code,
-        usedByPoolId: entry.poolSource?.poolId ?? null,
-      })),
-      hours: hours.map((record) => ({
-        id: record.id,
-        workerId: record.worker.id,
-        workerName: fullName(record.worker),
-        periodStart: formatDbDate(record.periodStart),
-        periodEnd: formatDbDate(record.periodEnd),
-        hoursWorked: record.hoursWorked.toFixed(2),
-        workerStoreId: record.worker.storeId,
-        workerActive: record.worker.isActive,
-      })),
+      operations,
     });
-    if (validation.issues.length > 0 || !validation.agreement) {
+    if (issues.length > 0) {
       const body: TipPoolValidationErrorBody = {
         statusCode: 422,
         message: 'No se puede calcular el reparto del período',
-        issues: validation.issues,
+        issues,
       };
       throw new UnprocessableEntityException(body);
     }
+    const distribution = this.distribute(operations);
 
-    const lines = calculateTipDistribution({
-      fundAmount,
-      workers: validation.hours.map((record) => ({
-        userId: record.workerId,
-        hoursWorked: record.hoursWorked,
-      })),
-    });
-    const hoursRecordByWorker = new Map(
-      validation.hours.map((record) => [record.workerId, record.id]),
-    );
-
+    // Todo cálculo nuevo es equitativo y no usa pacto: agreement_id queda
+    // NULL y la foto registra la regla (los triggers la leen para exigir
+    // horas NULL en líneas y constancias).
     const poolData = {
       status: 'DRAFT' as const,
-      totalAmount: new Prisma.Decimal(fundAmount),
+      totalAmount: new Prisma.Decimal(distribution.totalAmount),
       notes: null,
-      agreementId: validation.agreement.id,
-      agreementSnapshot: { ...toSnapshot(validation.agreement) },
+      agreementId: null,
+      agreementSnapshot: equalSharesSnapshot(),
       calculatedById: currentUser.id,
       calculatedAt: new Date(),
     };
     let poolId: string;
     if (existing) {
-      // Reemplaza la foto del borrador conservando su ID.
+      // Reemplaza la foto del borrador conservando su ID. Un borrador
+      // proporcional histórico también se reemplaza: sus registros diarios
+      // antiguos quedan libres y la foto nueva sale de las operaciones.
       poolId = existing.id;
       await tx.tipPoolLine.deleteMany({ where: { poolId } });
       await tx.tipPoolSource.deleteMany({ where: { poolId } });
+      await tx.tipPoolDailyOperationSource.deleteMany({ where: { poolId } });
       await tx.tipPool.update({
         where: { id: poolId },
         // Las observaciones se limpian (quedan en la auditoría y el recálculo
@@ -781,21 +879,23 @@ export class TipPoolsService {
       poolId = created.id;
     }
 
-    // Fuentes y líneas guardan copia de montos y horas: si después cambian el
-    // pacto o las horas, la foto del reparto no cambia.
-    await tx.tipPoolSource.createMany({
-      data: entries.map((entry) => ({
+    // Fuentes y líneas guardan copia de los montos: si después se corrige
+    // una operación del borrador, la foto no cambia hasta recalcular (y
+    // confirmar exige recalcular primero). La base exige que cada fuente
+    // concilie con el tip_fund_amount de su operación.
+    await tx.tipPoolDailyOperationSource.createMany({
+      data: distribution.days.map((day) => ({
         poolId,
-        tipEntryId: entry.id,
-        amount: entry.amount,
+        operationId: day.operationId,
+        amount: BigInt(day.fundAmount),
       })),
     });
     await tx.tipPoolLine.createMany({
-      data: lines.map((line) => ({
+      data: distribution.lines.map((line) => ({
         poolId,
         userId: line.userId,
-        workHoursRecordId: hoursRecordByWorker.get(line.userId) ?? null,
-        hoursWorked: new Prisma.Decimal(line.hoursWorked),
+        workHoursRecordId: null,
+        hoursWorked: null,
         amount: new Prisma.Decimal(line.amount),
       })),
     });

@@ -336,7 +336,8 @@ acumula ambas en `tipFundAmount`), sin duplicados
 trabajador debe ser del mismo local, con rol `TRABAJADOR` y activo): una baja
 lógica posterior no borra la selección histórica. El pacto de reparto admite la
 regla equitativa explícita `EQUAL_SHARES` junto a la proporcional histórica
-`PROPORTIONAL_TO_HOURS`, que sigue funcionando con `tip_entries` sin cambios;
+`PROPORTIONAL_TO_HOURS`, que identifica los repartos guardados con
+`tip_entries` y horas;
 las líneas y constancias de un reparto equitativo guardan `hoursWorked`
 `NULL` — la regla no usa horas y no se inventan — mientras los repartos
 proporcionales e históricos conservan las suyas. El reparto se alimenta de la
@@ -350,9 +351,62 @@ de una operación que ya alimentó un reparto cerrado (con el reparto en
 El modelo **se expone con SPRINT-4R-T03**: la API para consultar y corregir la
 selección de participantes ya está descrita en
 [Operación diaria](#operación-diaria-sprint-4r-t01-participantes-desde-sprint-4r-t03);
-el cálculo diario equitativo (crear el reparto desde la operación) es
-SPRINT-4R-T04. Detalle del modelo en
+el cálculo diario equitativo se describe en
+[Reparto equitativo](#reparto-equitativo-de-propinas-sprint-4r-t04). Detalle
+del modelo en
 [`docs/modelo-datos.md`](docs/modelo-datos.md#participantes-diarios-y-regla-equitativa-sprint-4r-t02).
+
+## Reparto equitativo de propinas (SPRINT-4R-T04)
+
+`POST /tip-pools/preview` (solo `CONTADOR`, con alcance por local) calcula y
+guarda el borrador (`DRAFT`) del reparto de un local y período. **Todo cálculo
+nuevo es equitativo** y sale de las operaciones diarias del período; los
+pactos, las horas y los `tip_entries` históricos ya no intervienen.
+
+**Regla.** Para cada operación diaria se suman la propina de tarjeta y la de
+efectivo (`tipFundAmount`) y ese fondo se divide **una sola vez** en partes
+iguales entre los participantes de ese día. Cada trabajador recibe la suma de
+sus asignaciones diarias del período: nunca se divide el total del período
+entre la unión de trabajadores. Un no seleccionado no recibe línea, y las
+líneas guardan `hoursWorked = null` (la regla no usa horas y no se inventan).
+
+**Residuo CLP (determinista).** Cada participante recibe
+`floor(fondo / n)` y los `fondo mod n` pesos sobrantes se entregan de a $1:
+los participantes se ordenan por ID ascendente y el primer peso va a la
+posición `(días desde 1970-01-01 hasta la fecha de negocio) mod n`, el
+siguiente a la posición siguiente (circular). Así el peso extra rota entre los
+participantes día a día en lugar de favorecer siempre al mismo, y la
+asignación de un día depende solo de ese día. Las líneas siempre suman el
+fondo exacto: $10.000 entre 3 asigna $3.334, $3.333 y $3.333. La regla vive en
+`src/tips/calculation/equal-daily-distribution.calculator.ts`.
+
+**Respuesta.** `rule: "EQUAL_SHARES"`, `agreement: null`, `totalHours: null`,
+`lines` (`userId`, `workerName`, `amount` a pagar) y `dailySources` (una por
+operación: fecha, tarjeta, efectivo y fondo aplicado); `sources` queda para los
+`tip_entries` de repartos históricos. La foto guarda `agreement_id NULL` y en
+`agreement_snapshot` solo la regla, que los triggers usan para exigir horas
+`NULL`.
+
+**Errores 422** (todas las causas a la vez, sin guardar nada):
+`DAILY_OPERATIONS_MISSING` (no hay operaciones en el período),
+`DAILY_OPERATION_ALREADY_USED` (otra operación ya alimenta otro reparto) y
+`DAILY_PARTICIPANTS_MISSING` (un día con fondo positivo sin participantes).
+
+**Versión y vigencia.** Recalcular un `DRAFT` reemplaza la foto conservando su
+ID y sube `version`; con `expectedVersion` (opcional) responde **409** con
+`currentStatus`/`currentVersion` si el borrador cambió desde que se revisó.
+`CONFIRMED` y `PAID` no se recalculan (409). Al confirmar, el reparto
+equitativo se recalcula con las operaciones vigentes (bloqueadas `FOR UPDATE`)
+y, si una operación se corrigió, agregó o cambió su selección desde el
+cálculo, responde **422** pidiendo recalcular. Desde la confirmación los
+triggers de T02 congelan montos y participantes de las operaciones fuente, y
+las constancias del pago copian la regla (`detail.rule`) con horas `null`; el
+PDF explica la regla en vez de mostrar horas.
+
+**Compatibilidad histórica.** Los repartos proporcionales ya guardados (por
+ejemplo el `DRAFT` del seed demo) se consultan, confirman y pagan tal cual,
+con sus horas, fuentes `tip_entries` y constancias. Recalcular uno de ellos lo
+reemplaza por la foto equitativa del período (si hay operaciones diarias).
 
 ## Registro diario de propinas (flujo anterior — histórico, modo lectura)
 

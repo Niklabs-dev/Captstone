@@ -406,7 +406,7 @@ SPRINT-4R-T04; ambos consumen este modelo.
 | --- | --- |
 | `daily_operation_participants` | Participante del reparto de una operación diaria: un trabajador una sola vez por operación (`UNIQUE(operation_id, worker_id)`). FK a la operación en `Cascade` (la participación muere con su operación) y al trabajador en `Restrict` (un trabajador con historial no se borra). |
 | `TipAgreementRule.EQUAL_SHARES` | Valor explícito de la regla equitativa en el enum de pactos. Convive con `PROPORTIONAL_TO_HOURS`; ninguna fila existente se reescribe. |
-| `tip_pool_lines.hours_worked` / `tip_pool_receipts.hours_worked` | `NULL` solo en repartos cuya regla aplicada es `EQUAL_SHARES`; obligatorias en cualquier otro caso, incluidos los repartos históricos sin pacto ni snapshot. La migración solo cae el `NOT NULL`: los valores existentes no se alteran. El campo sigue requerido en el cliente de Prisma hasta los ajustes de visualización de SPRINT-4R-T04. |
+| `tip_pool_lines.hours_worked` / `tip_pool_receipts.hours_worked` | `NULL` solo en repartos cuya regla aplicada es `EQUAL_SHARES`; obligatorias en cualquier otro caso, incluidos los repartos históricos sin pacto ni snapshot. La migración solo cae el `NOT NULL`: los valores existentes no se alteran. Desde SPRINT-4R-T04 el campo también es opcional en el cliente de Prisma (sin migración: la columna ya era NULLable). |
 | `tip_pool_daily_operation_sources` | Fuente de un reparto alimentada por la operación diaria, separada de `tip_pool_sources` (que sigue ligada a `tip_entries`). `amount` BIGINT en CLP entero aplica el fondo completo del día y `operation_id` es único: cada operación alimenta como máximo un reparto. |
 
 Reglas clave (CHECK y triggers; aplican a cualquier vía de escritura):
@@ -459,7 +459,11 @@ Sucesores: SPRINT-4R-T03 expuso la API de participantes (catálogo
 y corrección multipart de la selección, con la selección comparada como
 conjunto en la idempotencia) y SPRINT-4R-T04 calcula el reparto diario
 equitativo reutilizando `tip_pool_lines` para el monto final, sin inventar
-horas; este modelo es el contrato que ambos consumen.
+horas: todo cálculo nuevo crea el reparto con `agreement_id NULL`,
+`agreement_snapshot.rule = 'EQUAL_SHARES'`, una fila de
+`tip_pool_daily_operation_sources` por operación del período y líneas con
+`hours_worked NULL` (regla y residuo en el README del backend); este modelo es
+el contrato que ambos consumen.
 
 ## Cómo ver el modelo de forma visual
 
