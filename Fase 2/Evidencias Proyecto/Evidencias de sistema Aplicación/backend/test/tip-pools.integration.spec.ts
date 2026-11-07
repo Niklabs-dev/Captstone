@@ -460,9 +460,35 @@ describe.skipIf(!databaseUrl)(
         });
       });
 
-      // AGREEMENT_RULE_UNSUPPORTED no se puede producir en la base: el enum
-      // TipAgreementRule solo tiene PROPORTIONAL_TO_HOURS. Lo cubre el test
-      // unitario de tip-pool-validation.spec.ts.
+      // AGREEMENT_RULE_UNSUPPORTED: desde SPRINT-4R-T02 el enum
+      // TipAgreementRule también tiene EQUAL_SHARES (reparto equitativo de la
+      // operación diaria, que SPRINT-4R-T04 calcula). El motor histórico no
+      // la reinterpreta: responde 422 y no guarda nada, como muestra el test
+      // siguiente. Lo demás de la causa lo cubre el test unitario de
+      // tip-pool-validation.spec.ts.
+
+      it('AGREEMENT_RULE_UNSUPPORTED con pacto equitativo: el motor histórico no lo calcula', async () => {
+        await withinRollback(async (f) => {
+          // El pacto equitativo (reparto entre participantes de la operación
+          // diaria) existe en el enum pero este motor solo calcula la regla
+          // proporcional: lo reporta sin tocar nada.
+          await f.tx.tipAgreement.create({
+            data: {
+              name: 'Pacto equitativo',
+              rule: 'EQUAL_SHARES',
+              validFrom: day('2026-01-01'),
+              validTo: null,
+              storeId: f.storeId,
+              createdById: f.supervisor.id,
+            },
+          });
+          await addEntry(f, '2026-10-02', 'CASH', 1000);
+          await addHours(f, f.workers[0], 10);
+          await expectIssues(f, [
+            TIP_POOL_ISSUE_CODE.AGREEMENT_RULE_UNSUPPORTED,
+          ]);
+        });
+      });
 
       it('TIP_ENTRIES_MISSING', async () => {
         await withinRollback(async (f) => {

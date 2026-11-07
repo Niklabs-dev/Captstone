@@ -120,7 +120,8 @@ model User {
   registeredSales            Sale[]               @relation("RegisteredSales")
   responsibleCashClosings    CashClosing[]        @relation("ResponsibleCashClosings")
   closedCashClosings         CashClosing[]        @relation("ClosedCashClosings")
-  responsibleDailyOperations DailyOperation[]   @relation("ResponsibleDailyOperations")
+  responsibleDailyOperations DailyOperation[]    @relation("ResponsibleDailyOperations")
+  dailyOperationParticipations DailyOperationParticipant[]
   inventoryMovements         InventoryMovement[]  @relation("CreatedInventoryMovements")
   inventoryCounts            InventoryCount[]     @relation("CreatedInventoryCounts")
   ownDataRightsRequests      DataRightsRequest[]  @relation("OwnDataRightsRequests")
@@ -338,8 +339,15 @@ enum TipPoolStatus {
   PAID
 }
 
+/// Regla del pacto de reparto. PROPORTIONAL_TO_HOURS es la única que calcula
+/// el motor histórico (proporcional a las horas registradas); EQUAL_SHARES es
+/// la regla equitativa entre los participantes de la operación diaria
+/// (SPRINT-4R-T02 la agrega al enum y SPRINT-4R-T04 la calcula): las líneas de
+/// un reparto equitativo guardan el monto final en tip_pool_lines sin horas
+/// inventadas (hoursWorked NULL, validado por triggers).
 enum TipAgreementRule {
   PROPORTIONAL_TO_HOURS
+  EQUAL_SHARES
 }
 
 /// Registro diario agregado por local y medio de pago. Es la única fuente que
@@ -443,6 +451,7 @@ model TipPool {
   agreementId    String?         @map("agreement_id") @db.Uuid
   lines          TipPoolLine[]
   sources        TipPoolSource[]
+  dailyOperationSources TipPoolDailyOperationSource[]
   receipts       TipPoolReceipt[]
 
   @@unique([storeId, periodStart, periodEnd])
@@ -451,7 +460,13 @@ model TipPool {
 }
 
 /// Detalle del reparto por trabajador. hoursWorked es el snapshot usado en el
-/// cálculo y workHoursRecord mantiene la referencia a su registro fuente.
+/// cálculo y workHoursRecord mantiene la referencia a su registro fuente. En
+/// los repartos equitativos (EQUAL_SHARES) la columna hours_worked es NULL en
+/// la base: la regla no usa horas y no se inventan (la base lo exige con
+/// triggers). Ojo: la columna es NULLable en PostgreSQL desde
+/// SPRINT-4R-T02, pero el campo sigue requerido en el cliente de Prisma
+/// porque las vistas del módulo histórico aún asumen Decimal no nulo; se vuelve
+/// opcional junto con esos ajustes de visualización en SPRINT-4R-T04.
 model TipPoolLine {
   id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   hoursWorked Decimal @map("hours_worked") @db.Decimal(6, 2)
@@ -487,7 +502,9 @@ model TipPoolSource {
 /// Constancia de pago del reparto para un trabajador (SPRINT-3-T13). Es una
 /// foto: copia nombres, local, período, montos y el detalle del reparto para
 /// explicarse sola sin joins futuros. Se inserta al pasar el reparto a PAID y
-/// después es inmutable (triggers).
+/// después es inmutable (triggers). hoursWorked es NULL solo en los repartos
+/// equitativos (misma regla que tip_pool_lines; el campo sigue requerido en
+/// el cliente de Prisma hasta SPRINT-4R-T04, ver TipPoolLine).
 model TipPoolReceipt {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workerName  String   @map("worker_name") @db.VarChar(161)
@@ -790,6 +807,9 @@ model DailyOperation {
   voucher       DailyOperationVoucher? @relation(fields: [voucherId], references: [id], onDelete: Restrict)
   voucherId     String?               @unique @map("voucher_id") @db.Uuid
 
+  participants DailyOperationParticipant[]
+  poolSource   TipPoolDailyOperationSource?
+
   @@unique([storeId, businessDate])
   @@map("daily_operations")
 }
@@ -814,6 +834,55 @@ model DailyOperationVoucher {
   operation DailyOperation?
 
   @@map("daily_operation_vouchers")
+}
+
+/// Trabajadores que participan del reparto de una operación diaria
+/// (SPRINT-4R-T02). La operación ya es única por local y fecha y acumula la
+/// propina de tarjeta y la de efectivo en un solo fondo, así que UNA selección
+/// de participantes cubre ambos medios: no hay selecciones paralelas que
+/// diverjan. La base valida al insertar o cambiar la fila (trigger) que el
+/// trabajador sea del mismo local de la operación, con rol TRABAJADOR y
+/// activo; una baja lógica o un cambio de rol/local posteriores NO tocan la
+/// selección: la FK al trabajador es Restrict (no hay borrado) y la validación
+/// solo corre al escribir la participación, de modo que el historial se
+/// conserva. Tampoco se puede cambiar la selección ni los montos de la
+/// operación cuando ya alimentó un reparto CONFIRMED o PAID (trigger): eso no
+/// reinterpreta repartos cerrados.
+model DailyOperationParticipant {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  operation   DailyOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operationId String         @map("operation_id") @db.Uuid
+  worker      User           @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  workerId    String         @map("worker_id") @db.Uuid
+
+  @@unique([operationId, workerId])
+  @@index([workerId])
+  @@map("daily_operation_participants")
+}
+
+/// Fuente de un reparto alimentada por la operación diaria (SPRINT-4R-T02):
+/// separada de tip_pool_sources, que sigue ligada a los tip_entries
+/// históricos. Cada operación solo puede alimentar UN reparto (operation_id
+/// único), lo que evita el doble reparto del mismo fondo y, con amount BIGINT
+/// en CLP entero igual al tip_fund_amount de la operación (trigger), da la
+/// conciliación exacta del reparto contra el fondo que lo originó. amount
+/// conserva el monto aplicado aunque después se corrija la operación (la foto
+/// no se reinterpreta), y la base bloquea corregir los montos de una operación
+/// ya usada por un reparto CONFIRMED o PAID. Solo cambia en DRAFT (trigger),
+/// como las líneas y fuentes históricas.
+model TipPoolDailyOperationSource {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  amount BigInt
+
+  pool        TipPool        @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  poolId      String         @map("pool_id") @db.Uuid
+  operation   DailyOperation @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  operationId String         @unique @map("operation_id") @db.Uuid
+
+  @@index([poolId])
+  @@map("tip_pool_daily_operation_sources")
 }
 
 // -------------------------------------------------------------

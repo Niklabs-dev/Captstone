@@ -12,15 +12,19 @@
 | --- | --- | --- |
 | Núcleo | `stores`, `roles`, `users`, `refresh_tokens`, `audit_logs` | Locales, control de acceso por rol y local, autenticación JWT y auditoría inmutable |
 | Gestor Documental | `document_types`, `documents`, `document_versions`, `payslips` | Documentación laboral con hash SHA-256, versionado y conservación por 5 años; liquidaciones de sueldo con estado de publicación |
-| Propinas | `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources` | Pacto de reparto vigente, horas trabajadas y reparto con snapshots (art. 64 CT); `tip_entries` conserva la captura histórica por medio (modo lectura desde SPRINT-4R-T01) |
+| Propinas | `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources`, `tip_pool_receipts`, `tip_pool_daily_operation_sources` | Pacto de reparto (proporcional histórico y equitativo), horas trabajadas, reparto con snapshots (art. 64 CT) y constancias de pago; `tip_entries` conserva la captura histórica por medio (modo lectura desde SPRINT-4R-T01) y `tip_pool_daily_operation_sources` vincula el reparto con la operación diaria (SPRINT-4R-T02) |
 | Ventas y Caja | `payment_methods`, `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries` | **Histórico, modo lectura:** catálogo administrable de medios de pago (se conserva para historial y futura importación Excel), ventas por local (manuales y totales netos MrComanda) y cierre de caja por local, día y turno con conciliación y vouchers. Reemplazado operativamente por la operación diaria |
-| Operación diaria | `daily_operations`, `daily_operation_vouchers` | Una operación por local y fecha de negocio (SPRINT-4R-T01): propina tarjeta con voucher fotográfico, propina efectivo, fondo de propinas calculado y diferencia de efectivo con signo y motivo. Fuente operativa de ambos montos de propina |
+| Operación diaria | `daily_operations`, `daily_operation_vouchers`, `daily_operation_participants` | Una operación por local y fecha de negocio (SPRINT-4R-T01): propina tarjeta con voucher fotográfico, propina efectivo, fondo de propinas calculado y diferencia de efectivo con signo y motivo. Fuente operativa de ambos montos de propina y, desde SPRINT-4R-T02, de la selección de participantes del reparto (compartida por tarjeta y efectivo) |
 | Inventario | `products`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Stock por libro mayor de movimientos y conteos físicos que detectan mermas |
 | Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
 
-**27 tablas y 14 enums**, más las que agrega la migración de la operación diaria
-de SPRINT-4R-T01 (`daily_operations` y `daily_operation_vouchers`; fuente de
-verdad física: `prisma/schema.prisma`). El Portal del Trabajador no agrega
+**31 tablas y 14 enums**: el modelo base (27 tablas, hasta SPRINT-4-T32) más la
+operación diaria de SPRINT-4R-T01 (`daily_operations` y
+`daily_operation_vouchers`) y los participantes y fuentes diarias de
+SPRINT-4R-T02 (`daily_operation_participants` y
+`tip_pool_daily_operation_sources`; fuente de verdad física:
+`prisma/schema.prisma`). SPRINT-4R-T02 no agrega enums: añade el valor
+`EQUAL_SHARES` a `TipAgreementRule`. El Portal del Trabajador no agrega
 tablas: es una vista
 de solo lectura sobre `users`, `documents`, `tip_pool_lines` y `sales`, con
 aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
@@ -34,9 +38,14 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
   (protege la trazabilidad), `SET NULL` en auditoría (el registro sobrevive a la
   anonimización del usuario) y `CASCADE` solo en datos estrictamente hijos
   (tokens de sesión, líneas de reparto/cierre/conteo, fuentes de reparto,
-  vouchers y vínculos a propinas del cierre de caja).
+  vouchers y vínculos a propinas del cierre de caja y participaciones de la
+  operación diaria con su operación).
 - **Dinero en `DECIMAL(12,2)`** (CLP) y cantidades en `DECIMAL(12,3)`: nunca
   `float`, para evitar errores de redondeo en propinas, ventas e inventario.
+  La operación diaria y su fuente de reparto son la excepción por diseño:
+  montos en **`BIGINT` en CLP entero** (`daily_operations.*_tip_amount` y
+  `tip_fund_amount`, `tip_pool_daily_operation_sources.amount`), sin centavos,
+  con conciliación exacta contra el fondo.
 - **`date` para fechas de negocio** (períodos de reparto, día de cierre) y
   **`timestamptz` para marcas de tiempo** (Chile tiene horario de verano).
 - **Restricciones de negocio en la BD**: una operación diaria por local y día
@@ -51,7 +60,11 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
   por local, medio y período
   (`UNIQUE(store_id, payment_method_id, period_start, period_end)`; los
   períodos NULL de las ventas manuales no colisionan), una fuente por registro
-  diario (`UNIQUE(tip_entry_id)` en `tip_pool_sources`), un medio de pago por
+  diario (`UNIQUE(tip_entry_id)` en `tip_pool_sources`) y una operación diaria
+  alimentando como máximo un reparto (`UNIQUE(operation_id)` en
+  `tip_pool_daily_operation_sources`), una participación por trabajador y
+  operación (`UNIQUE(operation_id, worker_id)` en
+  `daily_operation_participants`), un medio de pago por
   código (`UNIQUE(code)` en `payment_methods`), un pacto por local e
   inicio (`UNIQUE(store_id, valid_from)`) y restricciones de exclusión que impiden
   vigencias de pactos o períodos de horas solapados (`tip_agreements_no_overlap`
@@ -68,6 +81,12 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 > (modo lectura) y la fuente operativa de los montos de propina es la
 > [operación diaria](#operación-diaria-sprint-4r-t01). Lo siguiente describe el
 > modelo del flujo anterior, conservado íntegro con sus repartos ya calculados.
+> Desde SPRINT-4R-T02 el reparto puede alimentarse además de la operación
+> diaria (`tip_pool_daily_operation_sources`, separada de `tip_pool_sources`)
+> y el pacto admite la regla equitativa `EQUAL_SHARES` junto a la histórica
+> `PROPORTIONAL_TO_HOURS`, sin reinterpretar los repartos proporcionales
+> (detalle en
+> [Participantes diarios y regla equitativa](#participantes-diarios-y-regla-equitativa-sprint-4r-t02)).
 
 - **`tip_entries` es la única fuente de los repartos**: agrupa por local, día de
   negocio y medio de pago el monto disponible para repartir. Los repartos se
@@ -81,7 +100,13 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
   `agreement_snapshot` (`agreement_id` + `agreement_snapshot`), cada línea
   guarda las horas usadas en `hours_worked` y la fuente guarda el monto aplicado
   en `tip_pool_sources.amount`. Si cambian el pacto, las horas o el registro
-  diario posteriormente, el reparto ya confirmado no se altera.
+  diario posteriormente, el reparto ya confirmado no se altera. Desde
+  SPRINT-4R-T02 la fuente también puede ser la operación diaria
+  (`tip_pool_daily_operation_sources.amount`, CLP entero igual al fondo del
+  día) y las líneas/constancias de un reparto equitativo guardan `hours_worked`
+  **NULL** — la regla no usa horas y no se inventan —, mientras los repartos
+  proporcionales e históricos conservan sus horas y su `NOT NULL` lógico
+  (trigger `tip_pool_children_hours_consistent`).
 - **`work_hours_records`** descompone las horas trabajadas por trabajador y
   período, permitiendo reutilizarlas en futuros repartos y mantener la
   referencia fuente en cada línea (`tip_pool_lines.work_hours_record_id`).
@@ -118,12 +143,14 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
   montos de propina; en el flujo anterior era `tip_entries` quien registraba
   diariamente el monto por local y medio de pago. `tip_pools` define el fondo y
   período por local;
-  `tip_pool_lines.hours_worked` es la base del reparto proporcional y `amount`
-  el registro escrito por trabajador; `calculated_by`/`confirmed_by`/
-  `confirmed_at` dejan trazabilidad del cálculo validado por el contador. El
-  pacto vigente (`tip_agreements`) y las horas trabajadas
-  (`work_hours_records`) se fotografían en el reparto para que modificaciones
-  posteriores no alteren un cálculo ya confirmado.
+  `tip_pool_lines.hours_worked` es la base del reparto proporcional
+  (`PROPORTIONAL_TO_HOURS`) y `amount` el registro escrito por trabajador; con
+  la regla equitativa (`EQUAL_SHARES`, SPRINT-4R-T02) la base son los
+  participantes de la operación diaria y las horas quedan `NULL`, sin ceros
+  ficticios; `calculated_by`/`confirmed_by`/`confirmed_at` dejan trazabilidad
+  del cálculo validado por el contador. El pacto vigente (`tip_agreements`) y
+  las horas trabajadas (`work_hours_records`) se fotografían en el reparto para
+  que modificaciones posteriores no alteren un cálculo ya confirmado.
 - **Cierre de caja por turno con responsable y desglose por medio de pago**:
   un cierre por local, día de negocio y turno
   (`UNIQUE(store_id, business_date, shift)`); `cash_closings.responsible_id`
@@ -197,6 +224,8 @@ cambian; el único cambio de estado posible es a `PUBLISHED`.
 | `tip_pools` | Reparto de un local para un período. Contiene el monto total (desde `tip_entries`), el estado, el pacto aplicado y las trazabilidades de cálculo y confirmación. |
 | `tip_pool_lines` | Línea del reparto por trabajador: horas fotografiadas, monto asignado, trabajador y referencia al registro de horas. |
 | `tip_pool_sources` | Fuente del reparto: vincula un `tip_pool` con el `tip_entry` usado y guarda el monto aplicado. Un registro diario solo puede usarse una vez. |
+| `tip_pool_receipts` | Constancia de pago del reparto para un trabajador: foto con nombres, local, período, horas, monto y detalle; inmutable y solo de un reparto `PAID`. |
+| `tip_pool_daily_operation_sources` | Fuente del reparto alimentada por la operación diaria (SPRINT-4R-T02): vincula un `tip_pool` con la `daily_operation` usada y guarda el fondo aplicado en CLP entero. Una operación solo puede alimentar un reparto. |
 
 Reglas clave:
 
@@ -204,11 +233,14 @@ Reglas clave:
 - Un `tip_pool_sources` por `tip_entry_id` (la fuente no se reutiliza en otro reparto).
 - El total de `tip_pools` se calcula sumando los `tip_entries` del período; las
   ventas aportan su `tip_amount` a través de la reconciliación con un único
-  `tip_entry`, sin sumar dos veces.
+  `tip_entry`, sin sumar dos veces. Desde SPRINT-4R-T02 el total también puede
+  componerse desde la operación diaria vía `tip_pool_daily_operation_sources`
+  (fondo completo del día, CLP entero).
 - Los repartos históricos se mantienen intactos porque cada entidad relevante
   conserva una copia del momento del cálculo: pacto (`agreement_snapshot`),
-  horas (`tip_pool_lines.hours_worked`) y monto fuente
-  (`tip_pool_sources.amount`).
+  horas (`tip_pool_lines.hours_worked`, `NULL` solo en repartos equitativos
+  `EQUAL_SHARES`) y monto fuente (`tip_pool_sources.amount` /
+  `tip_pool_daily_operation_sources.amount`).
 
 ## Medios de pago y ventas MrComanda (SPRINT-4-T32)
 
@@ -354,11 +386,82 @@ Reglas clave:
 - Contrato HTTP completo: [Operación diaria](../README.md#operación-diaria-sprint-4r-t01)
   en el README del backend.
 
+## Participantes diarios y regla equitativa (SPRINT-4R-T02)
+
+Migración `20261107200000_participantes_diarios_reparto_equitativo` (reversa
+manual en su `down.sql`, que Prisma no ejecuta; requiere que ninguna fila use
+`EQUAL_SHARES` ni queden horas `NULL` antes de revertir). Completa el modelo de
+la operación diaria: **los participantes del reparto viven en la operación** y
+una única selección cubre la propina de tarjeta y la de efectivo del mismo
+local y día (la operación ya acumula ambas en `tip_fund_amount`), así que
+consultar o corregir la operación siempre recupera la misma selección. Agrega
+la regla equitativa explícita al pacto y la fuente de reparto alimentada por la
+operación, sin tocar los históricos proporcionales. **No agrega endpoints:** la
+API de participantes es SPRINT-4R-T03 y el cálculo diario equitativo es
+SPRINT-4R-T04; ambos consumen este modelo.
+
+| Entidad | Rol |
+| --- | --- |
+| `daily_operation_participants` | Participante del reparto de una operación diaria: un trabajador una sola vez por operación (`UNIQUE(operation_id, worker_id)`). FK a la operación en `Cascade` (la participación muere con su operación) y al trabajador en `Restrict` (un trabajador con historial no se borra). |
+| `TipAgreementRule.EQUAL_SHARES` | Valor explícito de la regla equitativa en el enum de pactos. Convive con `PROPORTIONAL_TO_HOURS`; ninguna fila existente se reescribe. |
+| `tip_pool_lines.hours_worked` / `tip_pool_receipts.hours_worked` | `NULL` solo en repartos cuya regla aplicada es `EQUAL_SHARES`; obligatorias en cualquier otro caso, incluidos los repartos históricos sin pacto ni snapshot. La migración solo cae el `NOT NULL`: los valores existentes no se alteran. El campo sigue requerido en el cliente de Prisma hasta los ajustes de visualización de SPRINT-4R-T04. |
+| `tip_pool_daily_operation_sources` | Fuente de un reparto alimentada por la operación diaria, separada de `tip_pool_sources` (que sigue ligada a `tip_entries`). `amount` BIGINT en CLP entero aplica el fondo completo del día y `operation_id` es único: cada operación alimenta como máximo un reparto. |
+
+Reglas clave (CHECK y triggers; aplican a cualquier vía de escritura):
+
+- **Una selección compartida por tarjeta y efectivo**: al ser la operación
+  única por local y día y acumular ambos montos en `tip_fund_amount`, no
+  existen selecciones paralelas por medio que puedan divergir: tarjeta y
+  efectivo del mismo local/día comparten exactamente la misma selección.
+- **Validación al escribir, historia intacta después**: el trigger
+  `daily_operation_participants_validate_worker_rows` exige, al insertar o
+  cambiar una participación, que el trabajador sea del mismo local de la
+  operación, con rol `TRABAJADOR` y activo. Validar solo al escribir es lo que
+  permite que una baja lógica, un cambio de rol o de local posteriores dejen
+  la selección intacta (esos `UPDATE` sobre `users` no reevalúan la
+  participación), y la FK `Restrict` impide el borrado físico: las bajas
+  lógicas no borran historial.
+- **Sin doble reparto y conciliación exacta**: `UNIQUE(operation_id)` evita que
+  el mismo fondo se reparta dos veces; al insertar o cambiar la fuente, el
+  trigger `tip_pool_daily_operation_sources_enforce_rows` exige que `amount`
+  sea exactamente el `tip_fund_amount` de la operación y que reparto y
+  operación sean del mismo local
+  (`tip_pool_daily_operation_sources_amount_nonnegative` exige además
+  `amount >= 0`). El total del reparto cuadra con el fondo que lo originó, en
+  CLP entero.
+- **Reglas que conviven sin reinterpretar**: la regla aplicada se resuelve
+  primero desde el snapshot del reparto (`agreement_snapshot->>'rule'`) y solo
+  si no hay, desde el pacto vigente: cambiar el pacto no altera repartos ya
+  calculados. `tip_pool_children_hours_consistent` exige horas `NULL` en
+  líneas y constancias equitativas y las prohíbe en cualquier otro caso, así
+  los repartos proporcionales e históricos siguen funcionando igual y sus
+  valores no se reescriben.
+- **CONFIRMED/PAID inmutables también frente a la operación**: si la operación
+  alimentó un reparto `CONFIRMED` o `PAID`, los triggers
+  `daily_operation_participants_require_draft_pool_*` y
+  `daily_operations_require_draft_pool_rows` rechazan cambiar la selección de
+  participantes y los montos, fecha o local de la operación (con el reparto en
+  `DRAFT` sí se permite ajustarla, porque el recálculo vuelve a leerla). La
+  fuente diaria solo cambia en `DRAFT`, como las líneas y fuentes históricas.
+  Corregir participantes o fondos nunca reinterpreta repartos cerrados; el
+  motivo de la diferencia, el voucher y `updated_at` de la operación siguen
+  siendo corregibles porque no afectan el reparto.
+- **Constancia equitativa consistente**: la foto pagada compara sus horas con
+  las de su línea usando `IS NOT DISTINCT FROM` (en
+  `tip_pool_receipts_enforce_immutability`), porque `NULL = NULL` no sería
+  verdadero: la constancia de un reparto equitativo cuadra consigo misma y
+  sigue siendo inmutable.
+
+Sucesores: SPRINT-4R-T03 expone la API de participantes (consulta y corrección
+de la selección) y SPRINT-4R-T04 calcula el reparto diario equitativo
+reutilizando `tip_pool_lines` para el monto final, sin inventar horas; este
+modelo es el contrato que ambos consumen.
+
 ## Cómo ver el modelo de forma visual
 
-> Los diagramas Mermaid y DBML de abajo corresponden al modelo hasta
-> SPRINT-4-T32; las tablas de la operación diaria (SPRINT-4R-T01) aún no se
-> reflejan en ellos — ver `prisma/schema.prisma`.
+> Los diagramas Mermaid y DBML de abajo incluyen el módulo de operación
+> diaria (SPRINT-4R-T01 y SPRINT-4R-T02); la fuente de verdad física siempre
+> es `prisma/schema.prisma` y las migraciones.
 
 Hay cuatro opciones; las dos primeras están listas en este archivo:
 
@@ -412,7 +515,15 @@ erDiagram
   USERS ||--o{ TIP_POOLS : "calcula / confirma"
   TIP_POOLS ||--o{ TIP_POOL_LINES : "detalla"
   TIP_POOLS ||--o{ TIP_POOL_SOURCES : "compone"
+  TIP_POOLS ||--o{ TIP_POOL_DAILY_OPERATION_SOURCES : "compone (operación diaria)"
   USERS ||--o{ TIP_POOL_LINES : "recibe"
+
+  STORES ||--o{ DAILY_OPERATIONS : "opera a diario"
+  USERS ||--o{ DAILY_OPERATIONS : "responsable"
+  DAILY_OPERATIONS |o--o| DAILY_OPERATION_VOUCHERS : "voucher 1:1"
+  DAILY_OPERATIONS ||--o{ DAILY_OPERATION_PARTICIPANTS : "selecciona"
+  USERS ||--o{ DAILY_OPERATION_PARTICIPANTS : "participa"
+  DAILY_OPERATIONS |o--o| TIP_POOL_DAILY_OPERATION_SOURCES : "alimenta un reparto"
 
   STORES ||--o{ SALES : "vende"
   PAYMENT_METHODS ||--o{ SALES : "cobra"
@@ -468,7 +579,8 @@ enum TipPoolStatus {
 }
 
 enum TipAgreementRule {
-  PROPORTIONAL_TO_HOURS
+  PROPORTIONAL_TO_HOURS [note: 'Histórica: reparte en proporción a las horas registradas']
+  EQUAL_SHARES [note: 'Equitativa entre los participantes de la operación diaria (SPRINT-4R-T02); sin horas']
 }
 
 enum PaymentMethodBehavior {
@@ -770,7 +882,7 @@ Table tip_pools {
 
 Table tip_pool_lines {
   id uuid [pk, default: `gen_random_uuid()`]
-  hours_worked decimal(6,2) [not null, note: 'Snapshot de horas usadas en el cálculo (art. 64 CT)']
+  hours_worked decimal(6,2) [note: 'Snapshot de horas usadas en el cálculo (art. 64 CT); NULL solo en repartos EQUAL_SHARES (trigger)']
   amount decimal(12,2) [not null, note: 'Registro escrito del reparto']
   pool_id uuid [not null, ref: > tip_pools.id]
   user_id uuid [not null, ref: > users.id]
@@ -791,6 +903,33 @@ Table tip_pool_sources {
   indexes {
     pool_id
   }
+}
+
+Table tip_pool_receipts {
+  id uuid [pk, default: `gen_random_uuid()`]
+  worker_name varchar(161) [not null, note: 'Foto: nombre del trabajador']
+  store_name varchar(100) [not null, note: 'Foto: nombre del local']
+  period_start date [not null]
+  period_end date [not null]
+  hours_worked decimal(6,2) [note: 'Foto de horas; NULL solo en repartos equitativos (compara con IS NOT DISTINCT FROM)']
+  amount decimal(12,2) [not null]
+  payment_date date [not null]
+  paid_by_name varchar(161) [not null]
+  detail jsonb [not null, note: 'Detalle del reparto para explicarse sola']
+  created_at timestamptz [not null, default: `now()`]
+  pool_id uuid [not null, ref: > tip_pools.id]
+  user_id uuid [not null, ref: > users.id]
+  store_id uuid [not null, ref: > stores.id]
+  paid_by_id uuid [not null, ref: > users.id]
+
+  indexes {
+    (pool_id, user_id) [unique]
+    user_id
+    store_id
+    paid_by_id
+  }
+
+  Note: 'Constancia inmutable: solo INSERT de un reparto PAID (SPRINT-3-T13)'
 }
 
 Table payment_methods {
@@ -898,6 +1037,64 @@ Table cash_closing_tip_entries {
   }
 
   Note: 'Solo referencia: no copia montos; exige el mismo local y día que el cierre (trigger)'
+}
+
+Table daily_operations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  business_date date [not null, note: 'Fecha de negocio']
+  card_tip_amount bigint [not null, note: 'Propina tarjeta CLP entero >= 0']
+  cash_tip_amount bigint [not null, note: 'Propina efectivo CLP entero >= 0']
+  tip_fund_amount bigint [not null, note: 'Fondo: card_tip + cash_tip (CHECK)']
+  cash_difference bigint [not null, note: 'Con signo: positivo sobrante, negativo faltante']
+  difference_reason varchar(500) [note: 'Obligatorio si la diferencia no es cero (CHECK)']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+  store_id uuid [not null, ref: > stores.id]
+  responsible_id uuid [not null, ref: > users.id, note: 'Siempre desde el JWT']
+  voucher_id uuid [unique, ref: > daily_operation_vouchers.id, note: 'Obligatorio si card_tip_amount > 0 (CHECK); relación 1:1']
+
+  indexes {
+    (store_id, business_date) [unique, note: 'Una operación por local y día']
+  }
+
+  Note: 'SPRINT-4R-T01: fuente de ambos montos de propina. Montos, fecha y local inmutables si alimentó un reparto CONFIRMED/PAID (SPRINT-4R-T02)'
+}
+
+Table daily_operation_vouchers {
+  id uuid [pk, default: `gen_random_uuid()`]
+  file_name varchar(255) [not null]
+  file_path varchar(500) [not null, note: 'Archivo en volumen privado (subcarpeta vouchers/)']
+  mime_type varchar(100) [not null]
+  size_bytes bigint [not null]
+  sha256_hash char(64) [not null, note: 'Integridad verificable']
+  created_at timestamptz [not null, default: `now()`]
+}
+
+Table daily_operation_participants {
+  id uuid [pk, default: `gen_random_uuid()`]
+  created_at timestamptz [not null, default: `now()`]
+  operation_id uuid [not null, ref: > daily_operations.id, note: 'Cascade: la participación muere con su operación']
+  worker_id uuid [not null, ref: > users.id, note: 'Restrict: el trabajador con historial no se borra']
+
+  indexes {
+    (operation_id, worker_id) [unique, note: 'Un trabajador una sola vez por operación']
+    worker_id
+  }
+
+  Note: 'SPRINT-4R-T02: selección compartida por tarjeta y efectivo; trigger exige mismo local, rol TRABAJADOR y activo al escribir'
+}
+
+Table tip_pool_daily_operation_sources {
+  id uuid [pk, default: `gen_random_uuid()`]
+  amount bigint [not null, note: 'Fondo aplicado en CLP entero = tip_fund_amount de la operación (trigger); >= 0']
+  pool_id uuid [not null, ref: > tip_pools.id]
+  operation_id uuid [not null, unique, ref: > daily_operations.id, note: 'Una operación alimenta como máximo un reparto']
+
+  indexes {
+    pool_id
+  }
+
+  Note: 'SPRINT-4R-T02: fuente del reparto alimentada por la operación diaria, separada de tip_pool_sources'
 }
 
 Table products {
