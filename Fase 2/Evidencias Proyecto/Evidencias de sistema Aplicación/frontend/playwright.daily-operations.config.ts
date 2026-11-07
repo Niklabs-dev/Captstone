@@ -1,11 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './tests/real-tips',
+  testDir: './tests/real-daily-operations',
   workers: 1,
   retries: 0,
   timeout: 90000,
-  outputDir: 'output/playwright/tips/results',
+  outputDir: 'output/playwright/daily-operations/results',
   reporter: 'list',
   use: {
     baseURL: process.env.TEST_REAL_FRONTEND_URL ?? 'http://127.0.0.1:3338',

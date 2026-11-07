@@ -34,7 +34,7 @@ export function getNavigationView(pathname: string): {
     { href: '/admin/medios-pago', title: 'Medios de pago' },
     { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
     { href: '/propinas/repartos', title: 'Reparto de propinas' },
-    { href: '/propinas/diarias', title: 'Registro diario de propinas' },
+    { href: '/propinas/diarias', title: 'Operación diaria' },
     { href: '/dashboard', title: 'Inicio' },
     { href: '/admin/usuarios', title: 'Usuarios y roles' },
     { href: '/admin/locales', title: 'Locales' },
@@ -69,7 +69,7 @@ export function getNavigationItems(
   if (role === 'SUPERVISOR')
     return [
       home,
-      { href: '/propinas/diarias', label: 'Propinas diarias' },
+      { href: '/propinas/diarias', label: 'Operación diaria' },
       MY_TIPS,
       { href: '/portal/documentos', label: 'Mis documentos' },
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },

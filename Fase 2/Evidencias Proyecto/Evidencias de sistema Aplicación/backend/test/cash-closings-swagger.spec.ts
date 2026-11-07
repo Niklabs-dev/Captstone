@@ -4,9 +4,11 @@ import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module.js';
 import { createSwaggerDocument } from '../src/swagger.js';
 
-type Operation = NonNullable<OpenAPIObject['paths'][string]['get']>;
-
-describe('Swagger de cierres de caja (SPRINT-4-T09)', () => {
+// Documentación OpenAPI de la consulta histórica de cierres de caja
+// (SPRINT-4-T09). Desde SPRINT-4R-T01 la confirmación (POST /cash-closings)
+// se retiró: el documento conserva solo la lectura y no expone el DTO de
+// creación.
+describe('Swagger de cierres de caja (SPRINT-4-T09, lectura SPRINT-4R-T01)', () => {
   let app: INestApplication;
   let document: OpenAPIObject;
 
@@ -30,70 +32,27 @@ describe('Swagger de cierres de caja (SPRINT-4-T09)', () => {
     await app.close();
   });
 
-  function operation(method: 'get' | 'post', path: string): Operation {
-    const found = document.paths[path]?.[method];
-    if (!found) throw new Error(`Falta ${method.toUpperCase()} ${path}`);
-    return found;
-  }
+  it('GET /cash-closings/{id} documenta JWT, resumen y errores', () => {
+    const op = document.paths['/cash-closings/{id}']?.['get'];
+    if (!op) throw new Error('Falta GET /cash-closings/{id}');
+    expect(op.tags).toContain('cash-closings');
+    expect(op.summary).toEqual(expect.any(String));
+    expect(op.security).toEqual(expect.arrayContaining([{ bearer: [] }]));
+    expect(Object.keys(op.responses).sort()).toEqual(
+      ['200', '400', '401', '403', '404'].sort(),
+    );
+  });
 
-  it.each([
-    {
-      method: 'post' as const,
-      path: '/cash-closings',
-      statuses: ['200', '201', '400', '401', '403', '404', '409'],
-    },
-    {
-      method: 'get' as const,
-      path: '/cash-closings/{id}',
-      statuses: ['200', '400', '401', '403', '404'],
-    },
-  ])(
-    '$method $path documenta JWT, resumen y errores',
-    ({ method, path, statuses }) => {
-      const op = operation(method, path);
-      expect(op.tags).toContain('cash-closings');
-      expect(op.summary).toEqual(expect.any(String));
-      expect(op.security).toEqual(expect.arrayContaining([{ bearer: [] }]));
-      expect(Object.keys(op.responses).sort()).toEqual([...statuses].sort());
-    },
-  );
-
-  it('expone entradas controladas y totales de conciliación tipados', () => {
+  it('no expone la confirmación ni el DTO de creación', () => {
+    expect(document.paths['/cash-closings']?.['post']).toBeUndefined();
     const schemas = document.components?.schemas ?? {};
-    expect(schemas.CreateCashClosingDto).toMatchObject({
-      required: expect.arrayContaining([
-        'storeId',
-        'businessDate',
-        'shift',
-        'openingCash',
-        'lines',
-        'vouchers',
-      ]) as unknown,
-    });
-    const createProperties = (
-      schemas.CreateCashClosingDto as { properties: object }
-    ).properties;
-    expect(Object.keys(createProperties)).not.toEqual(
-      expect.arrayContaining([
-        'expectedAmount',
-        'responsibleId',
-        'closedAt',
-        'status',
-        'difference',
-      ]),
-    );
-    const lineDto = schemas.CreateCashClosingLineDto as {
-      properties: Record<string, { type?: string; $ref?: string }>;
-    };
-    expect(lineDto.properties.paymentMethod).toMatchObject({
-      type: 'string',
-    });
-    const voucherDto = schemas.CreateCashClosingVoucherDto as {
-      properties: Record<string, unknown>;
-    };
-    expect(Object.keys(voucherDto.properties)).toEqual(
-      expect.arrayContaining(['paymentMethod']),
-    );
+    expect(schemas.CreateCashClosingDto).toBeUndefined();
+    expect(schemas.CreateCashClosingLineDto).toBeUndefined();
+    expect(schemas.CreateCashClosingVoucherDto).toBeUndefined();
+  });
+
+  it('conserva el detalle tipado de la respuesta histórica', () => {
+    const schemas = document.components?.schemas ?? {};
     expect(
       Object.keys(
         (schemas.CashClosingResponseDto as { properties: object }).properties,
@@ -105,68 +64,9 @@ describe('Swagger de cierres de caja (SPRINT-4-T09)', () => {
         'responsible',
         'closedAt',
         'totalDifference',
-        'mrcomandaNetSales',
-        'mercadoPagoGrossAmount',
-        'mercadoPagoTipAmount',
-        'mercadoPagoNetSales',
-        'reconciliationDifference',
         'tipEntries',
         'tipFundAmount',
-        'hasDifferences',
-        'isBalanced',
         'balanceStatus',
-      ]),
-    );
-    const responseDto = schemas.CashClosingResponseDto as {
-      properties: Record<string, { items?: { $ref?: string } }>;
-    };
-    expect(responseDto.properties.balanceStatus).toMatchObject({
-      enum: ['CUADRADO', 'NO_CUADRADO'],
-    });
-    expect(responseDto.properties.lines).toMatchObject({
-      items: { $ref: '#/components/schemas/CashClosingLineResponseDto' },
-    });
-    const lineResponse = schemas.CashClosingLineResponseDto as {
-      properties: Record<string, { type?: string }>;
-    };
-    expect(lineResponse.properties.paymentMethod).toMatchObject({
-      type: 'string',
-    });
-    expect(lineResponse.properties.paymentMethodName).toMatchObject({
-      type: 'string',
-    });
-    for (const status of ['200', '201']) {
-      expect(
-        operation('post', '/cash-closings').responses[status],
-      ).toMatchObject({
-        content: {
-          'application/json': {
-            schema: { $ref: '#/components/schemas/CashClosingResponseDto' },
-          },
-        },
-      });
-    }
-  });
-
-  it('documenta el ID consultable ante un cierre duplicado', () => {
-    expect(operation('post', '/cash-closings').responses['409']).toMatchObject({
-      content: {
-        'application/json': {
-          schema: { $ref: '#/components/schemas/CashClosingConflictDto' },
-        },
-      },
-    });
-    const schemas = document.components?.schemas ?? {};
-    expect(
-      Object.keys(
-        (schemas.CashClosingConflictDto as { properties: object }).properties,
-      ),
-    ).toEqual(
-      expect.arrayContaining([
-        'statusCode',
-        'message',
-        'error',
-        'existingClosingId',
       ]),
     );
   });

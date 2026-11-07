@@ -10,8 +10,16 @@ Responsive de las vistas autenticadas (SPRINT-3-T07): menú móvil desplegable,
 diálogos adaptados y tablas accesibles. Alcance y verificación:
 [SPRINT-3-T07](docs/SPRINT-3-T07.md).
 
-Registro diario de propinas para supervisor (SPRINT-3-T11):
-[`/propinas/diarias`, contrato y pruebas](docs/SPRINT-3-T11.md).
+Operación diaria del local (SPRINT-4R-T01): una sola declaración por
+local y fecha — propina tarjeta con voucher, propina efectivo y diferencia de
+efectivo con signo. Contrato en el
+[README del backend](../backend/README.md#operación-diaria-sprint-4r-t01);
+reemplaza al registro diario de propinas, a la captura de ventas y al cierre
+por turno con conciliación (hoy históricos, en modo lectura).
+
+Registro diario de propinas para supervisor (SPRINT-3-T11, **histórico**):
+[`/propinas/diarias`, contrato y pruebas](docs/SPRINT-3-T11.md). El flujo fue
+reemplazado por la operación diaria (SPRINT-4R-T01).
 
 Aplicación Next.js 16 con App Router, TypeScript estricto y Tailwind CSS.
 
@@ -259,6 +267,38 @@ Constancias propias de propinas enteradas (SPRINT-3-T16):
 
 ## Medios de pago (SPRINT-4-T32)
 
-`/admin/medios-pago` permite crear, editar, desactivar y reactivar los medios de pago del sistema como administrador: nombre, orden de lista, comportamiento en el cierre (`CASH`, `RECONCILABLE_CARD`, `EXTERNAL_OTHER`) y disponibilidad para propinas. El código se normaliza a mayúsculas y guiones bajos y no se puede cambiar después de crearlo; los medios desactivados conservan su historial visible. `GET /api/payment-methods` exige sesión y solo administración lista inactivos; las mutaciones del BFF validan origen, rol, cuerpo acotado y respuesta. El registro diario de propinas carga los medios activos elegibles del catálogo (sin listas fijas) y el histórico muestra el nombre guardado aunque el medio se desactive. Pruebas: `npm run test:payment-methods` (unitarias), `npm run test:payment-methods:integration` (BFF con backend simulado) y `npm run test:payment-methods:e2e` (recorrido real con base exclusiva, igual que los demás módulos).
+`/admin/medios-pago` permite crear, editar, desactivar y reactivar los medios de pago del sistema como administrador: nombre, orden de lista, comportamiento en el cierre (`CASH`, `RECONCILABLE_CARD`, `EXTERNAL_OTHER`) y disponibilidad para propinas. El código se normaliza a mayúsculas y guiones bajos y no se puede cambiar después de crearlo; los medios desactivados conservan su historial visible. `GET /api/payment-methods` exige sesión y solo administración lista inactivos; las mutaciones del BFF validan origen, rol, cuerpo acotado y respuesta. El registro diario de propinas que cargaba los medios activos elegibles del
+catálogo quedó histórico con SPRINT-4R-T01; el catálogo se conserva para el
+historial y la futura importación de ventas desde Excel, y el histórico muestra
+el nombre guardado aunque el medio se desactive. Pruebas: `npm run test:payment-methods` (unitarias), `npm run test:payment-methods:integration` (BFF con backend simulado) y `npm run test:payment-methods:e2e` (recorrido real con base exclusiva, igual que los demás módulos).
 
 Diseño móvil del Sprint 4: [dirección y verificación](docs/SPRINT-4-DISENO-MOVIL.md). Prueba de navegador: npm run test:mobile-design -- --headed.
+
+## Operación diaria (SPRINT-4R-T01)
+
+Una sola pantalla de cierre por local y fecha reemplaza al registro diario de
+propinas (`/propinas/diarias`, hoy histórico), a la captura de ventas y al
+cierre de caja por turno con conciliación. El supervisor declara una vez al
+día, para su local (el local sale de la sesión validada, nunca de un parámetro
+editable):
+
+- **Propina tarjeta** (entero CLP `>= 0`) con **foto del voucher** (JPEG/PNG/
+  WebP, máximo 5 MiB); el archivo es obligatorio cuando la propina tarjeta es
+  mayor que cero y se almacena en el volumen privado del backend — se sube y
+  se descarga solo por el endpoint autorizado, sin URLs públicas.
+- **Propina efectivo** (entero CLP `>= 0`). El fondo del día
+  (`tipFundAmount`) lo calcula el backend como tarjeta + efectivo.
+- **Diferencia de efectivo con signo**: positivo = sobrante, negativo =
+  faltante; si no es cero el **motivo es obligatorio**.
+
+Contrato HTTP en el
+[README del backend](../backend/README.md#operación-diaria-sprint-4r-t01):
+`POST /daily-operations` (multipart) responde 201 al crear, 200 al reintento
+idéntico (sin duplicar) y 409 con `existingOperationId` cuando ya existe otra
+operación con distinto contenido para el mismo local y fecha;
+`GET /daily-operations?storeId&businessDate` devuelve 0 o 1 operaciones;
+`GET /daily-operations/:id` su detalle y `GET /daily-operations/:id/voucher`
+la descarga privada. La consulta histórica de propinas por medio, ventas y
+cierres por turno sigue disponible en modo lectura.
+
+Pruebas: `npm run test:daily-operations` (unitarias), `npm run test:daily-operations:integration` (BFF con backend simulado) y `TEST_REAL_DISPOSABLE=true npm run test:daily-operations:real` (recorrido real con base exclusiva, con las variables `TEST_REAL_*` de `.env.example`).

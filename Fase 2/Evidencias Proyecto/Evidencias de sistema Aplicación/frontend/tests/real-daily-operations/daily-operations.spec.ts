@@ -1,0 +1,667 @@
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { mkdir } from 'node:fs/promises';
+import { isRecord } from '../../src/lib/auth';
+
+test.skip(
+  process.env.TEST_REAL_DISPOSABLE !== 'true',
+  'Solo contra backend y base exclusivos con datos sintéticos.',
+);
+const backend = process.env.TEST_REAL_BACKEND_URL ?? 'http://127.0.0.1:3339';
+const password = 'Operacion-test-2026!';
+const date = '2026-10-26';
+let adminToken = '';
+let storeId = '';
+let otherStoreId = '';
+const accounts: { id: string; email: string; role: string }[] = [];
+let supervisor: { id: string; email: string };
+// PNG 1x1 real para el voucher.
+const png = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+function id(value: unknown): string {
+  if (!isRecord(value) || typeof value.id !== 'string')
+    throw Error('La respuesta no incluye un ID.');
+  return value.id;
+}
+async function login(
+  context: BrowserContext,
+  baseURL: string,
+  email = supervisor.email,
+  accountPassword = password,
+): Promise<undefined> {
+  expect(
+    (
+      await context.request.post('/api/auth/login', {
+        headers: { Origin: baseURL },
+        data: { email, password: accountPassword },
+      })
+    ).status(),
+  ).toBe(200);
+}
+async function registerDate(page: Page, value = date): Promise<undefined> {
+  await page.getByLabel(/Fecha de operación/).fill(value);
+  await expect(
+    page.getByRole('button', { name: 'Guardar operación', exact: true }),
+  ).toBeEnabled();
+}
+async function fillOperation(
+  page: Page,
+  values: {
+    card?: string;
+    cash?: string;
+    difference?: string;
+    reason?: string;
+  } = {},
+): Promise<undefined> {
+  if (values.card !== undefined)
+    await page
+      .getByRole('textbox', { name: /Propina con tarjeta/ })
+      .fill(values.card);
+  if (values.cash !== undefined)
+    await page
+      .getByRole('textbox', { name: /Propina en efectivo/ })
+      .fill(values.cash);
+  if (values.difference !== undefined)
+    await page
+      .getByRole('textbox', { name: /Diferencia de efectivo/ })
+      .fill(values.difference);
+  if (values.reason !== undefined)
+    await page
+      .getByRole('textbox', { name: /Motivo de la diferencia/ })
+      .fill(values.reason);
+}
+async function noOverflow(page: Page): Promise<undefined> {
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+}
+test.beforeAll(async ({ request }, info) => {
+  const admin = await request.post(backend + '/auth/login', {
+    data: {
+      email: process.env.TEST_REAL_ADMIN_EMAIL ?? 'admin@moi-food.cl',
+      password:
+        process.env.TEST_REAL_ADMIN_PASSWORD ?? 'admin-cambiar-en-produccion',
+    },
+  });
+  expect(admin.status()).toBe(200);
+  const session: unknown = await admin.json();
+  if (!isRecord(session) || typeof session.accessToken !== 'string')
+    throw Error('Login de prueba inválido.');
+  adminToken = session.accessToken;
+  const headers = { Authorization: 'Bearer ' + adminToken };
+  const suffix = info.project.name + '-' + randomUUID();
+  for (const name of ['Centro ', 'Norte ']) {
+    const response = await request.post(backend + '/stores', {
+      headers,
+      data: {
+        name: 'Operación ' + name + suffix,
+        city: 'Melipilla',
+        address: 'Av. Pruebas 311',
+      },
+    });
+    expect(response.status()).toBe(201);
+    if (!storeId) storeId = id(await response.json());
+    else otherStoreId = id(await response.json());
+  }
+  for (const [key, role, assignedStore] of [
+    ['supervisor', 'SUPERVISOR', storeId],
+    ['other', 'SUPERVISOR', otherStoreId],
+    ['worker', 'TRABAJADOR', storeId],
+    ['accountant', 'CONTADOR', null],
+  ] as const) {
+    const email = key + '-' + suffix + '@example.test';
+    const response = await request.post(backend + '/users', {
+      headers,
+      data: {
+        email,
+        password,
+        firstName: 'Camila',
+        lastName: 'Prueba de operación',
+        roleCode: role,
+        ...(assignedStore ? { storeId: assignedStore } : {}),
+      },
+    });
+    expect(response.status()).toBe(201);
+    const account = { id: id(await response.json()), email, role };
+    accounts.push(account);
+    if (key === 'supervisor') supervisor = account;
+  }
+});
+test.afterAll(async ({ request }) => {
+  if (!adminToken) return;
+  for (const account of accounts)
+    expect(
+      (
+        await request.patch(backend + '/users/' + account.id + '/deactivate', {
+          headers: { Authorization: 'Bearer ' + adminToken },
+        })
+      ).status(),
+    ).toBe(200);
+  for (const store of [storeId, otherStoreId])
+    if (store)
+      expect(
+        (
+          await request.patch(backend + '/stores/' + store + '/deactivate', {
+            headers: { Authorization: 'Bearer ' + adminToken },
+          })
+        ).status(),
+      ).toBe(200);
+});
+
+test('Supervisor: validación, voucher, registro, reintento idéntico, conflicto consultable y descarga', async ({
+  page,
+  context,
+  request,
+  baseURL,
+}, info) => {
+  await login(context, baseURL!);
+  await page.goto('/dashboard');
+  await page
+    .getByRole('link', { name: 'Registrar operación', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/propinas\/diarias$/);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Operación diaria' }),
+  ).toBeVisible();
+  await registerDate(page);
+  await expect(
+    page.getByRole('heading', { name: 'No hay operación registrada' }),
+  ).toBeVisible();
+  const save = page.getByRole('button', {
+    name: 'Guardar operación',
+    exact: true,
+  });
+  const card = page.getByRole('textbox', { name: /Propina con tarjeta/ });
+  const cash = page.getByRole('textbox', { name: /Propina en efectivo/ });
+  const difference = page.getByRole('textbox', {
+    name: /Diferencia de efectivo/,
+  });
+  const voucher = page.getByLabel(/Foto del voucher/);
+  // Validación: campos vacíos (la diferencia inicia en 0, valor válido).
+  await save.click();
+  await expect(card).toHaveAttribute('aria-invalid', 'true');
+  await expect(cash).toHaveAttribute('aria-invalid', 'true');
+  await expect(difference).toHaveValue('0');
+  await expect(difference).toHaveAttribute('aria-invalid', 'false');
+  await expect(page.getByRole('main').getByRole('alert')).toContainText(
+    'Corrige los campos',
+  );
+  await fillOperation(page, {
+    card: '12500',
+    cash: '8000',
+    difference: '-1500',
+  });
+  await save.click();
+  await expect(voucher).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByText(/Adjunta la foto del voucher/)).toBeVisible();
+  // El motivo es obligatorio cuando la diferencia no es cero.
+  await voucher.setInputFiles({
+    name: 'voucher.png',
+    mimeType: 'image/png',
+    buffer: png,
+  });
+  await save.click();
+  await expect(
+    page.getByRole('textbox', { name: /Motivo de la diferencia/ }),
+  ).toHaveAttribute('aria-invalid', 'true');
+  await fillOperation(page, { reason: 'Vale de caja firmado' });
+  for (const invalid of ['-1', '12.500', '10000000000']) {
+    await fillOperation(page, { card: invalid });
+    await save.click();
+    await expect(card).toHaveAttribute('aria-invalid', 'true');
+  }
+  await fillOperation(page, { card: '12500' });
+  // Doble envío: un único POST gracias al bloqueo en cliente.
+  let posts = 0;
+  await page.route('**/api/daily-operations', async (route) => {
+    if (route.request().method() === 'POST') {
+      posts++;
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 200));
+    }
+    await route.continue();
+  });
+  await page.locator('form').evaluate((form: HTMLFormElement) => {
+    form.requestSubmit();
+    form.requestSubmit();
+  });
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'Operación diaria registrada correctamente.' }),
+  ).toBeVisible();
+  expect(posts).toBe(1);
+  // La operación registrada queda consultable con sus montos y responsable.
+  const registered = page.locator('section', {
+    has: page.getByRole('heading', { name: /Operación registrada/ }),
+  });
+  await expect(registered).toContainText('$12.500');
+  await expect(registered).toContainText('$8.000');
+  await expect(registered).toContainText('$20.500');
+  await expect(registered).toContainText('-$1.500');
+  await expect(registered).toContainText('Vale de caja firmado');
+  await expect(registered).toContainText('Camila Prueba de operación');
+  await expect(
+    registered.getByText('Registrada', { exact: true }),
+  ).toBeVisible();
+  const persisted = await context.request.get(
+    '/api/daily-operations?storeId=' + storeId + '&businessDate=' + date,
+  );
+  expect(persisted.status()).toBe(200);
+  const operations: unknown = await persisted.json();
+  if (
+    !Array.isArray(operations) ||
+    operations.length !== 1 ||
+    !isRecord(operations[0])
+  )
+    throw Error('Se esperaba una operación registrada.');
+  const operationId = id(operations[0]);
+  expect(isRecord(operations[0].voucher)).toBe(true);
+  // El voucher privado se descarga autenticado por el BFF.
+  const download = await context.request.get(
+    '/api/daily-operations/' + operationId + '/voucher',
+  );
+  expect(download.status()).toBe(200);
+  expect(download.headers()['content-type']).toContain('image/');
+  expect(Buffer.from(await download.body()).length).toBeGreaterThan(0);
+  expect(
+    JSON.stringify(
+      await (
+        await context.request.get('/api/daily-operations/' + operationId)
+      ).json(),
+    ),
+  ).toContain(supervisor.id);
+  // Reintento idéntico: 200 sin duplicar ni requerir voucher nuevo en el BFF.
+  const replay = await context.request.post('/api/daily-operations', {
+    headers: { Origin: baseURL! },
+    multipart: {
+      storeId,
+      businessDate: date,
+      cardTipAmount: '12500',
+      cashTipAmount: '8000',
+      cashDifference: '-1500',
+      differenceReason: 'Vale de caja firmado',
+      voucher: { name: 'voucher.png', mimeType: 'image/png', buffer: png },
+    },
+  });
+  expect(replay.status()).toBe(200);
+  expect(await replay.text()).not.toContain('accessToken');
+  const replayed: unknown = await replay.json();
+  expect(isRecord(replayed) && replayed.id).toBe(operationId);
+  // Conflicto con otro contenido: 409 con ID consultable en el BFF.
+  const conflict = await context.request.post('/api/daily-operations', {
+    headers: { Origin: baseURL! },
+    multipart: {
+      storeId,
+      businessDate: date,
+      cardTipAmount: '13000',
+      cashTipAmount: '8000',
+      cashDifference: '-1500',
+      differenceReason: 'Vale de caja firmado',
+      voucher: { name: 'voucher.png', mimeType: 'image/png', buffer: png },
+    },
+  });
+  expect(conflict.status()).toBe(409);
+  const conflictBody: unknown = await conflict.json();
+  if (!isRecord(conflictBody)) throw Error('Conflicto sin cuerpo.');
+  expect(conflictBody.existingOperationId).toBe(operationId);
+  expect(JSON.stringify(conflictBody)).not.toContain('accessToken');
+  // La interfaz muestra el conflicto, conserva los campos y ofrece la registrada.
+  await fillOperation(page, {
+    card: '13000',
+    cash: '8000',
+    difference: '-1500',
+    reason: 'Vale de caja firmado',
+  });
+  await voucher.setInputFiles({
+    name: 'voucher.png',
+    mimeType: 'image/png',
+    buffer: png,
+  });
+  await save.click();
+  await expect(page.getByRole('main').getByRole('alert')).toContainText(
+    'Ya existe una operación registrada para esta fecha',
+  );
+  await expect(page.getByRole('main').getByRole('alert')).toContainText(
+    operationId,
+  );
+  await expect(registered).toContainText('$12.500');
+  await expect(card).toHaveValue('13000');
+  // El supervisor ajeno no lee el local de esta supervisora en el backend.
+  const directLogin = await request.post(backend + '/auth/login', {
+    data: { email: supervisor.email, password },
+  });
+  const token: unknown = await directLogin.json();
+  if (!isRecord(token) || typeof token.accessToken !== 'string')
+    throw Error('Falta token de prueba.');
+  expect(
+    (
+      await request.get(
+        backend +
+          '/daily-operations?storeId=' +
+          otherStoreId +
+          '&businessDate=' +
+          date,
+        { headers: { Authorization: 'Bearer ' + token.accessToken } },
+      )
+    ).status(),
+  ).toBe(403);
+  await page.keyboard.press('Tab');
+  await card.focus();
+  await expect(card).toBeFocused();
+  expect(
+    await card.evaluate((element) => getComputedStyle(element).outlineWidth),
+  ).toBe('2px');
+  await noOverflow(page);
+  const folder = 'output/playwright/daily-operations/' + info.project.name;
+  await mkdir(folder, { recursive: true });
+  await page.screenshot({ path: folder + '/registro.png', scale: 'css' });
+  // Cambiar de fecha vuelve a consultar; los valores se conservan al reintentar.
+  await page.getByLabel(/Fecha de operación/).fill('');
+  await expect(page.getByLabel(/Fecha de operación/)).toHaveAttribute(
+    'aria-invalid',
+    'true',
+  );
+  await expect(save).toBeDisabled();
+  await registerDate(page, '2026-10-25');
+  await expect(
+    page.getByRole('heading', { name: 'No hay operación registrada' }),
+  ).toBeVisible();
+  await registerDate(page);
+  await expect(registered).toContainText('$20.500');
+  expect(
+    (await context.cookies())
+      .filter((cookie) => cookie.name.startsWith('mf_'))
+      .every((cookie) => cookie.httpOnly),
+  ).toBe(true);
+  expect(await page.evaluate(() => document.cookie)).not.toContain('mf_access');
+});
+
+test('BFF y páginas: sesión, roles, origen, multipart e identidad/local no editables', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  expect(
+    (
+      await context.request.get(
+        '/api/daily-operations?storeId=' + storeId + '&businessDate=' + date,
+      )
+    ).status(),
+  ).toBe(401);
+  await login(context, baseURL!);
+  const headers = { Origin: baseURL! };
+  const file = { name: 'voucher.png', mimeType: 'image/png', buffer: png };
+  const valid = {
+    storeId,
+    businessDate: date,
+    cardTipAmount: '12500',
+    cashTipAmount: '8000',
+    cashDifference: '-1500',
+    differenceReason: 'Vale de caja firmado',
+  };
+  for (const body of [
+    { ...valid, storeId: otherStoreId },
+    { ...valid, responsibleId: accounts[1].id },
+    { ...valid, cardTipAmount: '-1' },
+    { ...valid, cashTipAmount: '1.5' },
+    { ...valid, cashDifference: 'texto' },
+    { ...valid, businessDate: '2026-02-30' },
+    { ...valid, cashDifference: '-1500', differenceReason: '' },
+  ])
+    expect(
+      (
+        await context.request.post('/api/daily-operations', {
+          headers,
+          multipart: { ...body, voucher: file },
+        })
+      ).status(),
+    ).toBe(400);
+  expect(
+    (
+      await context.request.post('/api/daily-operations', {
+        headers,
+        multipart: {
+          ...valid,
+          voucher: { name: 'v.pdf', mimeType: 'application/pdf', buffer: png },
+        },
+      })
+    ).status(),
+  ).toBe(415);
+  expect(
+    (
+      await context.request.get(
+        '/api/daily-operations?businessDate=' +
+          date +
+          '&storeId=' +
+          otherStoreId,
+      )
+    ).status(),
+  ).toBe(400);
+  expect(
+    (
+      await context.request.get(
+        '/api/daily-operations?businessDate=' +
+          date +
+          '&businessDate=2026-10-25&storeId=' +
+          storeId,
+      )
+    ).status(),
+  ).toBe(400);
+  expect(
+    (
+      await context.request.post('/api/daily-operations', {
+        headers: { Origin: 'https://other.example.test' },
+        multipart: { ...valid, voucher: file },
+      })
+    ).status(),
+  ).toBe(403);
+  expect(
+    (
+      await context.request.post('/api/daily-operations', {
+        multipart: { ...valid, voucher: file },
+      })
+    ).status(),
+  ).toBe(403);
+  expect(
+    (
+      await context.request.patch('/api/daily-operations', {
+        headers,
+        multipart: { ...valid, voucher: file },
+      })
+    ).status(),
+  ).toBe(405);
+  for (const account of accounts.filter((item) => item.role !== 'SUPERVISOR')) {
+    await login(context, baseURL!, account.email);
+    await page.goto('/propinas/diarias');
+    await expect(page).toHaveURL(
+      account.role === 'TRABAJADOR'
+        ? /\/portal\?reason=forbidden$/
+        : /\/dashboard\?reason=forbidden$/,
+    );
+    expect(
+      (
+        await context.request.get(
+          '/api/daily-operations?storeId=' + storeId + '&businessDate=' + date,
+        )
+      ).status(),
+    ).toBe(403);
+    expect(
+      (
+        await context.request.post('/api/daily-operations', {
+          headers,
+          multipart: { ...valid, voucher: file },
+        })
+      ).status(),
+    ).toBe(403);
+  }
+  await login(
+    context,
+    baseURL!,
+    process.env.TEST_REAL_ADMIN_EMAIL ?? 'admin@moi-food.cl',
+    process.env.TEST_REAL_ADMIN_PASSWORD ?? 'admin-cambiar-en-produccion',
+  );
+  await page.goto('/propinas/diarias');
+  await expect(page).toHaveURL(/\/dashboard\?reason=forbidden$/);
+  expect(
+    (
+      await context.request.get(
+        '/api/daily-operations?storeId=' + storeId + '&businessDate=' + date,
+      )
+    ).status(),
+  ).toBe(403);
+});
+
+test('Carga, error, reintento y conservación de campos sobre la API real', async ({
+  page,
+  context,
+  baseURL,
+}, info) => {
+  await login(context, baseURL!);
+  let release: (() => undefined) | undefined;
+  const gate = new Promise<undefined>((resolve) => {
+    release = () => {
+      resolve(undefined);
+      return undefined;
+    };
+  });
+  let failure = false;
+  let hold = true;
+  await page.route('**/api/daily-operations**', async (route) => {
+    if (route.request().method() === 'GET' && hold) await gate;
+    if (failure) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: '{"message":"temporary"}',
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto('/propinas/diarias');
+  await expect(
+    page.getByText('Consultando la operación del día…', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Guardar operación', exact: true }),
+  ).toBeDisabled();
+  hold = false;
+  release?.();
+  await registerDate(page, '2026-10-24');
+  failure = true;
+  await page.getByRole('button', { name: 'Actualizar consulta' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Reintentar consulta' }),
+  ).toBeVisible();
+  const folder = 'output/playwright/daily-operations/' + info.project.name;
+  await mkdir(folder, { recursive: true });
+  await page.screenshot({ path: folder + '/error-consulta.png', scale: 'css' });
+  failure = false;
+  await page.getByRole('button', { name: 'Reintentar consulta' }).click();
+  const save = page.getByRole('button', {
+    name: 'Guardar operación',
+    exact: true,
+  });
+  await expect(save).toBeEnabled();
+  await fillOperation(page, {
+    card: '4500',
+    cash: '0',
+    difference: '0',
+  });
+  await page
+    .getByLabel(/Foto del voucher/)
+    .setInputFiles({ name: 'voucher.png', mimeType: 'image/png', buffer: png });
+  failure = true;
+  await save.click();
+  await expect(page.getByRole('main').getByRole('alert')).toContainText(
+    'Conservamos los campos',
+  );
+  await expect(
+    page.getByRole('textbox', { name: /Propina con tarjeta/ }),
+  ).toHaveValue('4500');
+  await expect(save).toBeEnabled();
+  failure = false;
+  await save.click();
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'Operación diaria registrada correctamente.' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: /Operación registrada/ }),
+  ).toBeVisible();
+  await noOverflow(page);
+});
+
+test('Local desactivado después de abrir la vista: causa clara, monto conservado e historial disponible', async ({
+  page,
+  context,
+  baseURL,
+}, info) => {
+  await login(context, baseURL!);
+  await page.goto('/propinas/diarias');
+  await registerDate(page, '2026-10-23');
+  const card = page.getByRole('textbox', { name: /Propina con tarjeta/ });
+  await fillOperation(page, { card: '7500', cash: '0', difference: '0' });
+  await page
+    .getByLabel(/Foto del voucher/)
+    .setInputFiles({ name: 'voucher.png', mimeType: 'image/png', buffer: png });
+  // La API bloquea la baja si hay usuarios activos. Solo en esta base exclusiva
+  // se prepara el estado inactivo con la vista abierta para probar la regresión.
+  const changed = execFileSync(
+    'docker',
+    [
+      'compose',
+      '-f',
+      '../docker-compose.yml',
+      '-p',
+      process.env.COMPOSE_PROJECT_NAME ?? 'sprint3-t11',
+      'exec',
+      '-T',
+      'db',
+      'sh',
+      '-c',
+      'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -v store_id="$1"',
+      '--',
+      storeId,
+    ],
+    {
+      input:
+        "UPDATE stores SET is_active = false, updated_at = now() WHERE id = :'store_id'::uuid AND name LIKE 'Operación %' RETURNING id;",
+      encoding: 'utf8',
+      timeout: 15000,
+    },
+  );
+  expect(changed).toContain(storeId);
+  const response = page.waitForResponse(
+    (res) =>
+      res.url().endsWith('/api/daily-operations') &&
+      res.request().method() === 'POST',
+  );
+  await page
+    .getByRole('button', { name: 'Guardar operación', exact: true })
+    .click();
+  expect((await response).status()).toBe(400);
+  await expect(page.getByRole('main').getByRole('alert')).toContainText(
+    'Tu local está inactivo. Consulta con el administrador',
+  );
+  await expect(card).toHaveValue('7500');
+  await page.getByRole('button', { name: 'Actualizar consulta' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'No hay operación registrada' }),
+  ).toBeVisible();
+  await noOverflow(page);
+  const folder = 'output/playwright/daily-operations/' + info.project.name;
+  await mkdir(folder, { recursive: true });
+  await page.screenshot({
+    path: folder + '/local-desactivado.png',
+    fullPage: true,
+    scale: 'css',
+  });
+});

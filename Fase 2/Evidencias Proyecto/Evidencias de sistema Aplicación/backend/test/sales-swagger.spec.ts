@@ -4,9 +4,13 @@ import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module.js';
 import { createSwaggerDocument } from '../src/swagger.js';
 
-type Operation = NonNullable<OpenAPIObject['paths'][string]['get']>;
-
-describe('Swagger del ingreso de ventas MrComanda (SPRINT-4-T32)', () => {
+// El ingreso manual de ventas MrComanda (SPRINT-4-T32) fue reemplazado por la
+// operación diaria (SPRINT-4R-T01): las ventas ya no las captura el
+// supervisor ni alimentan una conciliación paralela. Este spec documenta la
+// desactivación: el endpoint y sus esquemas ya no se publican. Los datos
+// históricos de ventas siguen consultables por la consulta consolidada
+// (/sales-dashboard, módulo propio).
+describe('Ingreso MrComanda retirado (SPRINT-4-T32, SPRINT-4R-T01)', () => {
   let app: INestApplication;
   let document: OpenAPIObject;
 
@@ -17,6 +21,7 @@ describe('Swagger del ingreso de ventas MrComanda (SPRINT-4-T32)', () => {
     process.env.JWT_EXPIRES_IN ??= '1h';
     process.env.JWT_REFRESH_EXPIRES_IN ??= '7d';
     process.env.DOCUMENTS_STORAGE_PATH ??= './storage/test-documents';
+    process.env.DOCUMENTS_MAX_SIZE_MB ??= '1';
 
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
@@ -29,84 +34,27 @@ describe('Swagger del ingreso de ventas MrComanda (SPRINT-4-T32)', () => {
     await app.close();
   });
 
-  function operation(method: 'post', path: string): Operation {
-    const found = document.paths[path]?.[method];
-    if (!found) throw new Error(`Falta ${method.toUpperCase()} ${path}`);
-    return found;
-  }
-
-  it('POST /sales/mrcomanda documenta JWT, resumen y errores', () => {
-    const op = operation('post', '/sales/mrcomanda');
-    expect(op.tags).toContain('sales');
-    expect(op.summary).toEqual(expect.any(String));
-    expect(op.security).toEqual(expect.arrayContaining([{ bearer: [] }]));
-    expect(Object.keys(op.responses).sort()).toEqual(
-      ['201', '400', '401', '403', '404', '409'].sort(),
-    );
+  it('no publica el endpoint ni los esquemas del ingreso MrComanda', () => {
+    expect(document.paths['/sales/mrcomanda']).toBeUndefined();
+    const schemas = document.components?.schemas ?? {};
+    expect(schemas.CreateMrComandaSalesDto).toBeUndefined();
+    expect(schemas.MrComandaTotalDto).toBeUndefined();
+    expect(schemas.MrComandaSalesResponseDto).toBeUndefined();
   });
 
-  it('expone la solicitud con local, período con zona horaria y totales por código', () => {
-    const schemas = document.components?.schemas ?? {};
-    const create = schemas.CreateMrComandaSalesDto as {
-      required: string[];
-      properties: Record<string, { type?: string; items?: unknown }>;
-    };
-    expect(create.required.sort()).toEqual(
-      ['periodEnd', 'periodStart', 'storeId', 'totals'].sort(),
-    );
-    expect(create.properties.storeId).toMatchObject({ type: 'string' });
-    expect(create.properties.periodStart).toMatchObject({ type: 'string' });
-    expect(create.properties.totals).toMatchObject({ type: 'array' });
-    expect(create.properties.totals.items).toMatchObject({
-      $ref: '#/components/schemas/MrComandaTotalDto',
-    });
-
-    const total = schemas.MrComandaTotalDto as {
-      required: string[];
-      properties: Record<string, unknown>;
-    };
-    expect(total.required.sort()).toEqual(
-      ['netAmount', 'paymentMethod'].sort(),
-    );
-    expect(total.properties).not.toHaveProperty('paymentMethodName');
+  it('no publica rutas de escritura de propinas ni de cierres', () => {
+    expect(document.paths['/tips']?.['post']).toBeUndefined();
+    expect(document.paths['/tips/{id}']?.['patch']).toBeUndefined();
+    expect(document.paths['/tips/{id}']?.['delete']).toBeUndefined();
+    expect(document.paths['/cash-closings']?.['post']).toBeUndefined();
   });
 
-  it('tipa la respuesta con código, nombre, neto y flag de creación', () => {
-    const schemas = document.components?.schemas ?? {};
-    const response = schemas.MrComandaSalesResponseDto as {
-      properties: Record<string, unknown>;
-    };
-    expect(Object.keys(response.properties)).toEqual(
-      expect.arrayContaining([
-        'storeId',
-        'periodStart',
-        'periodEnd',
-        'created',
-        'totalNetAmount',
-        'totals',
-      ]),
-    );
-
-    const totalResponse = schemas.MrComandaSaleTotalResponseDto as {
-      properties: Record<string, unknown>;
-    };
-    expect(Object.keys(totalResponse.properties)).toEqual(
-      expect.arrayContaining([
-        'saleId',
-        'paymentMethod',
-        'paymentMethodName',
-        'netAmount',
-      ]),
-    );
-
-    expect(
-      operation('post', '/sales/mrcomanda').responses['201'],
-    ).toMatchObject({
-      content: {
-        'application/json': {
-          schema: { $ref: '#/components/schemas/MrComandaSalesResponseDto' },
-        },
-      },
-    });
+  it('mantiene la consulta consolidada y el catálogo de medios publicados', () => {
+    expect(document.paths['/sales-dashboard']?.['get']).toBeDefined();
+    expect(document.paths['/payment-methods']?.['get']).toBeDefined();
+    expect(document.paths['/payment-methods']?.['post']).toBeDefined();
+    // Las lecturas históricas se conservan.
+    expect(document.paths['/tips']?.['get']).toBeDefined();
+    expect(document.paths['/cash-closings/{id}']?.['get']).toBeDefined();
   });
 });
