@@ -12,7 +12,6 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import {
   seedDatabase,
-  TIP_DEMO_AGREEMENT,
   TIP_DEMO_ENTRIES,
   TIP_DEMO_IDS,
   TIP_DEMO_PERIOD,
@@ -27,15 +26,21 @@ import type { AuthUser, JwtPayload } from '../src/auth/types/auth.types.js';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import type { PrismaService } from '../src/prisma/prisma.service.js';
 import { StoresService } from '../src/stores/stores.service.js';
-import { TipPoolsService } from '../src/tips/tip-pools.service.js';
-import { TipsService } from '../src/tips/tips.service.js';
+import { epochDay } from '../src/tips/calculation/equal-daily-distribution.calculator.js';
 import {
+  TipPoolsService,
+  VERSION_CONFLICT_MESSAGE,
+} from '../src/tips/tip-pools.service.js';
+import {
+  EQUAL_SHARES_RULE_NAME,
   TIP_POOL_ISSUE_CODE,
+  type TipPoolConflictBody,
   type TipPoolIssueCode,
   type TipPoolResponse,
   type TipPoolValidationErrorBody,
 } from '../src/tips/types/tip-pools.types.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
+import { createDailyOperation } from './helpers/daily-operations.js';
 import {
   ensureDefaultPaymentMethods,
   paymentMethodIdOf,
@@ -44,12 +49,17 @@ import {
 type App = Parameters<typeof request>[0];
 
 // Tests de integración del cálculo y vista previa del reparto de propinas
-// (SPRINT-3-T12) contra PostgreSQL real. Se omiten si no se define
-// TEST_DATABASE_URL.
+// (SPRINT-3-T12, regla equitativa de SPRINT-4R-T04) contra PostgreSQL real.
+// Se omiten si no se define TEST_DATABASE_URL.
 //
-// - El servicio se prueba dentro de withinRollback: TipPoolsService,
-//   StoresService y TipsService reciben la transacción del test en lugar de
-//   PrismaService, así todo lo que crean se revierte.
+// Todo cálculo nuevo es equitativo: el fondo de cada operación diaria
+// (tarjeta + efectivo) se divide una sola vez entre sus participantes y cada
+// trabajador recibe la suma de sus asignaciones diarias. Los repartos
+// proporcionales históricos (seed demo) se conservan tal cual.
+//
+// - El servicio se prueba dentro de withinRollback: TipPoolsService y
+//   StoresService reciben la transacción del test en lugar de PrismaService,
+//   así todo lo que crean se revierte.
 // - Roles, auditoría y concurrencia necesitan el pipeline HTTP completo y dos
 //   conexiones reales, que no caben en una transacción: esos tests usan un
 //   local propio ("Subway Tip Pools API Test") y correos
@@ -90,10 +100,10 @@ function transactionAsPrismaService(
 interface Fixture {
   tx: Prisma.TransactionClient;
   service: TipPoolsService;
-  tips: TipsService;
   storeId: string;
   accountant: AuthUser;
   supervisor: AuthUser;
+  // Ana, Beto y Carla, TRABAJADOR activos del local.
   workers: string[];
 }
 
@@ -124,7 +134,7 @@ async function createUser(
   tx: Prisma.TransactionClient,
   role: RoleCode,
   storeId: string | null,
-  overrides: { firstName?: string; isActive?: boolean } = {},
+  overrides: { firstName?: string } = {},
 ): Promise<AuthUser> {
   const email = `${randomUUID()}@tip-pools-test.invalid`;
   const user = await tx.user.create({
@@ -133,7 +143,6 @@ async function createUser(
       passwordHash: '$2b$04$hash-de-prueba',
       firstName: overrides.firstName ?? role,
       lastName: 'Reparto',
-      isActive: overrides.isActive ?? true,
       roleId: await roleId(tx, role),
       storeId,
     },
@@ -143,7 +152,6 @@ async function createUser(
 
 async function createFixture(tx: Prisma.TransactionClient): Promise<Fixture> {
   const prisma = transactionAsPrismaService(tx);
-  const stores = new StoresService(prisma);
   await ensureDefaultPaymentMethods(tx);
   const storeId = await createStore(tx);
   const accountant = await createUser(tx, ROLE.CONTADOR, null);
@@ -156,8 +164,7 @@ async function createFixture(tx: Prisma.TransactionClient): Promise<Fixture> {
   }
   return {
     tx,
-    service: new TipPoolsService(prisma, stores),
-    tips: new TipsService(prisma, stores),
+    service: new TipPoolsService(prisma, new StoresService(prisma)),
     storeId,
     accountant,
     supervisor,
@@ -165,86 +172,99 @@ async function createFixture(tx: Prisma.TransactionClient): Promise<Fixture> {
   };
 }
 
-async function addAgreement(
-  f: Fixture,
-  validFrom = '2026-01-01',
-  validTo: string | null = null,
-): Promise<string> {
-  const agreement = await f.tx.tipAgreement.create({
-    data: {
-      name: `Pacto desde ${validFrom}`,
-      rule: 'PROPORTIONAL_TO_HOURS',
-      validFrom: day(validFrom),
-      validTo: validTo ? day(validTo) : null,
-      storeId: f.storeId,
-      createdById: f.supervisor.id,
-    },
-  });
-  return agreement.id;
-}
-
-async function addEntry(
+function addOperation(
   f: Fixture,
   businessDate: string,
-  paymentMethodCode: string,
-  amount: number,
+  amounts: { card?: number; cash?: number },
+  participantIds: readonly string[],
 ): Promise<string> {
-  const paymentMethodId = await paymentMethodIdOf(f.tx, paymentMethodCode);
-  const entry = await f.tx.tipEntry.create({
-    data: {
-      businessDate: day(businessDate),
-      paymentMethodId,
-      amount,
-      storeId: f.storeId,
-      responsibleId: f.supervisor.id,
-    },
+  return createDailyOperation(f.tx, {
+    storeId: f.storeId,
+    responsibleId: f.supervisor.id,
+    businessDate,
+    cardTipAmount: amounts.card ?? 0,
+    cashTipAmount: amounts.cash ?? 0,
+    participantIds,
   });
-  return entry.id;
 }
 
-async function addHours(
-  f: Fixture,
-  workerId: string,
-  hoursWorked: number,
-  period: { start: string; end: string } = PERIOD,
-): Promise<string> {
-  const record = await f.tx.workHoursRecord.create({
-    data: {
-      periodStart: day(period.start),
-      periodEnd: day(period.end),
-      hoursWorked,
-      storeId: f.storeId,
-      workerId,
-      recordedById: f.supervisor.id,
-    },
-  });
-  return record.id;
+// Monto esperado de un día por participante: base para todos y el peso extra
+// en la posición (díaDesdeEpoch mod n) del orden por ID, como documenta el
+// calculador (aquí con residuo 1).
+function expectedSplit(
+  businessDate: string,
+  fund: number,
+  participantIds: readonly string[],
+): Record<string, number> {
+  const sorted = [...participantIds].sort();
+  const base = Math.floor(fund / sorted.length);
+  const residual = fund % sorted.length;
+  const offset = epochDay(businessDate) % sorted.length;
+  return Object.fromEntries(
+    sorted.map((id, index) => [
+      id,
+      base +
+        ((index - offset + sorted.length) % sorted.length < residual ? 1 : 0),
+    ]),
+  );
 }
 
-// Pacto vigente, dos registros dentro del período (12.000) y uno fuera, y
-// 10/20/30 horas: el reparto esperado es 2.000/4.000/6.000.
-async function seedHappyPath(f: Fixture): Promise<void> {
-  await addAgreement(f);
-  await addEntry(f, '2026-10-02', 'CASH', 8000);
-  await addEntry(f, '2026-10-15', 'DEBIT_CARD', 4000);
-  await addEntry(f, '2026-10-16', 'CASH', 99999);
-  await addHours(f, f.workers[0], 10);
-  await addHours(f, f.workers[1], 20);
-  await addHours(f, f.workers[2], 30);
+function addAmounts(
+  ...parts: Record<string, number>[]
+): Record<string, number> {
+  const total: Record<string, number> = {};
+  for (const part of parts) {
+    for (const [id, amount] of Object.entries(part)) {
+      total[id] = (total[id] ?? 0) + amount;
+    }
+  }
+  return total;
+}
+
+function amountsByUser(pool: TipPoolResponse): Record<string, number> {
+  return Object.fromEntries(
+    pool.lines.map((line) => [line.userId, line.amount]),
+  );
+}
+
+// Dos operaciones dentro del período (16.000) y una fuera: el 02-10 hay
+// $10.000 (tarjeta 7.000 + efectivo 3.000) entre los tres y el 08-10 $6.000
+// en efectivo entre Beto y Carla.
+async function seedHappyPath(f: Fixture): Promise<Record<string, number>> {
+  const [ana, beto, carla] = f.workers;
+  await addOperation(f, '2026-10-02', { card: 7000, cash: 3000 }, [
+    ana,
+    beto,
+    carla,
+  ]);
+  await addOperation(f, '2026-10-08', { cash: 6000 }, [beto, carla]);
+  await addOperation(f, '2026-10-16', { cash: 99999 }, [ana]);
+  return addAmounts(
+    expectedSplit('2026-10-02', 10000, [ana, beto, carla]),
+    expectedSplit('2026-10-08', 6000, [beto, carla]),
+  );
 }
 
 function preview(
   f: Fixture,
   period: { start: string; end: string } = PERIOD,
   storeId = f.storeId,
+  expectedVersion?: number,
 ) {
   return f.service.preview(
-    { storeId, periodStart: period.start, periodEnd: period.end },
+    {
+      storeId,
+      periodStart: period.start,
+      periodEnd: period.end,
+      ...(expectedVersion === undefined ? {} : { expectedVersion }),
+    },
     f.accountant,
   );
 }
 
-async function issueCodesOf(promise: Promise<unknown>): Promise<string[]> {
+async function issuesOf(
+  promise: Promise<unknown>,
+): Promise<TipPoolValidationErrorBody['issues']> {
   try {
     await promise;
   } catch (error) {
@@ -253,7 +273,7 @@ async function issueCodesOf(promise: Promise<unknown>): Promise<string[]> {
       error as UnprocessableEntityException
     ).getResponse() as TipPoolValidationErrorBody;
     expect(body.statusCode).toBe(422);
-    return body.issues.map((issue) => issue.code);
+    return body.issues;
   }
   throw new Error('Se esperaba una respuesta 422');
 }
@@ -262,7 +282,8 @@ async function expectIssues(
   f: Fixture,
   expected: TipPoolIssueCode[],
 ): Promise<void> {
-  expect(await issueCodesOf(preview(f))).toEqual(expected);
+  const issues = await issuesOf(preview(f));
+  expect(issues.map((issue) => issue.code)).toEqual(expected);
   expect(await f.tx.tipPool.count({ where: { storeId: f.storeId } })).toBe(0);
 }
 
@@ -271,7 +292,7 @@ function sumAmounts(items: { amount: number }[]): number {
 }
 
 describe.skipIf(!databaseUrl)(
-  'Cálculo del reparto de propinas (SPRINT-3-T12)',
+  'Cálculo del reparto equitativo de propinas (SPRINT-4R-T04)',
   () => {
     let prisma: PrismaClient;
 
@@ -301,67 +322,75 @@ describe.skipIf(!databaseUrl)(
       }
     }
 
-    it('guarda pool, líneas y fuentes del período y concilia con el total', async () => {
+    it('guarda pool, líneas y fuentes diarias del período y concilia con el total', async () => {
       await withinRollback(async (f) => {
-        await seedHappyPath(f);
+        const expected = await seedHappyPath(f);
         const result = await preview(f);
 
         expect(result.created).toBe(true);
         const pool = result.pool;
         expect(pool).toMatchObject({
           status: 'DRAFT',
+          version: 1,
           store: { id: f.storeId },
           periodStart: PERIOD.start,
           periodEnd: PERIOD.end,
-          agreement: {
-            rule: 'PROPORTIONAL_TO_HOURS',
-            validFrom: '2026-01-01',
-            validTo: null,
-          },
-          totalAmount: 12000,
-          totalHours: '60.00',
+          rule: 'EQUAL_SHARES',
+          agreement: null,
+          totalAmount: 16000,
+          totalHours: null,
           reconciled: true,
+          sources: [],
           calculatedBy: { id: f.accountant.id },
         });
-        expect(pool.lines).toEqual(
-          [
-            { userId: f.workers[0], hoursWorked: '10.00', amount: 2000 },
-            { userId: f.workers[1], hoursWorked: '20.00', amount: 4000 },
-            { userId: f.workers[2], hoursWorked: '30.00', amount: 6000 },
-          ]
-            .sort((a, b) => (a.userId < b.userId ? -1 : 1))
-            .map((line): unknown => expect.objectContaining(line)),
+        expect(amountsByUser(pool)).toEqual(expected);
+        expect(pool.lines.every((line) => line.hoursWorked === null)).toBe(
+          true,
         );
-        expect(pool.lines.map((line) => line.workerName)).toEqual(
-          expect.arrayContaining(['Ana Reparto', 'Beto Reparto']),
+        expect(pool.lines.map((line) => line.workerName).sort()).toEqual([
+          'Ana Reparto',
+          'Beto Reparto',
+          'Carla Reparto',
+        ]);
+        expect(pool.lines.map((line) => line.userId)).toEqual(
+          [...f.workers].sort(),
         );
-        expect(pool.sources).toEqual([
+        expect(pool.dailySources).toEqual([
           expect.objectContaining({
             businessDate: '2026-10-02',
-            paymentMethod: 'CASH',
-            paymentMethodName: 'Efectivo',
-            amount: 8000,
+            cardTipAmount: 7000,
+            cashTipAmount: 3000,
+            amount: 10000,
           }),
           expect.objectContaining({
-            businessDate: '2026-10-15',
-            paymentMethod: 'DEBIT_CARD',
-            paymentMethodName: 'Tarjeta de débito',
-            amount: 4000,
+            businessDate: '2026-10-08',
+            cardTipAmount: 0,
+            cashTipAmount: 6000,
+            amount: 6000,
           }),
         ]);
         expect(sumAmounts(pool.lines)).toBe(pool.totalAmount);
 
         const stored = await f.tx.tipPool.findUniqueOrThrow({
           where: { id: pool.id },
-          include: { lines: true, sources: true },
+          include: { lines: true, sources: true, dailyOperationSources: true },
         });
         expect(stored.status).toBe('DRAFT');
-        expect(stored.notes).toBeNull();
+        expect(stored.agreementId).toBeNull();
+        expect(stored.agreementSnapshot).toEqual({
+          rule: 'EQUAL_SHARES',
+          name: EQUAL_SHARES_RULE_NAME,
+          capturedAt: expect.any(String) as string,
+        });
         expect(stored.calculatedById).toBe(f.accountant.id);
-        expect(stored.lines).toHaveLength(3);
-        expect(stored.sources).toHaveLength(2);
+        expect(stored.sources).toHaveLength(0);
+        expect(stored.dailyOperationSources).toHaveLength(2);
+        // Sin horas inventadas: la base las guarda NULL (trigger T02).
         expect(
-          stored.lines.every((line) => line.workHoursRecordId !== null),
+          stored.lines.every(
+            (line) =>
+              line.hoursWorked === null && line.workHoursRecordId === null,
+          ),
         ).toBe(true);
         expect(
           stored.lines.reduce(
@@ -369,63 +398,126 @@ describe.skipIf(!databaseUrl)(
             new Prisma.Decimal(0),
           ),
         ).toEqual(stored.totalAmount);
-        // Mismas claves que el snapshot del seed demo (SPRINT-3-T09).
-        expect(stored.agreementSnapshot).toEqual(
-          expect.objectContaining({
-            id: stored.agreementId,
-            name: 'Pacto desde 2026-01-01',
-            rule: 'PROPORTIONAL_TO_HOURS',
-            validFrom: '2026-01-01',
-            validTo: null,
-          }),
-        );
-        expect(Object.keys(stored.agreementSnapshot ?? {})).toEqual(
-          expect.arrayContaining(Object.keys(TIP_DEMO_POOL.agreementSnapshot)),
-        );
       });
     });
 
-    it('incluye en el fondo las propinas de medios desactivados, con código y nombre', async () => {
+    it('$10.000 entre 3 asigna $3.334, $3.333 y $3.333 con la regla documentada', async () => {
       await withinRollback(async (f) => {
-        await addAgreement(f);
-        // Junaeb no admite propinas hoy, pero el registro histórico existe:
-        // sigue alimentando el reparto con su monto y su medio.
-        const junaeb = await f.tx.paymentMethod.create({
+        await addOperation(f, '2026-10-05', { cash: 10000 }, f.workers);
+        const pool = (await preview(f)).pool;
+
+        expect(pool.lines.map((line) => line.amount).sort()).toEqual([
+          3333, 3333, 3334,
+        ]);
+        // El peso extra va a la posición (díaDesdeEpoch mod 3) por ID.
+        expect(amountsByUser(pool)).toEqual(
+          expectedSplit('2026-10-05', 10000, f.workers),
+        );
+        expect(sumAmounts(pool.lines)).toBe(10000);
+      });
+    });
+
+    it('en varios días cada uno recibe la suma de sus asignaciones, no una división entre la unión', async () => {
+      await withinRollback(async (f) => {
+        const [ana, beto, carla] = f.workers;
+        await addOperation(f, '2026-10-01', { card: 10000 }, [ana, beto]);
+        await addOperation(f, '2026-10-02', { cash: 6000 }, [carla]);
+        const pool = (await preview(f)).pool;
+
+        // Dividir 16.000 entre la unión daría 5.333 a cada uno.
+        expect(amountsByUser(pool)).toEqual({
+          [ana]: 5000,
+          [beto]: 5000,
+          [carla]: 6000,
+        });
+      });
+    });
+
+    it('un no seleccionado no recibe línea ni monto', async () => {
+      await withinRollback(async (f) => {
+        const [ana, beto, carla] = f.workers;
+        await addOperation(f, '2026-10-03', { cash: 9000 }, [ana, carla]);
+        const pool = (await preview(f)).pool;
+
+        expect(pool.lines.map((line) => line.userId)).toEqual(
+          [ana, carla].sort(),
+        );
+        expect(pool.lines.some((line) => line.userId === beto)).toBe(false);
+        expect(amountsByUser(pool)).toEqual({ [ana]: 4500, [carla]: 4500 });
+      });
+    });
+
+    it('un día sin propinas no exige participantes y no genera líneas', async () => {
+      await withinRollback(async (f) => {
+        await addOperation(f, '2026-10-03', {}, []);
+        await addOperation(f, '2026-10-04', { cash: 3000 }, [f.workers[0]]);
+        const pool = (await preview(f)).pool;
+
+        expect(pool.totalAmount).toBe(3000);
+        expect(pool.lines).toHaveLength(1);
+        expect(pool.dailySources.map((source) => source.amount)).toEqual([
+          0, 3000,
+        ]);
+      });
+    });
+
+    it('un trabajador desactivado después conserva su asignación del día', async () => {
+      await withinRollback(async (f) => {
+        const [ana, beto] = f.workers;
+        await addOperation(f, '2026-10-03', { cash: 8000 }, [ana, beto]);
+        // La baja lógica posterior no borra la selección (T02): lo trabajado
+        // ese día se le reparte igual.
+        await f.tx.user.update({
+          where: { id: beto },
+          data: { isActive: false },
+        });
+        const pool = (await preview(f)).pool;
+
+        expect(amountsByUser(pool)).toEqual({ [ana]: 4000, [beto]: 4000 });
+      });
+    });
+
+    it('no usa pactos, horas ni registros históricos: la regla siempre es equitativa', async () => {
+      await withinRollback(async (f) => {
+        const [ana, beto, carla] = f.workers;
+        // Un pacto proporcional vigente, horas y propinas del flujo antiguo
+        // no cambian la regla ni el fondo.
+        await f.tx.tipAgreement.create({
           data: {
-            code: `TIPSTEST_JUNAEB_${randomUUID().replace(/-/g, '').slice(0, 8)}`,
-            name: 'Junaeb histórico',
-            behavior: 'EXTERNAL_OTHER',
-            sortOrder: 90,
-            isActive: false,
-            availableForTips: false,
+            name: 'Pacto proporcional antiguo',
+            rule: 'PROPORTIONAL_TO_HOURS',
+            validFrom: day('2026-01-01'),
+            storeId: f.storeId,
+            createdById: f.supervisor.id,
+          },
+        });
+        await f.tx.workHoursRecord.create({
+          data: {
+            periodStart: day(PERIOD.start),
+            periodEnd: day(PERIOD.end),
+            hoursWorked: 99,
+            storeId: f.storeId,
+            workerId: ana,
+            recordedById: f.supervisor.id,
           },
         });
         await f.tx.tipEntry.create({
           data: {
             businessDate: day('2026-10-02'),
-            paymentMethodId: junaeb.id,
-            amount: 7000,
+            paymentMethodId: await paymentMethodIdOf(f.tx, 'CASH'),
+            amount: 50000,
             storeId: f.storeId,
             responsibleId: f.supervisor.id,
           },
         });
-        await addEntry(f, '2026-10-15', 'CASH', 5000);
-        await addHours(f, f.workers[0], 10);
+        await addOperation(f, '2026-10-02', { cash: 6000 }, [beto, carla]);
 
-        const result = await preview(f);
-        expect(result.pool.totalAmount).toBe(12000);
-        expect(result.pool.sources).toEqual([
-          expect.objectContaining({
-            paymentMethod: junaeb.code,
-            paymentMethodName: 'Junaeb histórico',
-            amount: 7000,
-          }),
-          expect.objectContaining({
-            paymentMethod: 'CASH',
-            paymentMethodName: 'Efectivo',
-            amount: 5000,
-          }),
-        ]);
+        const pool = (await preview(f)).pool;
+        expect(pool.rule).toBe('EQUAL_SHARES');
+        expect(pool.agreement).toBeNull();
+        expect(pool.totalAmount).toBe(6000);
+        expect(pool.sources).toEqual([]);
+        expect(amountsByUser(pool)).toEqual({ [beto]: 3000, [carla]: 3000 });
       });
     });
 
@@ -439,208 +531,116 @@ describe.skipIf(!databaseUrl)(
     });
 
     describe('responde 422 con cada causa y no guarda nada', () => {
-      it('AGREEMENT_MISSING', async () => {
+      it('DAILY_OPERATIONS_MISSING', async () => {
         await withinRollback(async (f) => {
-          await addEntry(f, '2026-10-02', 'CASH', 1000);
-          await addHours(f, f.workers[0], 10);
-          await addAgreement(f, '2026-01-01', '2026-09-30');
-          await expectIssues(f, [TIP_POOL_ISSUE_CODE.AGREEMENT_MISSING]);
+          await addOperation(f, '2026-10-20', { cash: 1000 }, [f.workers[0]]);
+          await expectIssues(f, [TIP_POOL_ISSUE_CODE.DAILY_OPERATIONS_MISSING]);
         });
       });
 
-      it('AGREEMENT_CHANGES_IN_PERIOD', async () => {
+      it('DAILY_PARTICIPANTS_MISSING: un fondo positivo sin participantes impide calcular', async () => {
         await withinRollback(async (f) => {
-          await addAgreement(f, '2026-01-01', '2026-10-07');
-          await addAgreement(f, '2026-10-08');
-          await addEntry(f, '2026-10-02', 'CASH', 1000);
-          await addHours(f, f.workers[0], 10);
-          await expectIssues(f, [
-            TIP_POOL_ISSUE_CODE.AGREEMENT_CHANGES_IN_PERIOD,
-          ]);
-        });
-      });
+          await addOperation(f, '2026-10-02', { cash: 5000 }, [f.workers[0]]);
+          const orphanId = await addOperation(
+            f,
+            '2026-10-03',
+            { cash: 4500 },
+            [],
+          );
+          const issues = await issuesOf(preview(f));
 
-      // AGREEMENT_RULE_UNSUPPORTED: desde SPRINT-4R-T02 el enum
-      // TipAgreementRule también tiene EQUAL_SHARES (reparto equitativo de la
-      // operación diaria, que SPRINT-4R-T04 calcula). El motor histórico no
-      // la reinterpreta: responde 422 y no guarda nada, como muestra el test
-      // siguiente. Lo demás de la causa lo cubre el test unitario de
-      // tip-pool-validation.spec.ts.
-
-      it('AGREEMENT_RULE_UNSUPPORTED con pacto equitativo: el motor histórico no lo calcula', async () => {
-        await withinRollback(async (f) => {
-          // El pacto equitativo (reparto entre participantes de la operación
-          // diaria) existe en el enum pero este motor solo calcula la regla
-          // proporcional: lo reporta sin tocar nada.
-          await f.tx.tipAgreement.create({
-            data: {
-              name: 'Pacto equitativo',
-              rule: 'EQUAL_SHARES',
-              validFrom: day('2026-01-01'),
-              validTo: null,
-              storeId: f.storeId,
-              createdById: f.supervisor.id,
+          expect(issues).toEqual([
+            {
+              code: TIP_POOL_ISSUE_CODE.DAILY_PARTICIPANTS_MISSING,
+              message: expect.stringContaining(
+                'ningún trabajador participante',
+              ) as string,
+              details: {
+                operations: [
+                  {
+                    operationId: orphanId,
+                    businessDate: '2026-10-03',
+                    tipFundAmount: 4500,
+                  },
+                ],
+              },
             },
-          });
-          await addEntry(f, '2026-10-02', 'CASH', 1000);
-          await addHours(f, f.workers[0], 10);
-          await expectIssues(f, [
-            TIP_POOL_ISSUE_CODE.AGREEMENT_RULE_UNSUPPORTED,
           ]);
-        });
-      });
-
-      it('TIP_ENTRIES_MISSING', async () => {
-        await withinRollback(async (f) => {
-          await addAgreement(f);
-          await addEntry(f, '2026-10-20', 'CASH', 1000);
-          await addHours(f, f.workers[0], 10);
-          await expectIssues(f, [TIP_POOL_ISSUE_CODE.TIP_ENTRIES_MISSING]);
-        });
-      });
-
-      it('TIP_ENTRY_ALREADY_USED', async () => {
-        await withinRollback(async (f) => {
-          await seedHappyPath(f);
-          // Otro reparto (período solapado) ya usa el registro del 2 de octubre.
-          const entry = await f.tx.tipEntry.findFirstOrThrow({
-            where: { storeId: f.storeId, businessDate: day('2026-10-02') },
-          });
-          const other = await f.tx.tipPool.create({
-            data: {
-              storeId: f.storeId,
-              periodStart: day('2026-09-28'),
-              periodEnd: day('2026-10-04'),
-              totalAmount: 8000,
-              calculatedById: f.accountant.id,
-            },
-          });
-          await f.tx.tipPoolSource.create({
-            data: { poolId: other.id, tipEntryId: entry.id, amount: 8000 },
-          });
-
-          const codes = await issueCodesOf(preview(f));
-          expect(codes).toEqual([TIP_POOL_ISSUE_CODE.TIP_ENTRY_ALREADY_USED]);
-          expect(
-            await f.tx.tipPool.count({ where: { storeId: f.storeId } }),
-          ).toBe(1);
-        });
-      });
-
-      it('WORK_HOURS_MISSING', async () => {
-        await withinRollback(async (f) => {
-          await addAgreement(f);
-          await addEntry(f, '2026-10-02', 'CASH', 1000);
-          await expectIssues(f, [TIP_POOL_ISSUE_CODE.WORK_HOURS_MISSING]);
-        });
-      });
-
-      it('WORK_HOURS_PERIOD_MISMATCH', async () => {
-        await withinRollback(async (f) => {
-          await addAgreement(f);
-          await addEntry(f, '2026-10-02', 'CASH', 1000);
-          await addHours(f, f.workers[0], 10);
-          await addHours(f, f.workers[1], 10, {
-            start: '2026-10-01',
-            end: '2026-10-14',
-          });
-          await expectIssues(f, [
-            TIP_POOL_ISSUE_CODE.WORK_HOURS_PERIOD_MISMATCH,
-          ]);
-        });
-      });
-
-      it('WORK_HOURS_TOTAL_ZERO', async () => {
-        await withinRollback(async (f) => {
-          await addAgreement(f);
-          await addEntry(f, '2026-10-02', 'CASH', 1000);
-          await addHours(f, f.workers[0], 0);
-          await addHours(f, f.workers[1], 0);
-          await expectIssues(f, [TIP_POOL_ISSUE_CODE.WORK_HOURS_TOTAL_ZERO]);
-        });
-      });
-
-      it('WORKER_NOT_IN_STORE por otro local y por usuario inactivo', async () => {
-        await withinRollback(async (f) => {
-          await addAgreement(f);
-          await addEntry(f, '2026-10-02', 'CASH', 1000);
-          await addHours(f, f.workers[0], 10);
-          const otherStore = await createStore(f.tx);
-          const outsider = await createUser(f.tx, ROLE.TRABAJADOR, otherStore);
-          const inactive = await createUser(f.tx, ROLE.TRABAJADOR, f.storeId, {
-            isActive: false,
-          });
-          await addHours(f, outsider.id, 5);
-          await addHours(f, inactive.id, 5);
-
-          try {
-            await preview(f);
-            throw new Error('Se esperaba una respuesta 422');
-          } catch (error) {
-            const body = (
-              error as UnprocessableEntityException
-            ).getResponse() as TipPoolValidationErrorBody;
-            expect(body.issues).toEqual([
-              expect.objectContaining({
-                code: TIP_POOL_ISSUE_CODE.WORKER_NOT_IN_STORE,
-                details: {
-                  workers: expect.arrayContaining([
-                    expect.objectContaining({
-                      userId: outsider.id,
-                      reason: 'OTHER_STORE',
-                    }),
-                    expect.objectContaining({
-                      userId: inactive.id,
-                      reason: 'INACTIVE',
-                    }),
-                  ]) as unknown,
-                },
-              }),
-            ]);
-          }
           expect(
             await f.tx.tipPool.count({ where: { storeId: f.storeId } }),
           ).toBe(0);
         });
       });
 
+      it('DAILY_OPERATION_ALREADY_USED por un reparto de período solapado', async () => {
+        await withinRollback(async (f) => {
+          await seedHappyPath(f);
+          const other = (
+            await preview(f, { start: '2026-09-28', end: '2026-10-04' })
+          ).pool;
+          expect(other.dailySources).toHaveLength(1);
+
+          const issues = await issuesOf(preview(f));
+          expect(issues).toEqual([
+            expect.objectContaining({
+              code: TIP_POOL_ISSUE_CODE.DAILY_OPERATION_ALREADY_USED,
+              details: {
+                operations: [
+                  {
+                    operationId: other.dailySources[0].operationId,
+                    businessDate: '2026-10-02',
+                    poolId: other.id,
+                  },
+                ],
+              },
+            }),
+          ]);
+          expect(
+            await f.tx.tipPool.count({ where: { storeId: f.storeId } }),
+          ).toBe(1);
+        });
+      });
+
       it('devuelve todas las causas a la vez', async () => {
         await withinRollback(async (f) => {
-          await addHours(f, f.workers[0], 10);
-          await expectIssues(f, [
-            TIP_POOL_ISSUE_CODE.AGREEMENT_MISSING,
-            TIP_POOL_ISSUE_CODE.TIP_ENTRIES_MISSING,
+          await seedHappyPath(f);
+          await preview(f, { start: '2026-10-02', end: '2026-10-02' });
+          await addOperation(f, '2026-10-09', { cash: 100 }, []);
+          const issues = await issuesOf(preview(f));
+          expect(issues.map((issue) => issue.code)).toEqual([
+            TIP_POOL_ISSUE_CODE.DAILY_OPERATION_ALREADY_USED,
+            TIP_POOL_ISSUE_CODE.DAILY_PARTICIPANTS_MISSING,
           ]);
         });
       });
     });
 
-    it('regenerar un DRAFT reemplaza líneas y fuentes y conserva el id', async () => {
+    it('recalcular un DRAFT reemplaza líneas y fuentes, conserva el id y sube la versión', async () => {
       await withinRollback(async (f) => {
-        await seedHappyPath(f);
+        const [ana, beto, carla] = f.workers;
+        await addOperation(f, '2026-10-02', { cash: 9000 }, [ana, beto, carla]);
         const first = (await preview(f)).pool;
         const oldLineIds = (
           await f.tx.tipPoolLine.findMany({ where: { poolId: first.id } })
         ).map((line) => line.id);
 
-        await addEntry(f, '2026-10-03', 'TRANSFER', 3000);
-        await f.tx.workHoursRecord.updateMany({
-          where: { workerId: f.workers[2] },
-          data: { hoursWorked: 0 },
+        // Se agrega otro día y se corrige la selección del primero (el
+        // borrador lo permite): el recálculo toma el estado vigente.
+        await addOperation(f, '2026-10-03', { card: 3000 }, [carla]);
+        const firstOperation = first.dailySources[0].operationId;
+        await f.tx.dailyOperationParticipant.deleteMany({
+          where: { operationId: firstOperation, workerId: ana },
         });
-        const second = await preview(f);
+        const second = await preview(f, PERIOD, f.storeId, first.version);
 
         expect(second.created).toBe(false);
         expect(second.pool.id).toBe(first.id);
-        expect(second.pool.totalAmount).toBe(15000);
-        expect(second.pool.sources).toHaveLength(3);
-        const byUser = Object.fromEntries(
-          second.pool.lines.map((line) => [line.userId, line.amount]),
-        );
-        expect(byUser).toEqual({
-          [f.workers[0]]: 5000,
-          [f.workers[1]]: 10000,
-          [f.workers[2]]: 0,
+        expect(second.pool.version).toBe(first.version + 1);
+        expect(second.pool.totalAmount).toBe(12000);
+        expect(second.pool.dailySources).toHaveLength(2);
+        expect(amountsByUser(second.pool)).toEqual({
+          [beto]: 4500,
+          [carla]: 7500,
         });
         expect(
           await f.tx.tipPool.count({ where: { storeId: f.storeId } }),
@@ -649,8 +649,48 @@ describe.skipIf(!databaseUrl)(
           await f.tx.tipPoolLine.count({ where: { id: { in: oldLineIds } } }),
         ).toBe(0);
         expect(
-          await f.tx.tipPoolSource.count({ where: { poolId: first.id } }),
-        ).toBe(3);
+          await f.tx.tipPoolDailyOperationSource.count({
+            where: { poolId: first.id },
+          }),
+        ).toBe(2);
+      });
+    });
+
+    it('recalcular con expectedVersion desactualizado responde 409 y no toca la foto', async () => {
+      await withinRollback(async (f) => {
+        await seedHappyPath(f);
+        const first = (await preview(f)).pool;
+        const observed = await f.service.observe(
+          first.id,
+          { expectedVersion: first.version, notes: 'Revisar el 08-10' },
+          f.accountant,
+        );
+
+        let body: TipPoolConflictBody | null = null;
+        try {
+          await preview(f, PERIOD, f.storeId, first.version);
+        } catch (error) {
+          expect(error).toBeInstanceOf(ConflictException);
+          body = (
+            error as ConflictException
+          ).getResponse() as TipPoolConflictBody;
+        }
+        expect(body).toEqual({
+          statusCode: 409,
+          message: VERSION_CONFLICT_MESSAGE,
+          currentStatus: 'DRAFT',
+          currentVersion: observed.version,
+        });
+        const stored = await f.service.findOne(first.id, f.accountant);
+        expect(stored.version).toBe(observed.version);
+        expect(stored.notes).toBe('Revisar el 08-10');
+        expect(stored.lines).toEqual(first.lines);
+
+        // Con la versión vigente el recálculo procede y limpia la observación.
+        const again = await preview(f, PERIOD, f.storeId, observed.version);
+        expect(again.previousNotes).toBe('Revisar el 08-10');
+        expect(again.pool.version).toBe(observed.version + 1);
+        expect(again.pool.notes).toBeNull();
       });
     });
 
@@ -660,81 +700,29 @@ describe.skipIf(!databaseUrl)(
         await withinRollback(async (f) => {
           await seedHappyPath(f);
           const pool = (await preview(f)).pool;
-          await f.tx.tipPool.update({
-            where: { id: pool.id },
-            data: {
-              status: 'CONFIRMED',
-              confirmedAt: new Date(),
-              confirmedById: f.accountant.id,
-            },
-          });
-          // Desde SPRINT-3-T13 PAID exige pasar por CONFIRMED y los datos del
-          // pago (CHECK y triggers de tip_pools).
+          const confirmed = await f.service.confirm(
+            pool.id,
+            { expectedVersion: pool.version },
+            f.accountant,
+          );
           if (status === 'PAID') {
-            await f.tx.tipPool.update({
-              where: { id: pool.id },
-              data: {
-                status,
-                paidAt: new Date(),
-                paidById: f.accountant.id,
-                paymentDate: day(PERIOD.end),
-                version: { increment: 1 },
-              },
-            });
+            await f.service.pay(
+              pool.id,
+              { expectedVersion: confirmed.version, paymentDate: '2026-10-20' },
+              f.accountant,
+            );
           }
-          await addEntry(f, '2026-10-03', 'TRANSFER', 3000);
+          await addOperation(f, '2026-10-03', { cash: 3000 }, [f.workers[0]]);
 
           await expect(preview(f)).rejects.toBeInstanceOf(ConflictException);
           const stored = await f.service.findOne(pool.id, f.accountant);
           expect(stored.status).toBe(status);
-          expect(stored.totalAmount).toBe(12000);
-          expect(stored.sources).toHaveLength(2);
+          expect(stored.totalAmount).toBe(16000);
+          expect(stored.lines).toEqual(pool.lines);
+          expect(stored.dailySources).toEqual(pool.dailySources);
         });
       },
     );
-
-    it('la foto guardada no cambia si después cambian el pacto o las horas', async () => {
-      await withinRollback(async (f) => {
-        await seedHappyPath(f);
-        const original = (await preview(f)).pool;
-
-        await f.tx.tipAgreement.updateMany({
-          where: { storeId: f.storeId },
-          data: { name: 'Pacto renombrado', validTo: day('2026-12-31') },
-        });
-        await f.tx.workHoursRecord.updateMany({
-          where: { storeId: f.storeId },
-          data: { hoursWorked: 99 },
-        });
-
-        const stored = await f.service.findOne(original.id, f.accountant);
-        expect(stored.agreement).toEqual(original.agreement);
-        expect(stored.agreement?.name).toBe('Pacto desde 2026-01-01');
-        expect(stored.agreement?.validTo).toBeNull();
-        expect(stored.lines).toEqual(original.lines);
-        expect(stored.totalHours).toBe('60.00');
-        expect(stored.reconciled).toBe(true);
-      });
-    });
-
-    it('bloquea editar o borrar un registro diario usado por la vista previa', async () => {
-      await withinRollback(async (f) => {
-        await seedHappyPath(f);
-        const pool = (await preview(f)).pool;
-        const entryId = pool.sources[0].tipEntryId;
-
-        await expect(
-          f.tips.update(entryId, { amount: 1 }, f.supervisor),
-        ).rejects.toBeInstanceOf(ConflictException);
-        await expect(
-          f.tips.remove(entryId, f.supervisor),
-        ).rejects.toBeInstanceOf(ConflictException);
-        const entry = await f.tx.tipEntry.findUniqueOrThrow({
-          where: { id: entryId },
-        });
-        expect(Number(entry.amount)).toBe(8000);
-      });
-    });
 
     it('consulta por ID responde 404 si no existe o el usuario no accede al local', async () => {
       await withinRollback(async (f) => {
@@ -755,7 +743,7 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
-    it('reemplaza el DRAFT del seed demo y obtiene 10.000 / 15.000 (total 25.000)', async () => {
+    it('conserva el DRAFT proporcional histórico del seed demo y su recálculo usa la regla equitativa', async () => {
       await withinRollback(async (f) => {
         // Recrea las fixtures demo dentro de la transacción (upsert por UUID
         // fijo), sin depender de que el seed se haya ejecutado antes.
@@ -766,42 +754,80 @@ describe.skipIf(!databaseUrl)(
           adminLastName: 'Reparto',
           includeDemoData: true,
         });
+        const demoPeriod = {
+          start: TIP_DEMO_PERIOD.start.toISOString().slice(0, 10),
+          end: TIP_DEMO_PERIOD.end.toISOString().slice(0, 10),
+        };
 
-        const result = await preview(
-          f,
-          {
-            start: TIP_DEMO_PERIOD.start.toISOString().slice(0, 10),
-            end: TIP_DEMO_PERIOD.end.toISOString().slice(0, 10),
-          },
-          TIP_DEMO_STORE.id,
-        );
-
-        expect(result.created).toBe(false);
-        expect(result.pool.id).toBe(TIP_DEMO_POOL.id);
-        expect(result.pool.totalAmount).toBe(TIP_DEMO_POOL.totalAmount);
-        expect(result.pool.agreement).toMatchObject(
-          TIP_DEMO_POOL.agreementSnapshot,
-        );
+        // Compatibilidad: la foto proporcional se lee igual que antes.
+        const legacy = await f.service.findOne(TIP_DEMO_POOL.id, f.accountant);
+        expect(legacy).toMatchObject({
+          rule: 'PROPORTIONAL_TO_HOURS',
+          totalAmount: TIP_DEMO_POOL.totalAmount,
+          totalHours: '100.00',
+          dailySources: [],
+          reconciled: true,
+        });
+        expect(legacy.agreement).toMatchObject(TIP_DEMO_POOL.agreementSnapshot);
         expect(
           Object.fromEntries(
-            result.pool.lines.map((line) => [line.userId, line.amount]),
+            legacy.lines.map((line) => [
+              line.userId,
+              [line.hoursWorked, line.amount],
+            ]),
           ),
         ).toEqual(
           Object.fromEntries(
             TIP_DEMO_WORKER_PERIODS.map((worker) => [
               worker.workerId,
-              worker.lineAmount,
+              [worker.hoursWorked.toFixed(2), worker.lineAmount],
             ]),
           ),
         );
         expect(
-          result.pool.sources.map((source) => source.tipEntryId).sort(),
+          legacy.sources.map((source) => source.tipEntryId).sort(),
         ).toEqual(TIP_DEMO_ENTRIES.map((entry) => entry.id).sort());
-        expect(sumAmounts(result.pool.lines)).toBe(25000);
-        expect(result.pool.agreement?.id).toBe(TIP_DEMO_AGREEMENT.id);
-        expect(result.pool.lines.map((line) => line.userId)).toEqual(
-          [TIP_DEMO_IDS.workerOne, TIP_DEMO_IDS.workerTwo].sort(),
+
+        // Sin operaciones diarias en el período el recálculo no procede y la
+        // foto histórica queda intacta.
+        const issues = await issuesOf(
+          preview(f, demoPeriod, TIP_DEMO_STORE.id),
         );
+        expect(issues.map((issue) => issue.code)).toEqual([
+          TIP_POOL_ISSUE_CODE.DAILY_OPERATIONS_MISSING,
+        ]);
+        expect(await f.service.findOne(TIP_DEMO_POOL.id, f.accountant)).toEqual(
+          legacy,
+        );
+
+        // Con operaciones diarias, recalcular reemplaza la foto por la
+        // equitativa y libera los registros históricos.
+        await createDailyOperation(f.tx, {
+          storeId: TIP_DEMO_STORE.id,
+          responsibleId: TIP_DEMO_IDS.supervisor,
+          businessDate: demoPeriod.start,
+          cashTipAmount: 20000,
+          participantIds: [TIP_DEMO_IDS.workerOne, TIP_DEMO_IDS.workerTwo],
+        });
+        const result = await preview(f, demoPeriod, TIP_DEMO_STORE.id);
+        expect(result.created).toBe(false);
+        expect(result.pool).toMatchObject({
+          id: TIP_DEMO_POOL.id,
+          rule: 'EQUAL_SHARES',
+          agreement: null,
+          totalAmount: 20000,
+          totalHours: null,
+          sources: [],
+        });
+        expect(amountsByUser(result.pool)).toEqual({
+          [TIP_DEMO_IDS.workerOne]: 10000,
+          [TIP_DEMO_IDS.workerTwo]: 10000,
+        });
+        expect(
+          await f.tx.tipPoolSource.count({
+            where: { poolId: TIP_DEMO_POOL.id },
+          }),
+        ).toBe(0);
       });
     });
   },
@@ -816,7 +842,7 @@ const HTTP_PERIOD = { start: '2026-03-01', end: '2026-03-15' } as const;
 const CONCURRENT_PERIOD = { start: '2026-04-01', end: '2026-04-15' } as const;
 
 describe.skipIf(!databaseUrl)(
-  'API de vista previa del reparto (SPRINT-3-T12)',
+  'API de vista previa del reparto equitativo (SPRINT-4R-T04)',
   () => {
     let app: INestApplication<App>;
     let prisma: PrismaClient;
@@ -829,16 +855,37 @@ describe.skipIf(!databaseUrl)(
       await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
         const storeWhere = { name: { startsWith: STORE_NAME } };
-        await tx.tipPoolSource.deleteMany({
+        await tx.tipPoolDailyOperationSource.deleteMany({
           where: { pool: { store: storeWhere } },
         });
         await tx.tipPoolLine.deleteMany({
           where: { pool: { store: storeWhere } },
         });
         await tx.tipPool.deleteMany({ where: { store: storeWhere } });
-        await tx.tipAgreement.deleteMany({ where: { store: storeWhere } });
-        await tx.workHoursRecord.deleteMany({ where: { store: storeWhere } });
-        await tx.tipEntry.deleteMany({ where: { store: storeWhere } });
+        const operations = await tx.dailyOperation.findMany({
+          where: { store: storeWhere },
+          select: { voucherId: true },
+        });
+        // En modo replica las cascadas (triggers de FK) no corren: los
+        // participantes se borran explícitamente antes que su operación.
+        await tx.dailyOperationParticipant.deleteMany({
+          where: {
+            OR: [
+              { operation: { store: storeWhere } },
+              { worker: { email: { endsWith: DOMAIN } } },
+            ],
+          },
+        });
+        await tx.dailyOperation.deleteMany({ where: { store: storeWhere } });
+        await tx.dailyOperationVoucher.deleteMany({
+          where: {
+            id: {
+              in: operations.flatMap((operation) =>
+                operation.voucherId ? [operation.voucherId] : [],
+              ),
+            },
+          },
+        });
       });
       await purgeTestAuditLogs(prisma, {
         OR: [
@@ -880,48 +927,33 @@ describe.skipIf(!databaseUrl)(
       tokens[name] = await jwt.signAsync(payload);
     }
 
+    // Dos operaciones por período: tarjeta 7.000 el primer día y efectivo
+    // 3.001 el último, ambas entre los dos trabajadores (fondo 10.001).
     async function seedPeriod(period: {
       start: string;
       end: string;
     }): Promise<void> {
-      const cashId = await paymentMethodIdOf(prisma, 'CASH');
-      const creditId = await paymentMethodIdOf(prisma, 'CREDIT_CARD');
-      await prisma.tipEntry.createMany({
-        data: [
-          {
-            businessDate: day(period.start),
-            paymentMethodId: cashId,
-            amount: 7000,
-            storeId,
-            responsibleId: ids.supervisor,
-          },
-          {
-            businessDate: day(period.end),
-            paymentMethodId: creditId,
-            amount: 3001,
-            storeId,
-            responsibleId: ids.supervisor,
-          },
-        ],
+      const participantIds = [ids.workerOne, ids.workerTwo];
+      await createDailyOperation(prisma, {
+        storeId,
+        responsibleId: ids.supervisor,
+        businessDate: period.start,
+        cardTipAmount: 7000,
+        participantIds,
       });
-      await prisma.workHoursRecord.createMany({
-        data: [
-          { worker: 'workerOne', hours: 12.5 },
-          { worker: 'workerTwo', hours: 37.5 },
-        ].map(({ worker, hours }) => ({
-          periodStart: day(period.start),
-          periodEnd: day(period.end),
-          hoursWorked: hours,
-          storeId,
-          workerId: ids[worker],
-          recordedById: ids.supervisor,
-        })),
+      await createDailyOperation(prisma, {
+        storeId,
+        responsibleId: ids.supervisor,
+        businessDate: period.end,
+        cashTipAmount: 3001,
+        participantIds,
       });
     }
 
     function postPreview(
       token: string,
       period: { start: string; end: string } = HTTP_PERIOD,
+      extra: Record<string, unknown> = {},
     ) {
       return request(app.getHttpServer())
         .post('/tip-pools/preview')
@@ -930,6 +962,7 @@ describe.skipIf(!databaseUrl)(
           storeId,
           periodStart: period.start,
           periodEnd: period.end,
+          ...extra,
         });
     }
 
@@ -986,15 +1019,6 @@ describe.skipIf(!databaseUrl)(
       await createApiUser('workerOne', ROLE.TRABAJADOR, storeId);
       await createApiUser('workerTwo', ROLE.TRABAJADOR, storeId);
 
-      await prisma.tipAgreement.create({
-        data: {
-          name: 'Pacto API Test',
-          rule: 'PROPORTIONAL_TO_HOURS',
-          validFrom: day('2026-01-01'),
-          storeId,
-          createdById: ids.supervisor,
-        },
-      });
       await seedPeriod(HTTP_PERIOD);
       await seedPeriod(CONCURRENT_PERIOD);
     }, 60_000);
@@ -1015,23 +1039,42 @@ describe.skipIf(!databaseUrl)(
     it('calcula, recalcula y audita cada operación', async () => {
       const created = (await postPreview(tokens.accountant).expect(201))
         .body as TipPoolResponse;
-      // 10.001 × 12,5 / 50 = 2.500,25 y 10.001 × 37,5 / 50 = 7.500,75: el CLP
-      // sobrante va al mayor resto (0,75).
       expect(created).toMatchObject({
         status: 'DRAFT',
+        rule: 'EQUAL_SHARES',
+        agreement: null,
         totalAmount: 10001,
-        totalHours: '50.00',
+        totalHours: null,
         reconciled: true,
       });
+      // 7.000 en partes iguales y 3.001 con el peso extra rotado al día.
       expect(
         Object.fromEntries(
           created.lines.map((line) => [line.userId, line.amount]),
         ),
-      ).toEqual({ [ids.workerOne]: 2500, [ids.workerTwo]: 7501 });
+      ).toEqual(
+        addAmounts(
+          expectedSplit(HTTP_PERIOD.start, 7000, [
+            ids.workerOne,
+            ids.workerTwo,
+          ]),
+          expectedSplit(HTTP_PERIOD.end, 3001, [ids.workerOne, ids.workerTwo]),
+        ),
+      );
+      expect(created.lines.every((line) => line.hoursWorked === null)).toBe(
+        true,
+      );
+      expect(created.dailySources.map((source) => source.amount)).toEqual([
+        7000, 3001,
+      ]);
 
-      const again = (await postPreview(tokens.accountant).expect(200))
-        .body as TipPoolResponse;
+      const again = (
+        await postPreview(tokens.accountant, HTTP_PERIOD, {
+          expectedVersion: created.version,
+        }).expect(200)
+      ).body as TipPoolResponse;
       expect(again.id).toBe(created.id);
+      expect(again.version).toBe(created.version + 1);
 
       const audits = await prisma.auditLog.findMany({
         where: { entityType: 'tip_pools', entityId: created.id },
@@ -1048,6 +1091,7 @@ describe.skipIf(!databaseUrl)(
           storeId,
           periodStart: HTTP_PERIOD.start,
           periodEnd: HTTP_PERIOD.end,
+          rule: 'EQUAL_SHARES',
           totalAmount: 10001,
           recalculated: false,
           workers: 2,
@@ -1063,6 +1107,33 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
+    it('recalcular con expectedVersion desactualizado responde 409 con la versión actual', async () => {
+      const pool = await prisma.tipPool.findFirstOrThrow({
+        where: { storeId, periodStart: day(HTTP_PERIOD.start) },
+      });
+      const response = await postPreview(tokens.accountant, HTTP_PERIOD, {
+        expectedVersion: pool.version - 1,
+      }).expect(409);
+      expect(response.body).toEqual({
+        statusCode: 409,
+        message: VERSION_CONFLICT_MESSAGE,
+        currentStatus: 'DRAFT',
+        currentVersion: pool.version,
+      });
+      const after = await prisma.tipPool.findUniqueOrThrow({
+        where: { id: pool.id },
+      });
+      expect(after.version).toBe(pool.version);
+    });
+
+    it('valida expectedVersion con 400', async () => {
+      for (const expectedVersion of [0, 1.5, 'dos']) {
+        await postPreview(tokens.accountant, HTTP_PERIOD, {
+          expectedVersion,
+        }).expect(400);
+      }
+    });
+
     it('consulta por ID: contador y administrador sí, supervisor no', async () => {
       const pool = await prisma.tipPool.findFirstOrThrow({
         where: { storeId, periodStart: day(HTTP_PERIOD.start) },
@@ -1070,7 +1141,11 @@ describe.skipIf(!databaseUrl)(
       for (const name of ['accountant', 'admin']) {
         const body = (await getPool(pool.id, tokens[name]).expect(200))
           .body as TipPoolResponse;
-        expect(body).toMatchObject({ id: pool.id, totalAmount: 10001 });
+        expect(body).toMatchObject({
+          id: pool.id,
+          rule: 'EQUAL_SHARES',
+          totalAmount: 10001,
+        });
       }
       await getPool(pool.id, tokens.supervisor).expect(403);
       await getPool(randomUUID(), tokens.accountant).expect(404);
@@ -1086,10 +1161,7 @@ describe.skipIf(!databaseUrl)(
         message: 'No se puede calcular el reparto del período',
         issues: [
           expect.objectContaining({
-            code: TIP_POOL_ISSUE_CODE.TIP_ENTRIES_MISSING,
-          }),
-          expect.objectContaining({
-            code: TIP_POOL_ISSUE_CODE.WORK_HOURS_MISSING,
+            code: TIP_POOL_ISSUE_CODE.DAILY_OPERATIONS_MISSING,
           }),
         ],
       });
@@ -1113,11 +1185,11 @@ describe.skipIf(!databaseUrl)(
 
       const pools = await prisma.tipPool.findMany({
         where: { storeId, periodStart: day(CONCURRENT_PERIOD.start) },
-        include: { lines: true, sources: true },
+        include: { lines: true, dailyOperationSources: true },
       });
       expect(pools).toHaveLength(1);
       expect(pools[0].lines).toHaveLength(2);
-      expect(pools[0].sources).toHaveLength(2);
+      expect(pools[0].dailyOperationSources).toHaveLength(2);
       expect(
         pools[0].lines.reduce(
           (sum, line) => sum.plus(line.amount),

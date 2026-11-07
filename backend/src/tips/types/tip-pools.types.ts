@@ -1,22 +1,31 @@
-// Tipos del cálculo y vista previa del reparto de propinas (SPRINT-3-T12).
+// Tipos del cálculo y vista previa del reparto de propinas (SPRINT-3-T12 y
+// SPRINT-4R-T04).
 
 export const TIP_POOL_STATUSES = ['DRAFT', 'CONFIRMED', 'PAID'] as const;
 export type TipPoolStatusCode = (typeof TIP_POOL_STATUSES)[number];
 
-export const SUPPORTED_AGREEMENT_RULE = 'PROPORTIONAL_TO_HOURS';
+// Regla aplicada por el reparto. Todo cálculo nuevo es EQUAL_SHARES: el fondo
+// de cada operación diaria se divide entre sus participantes (SPRINT-4R-T04).
+// PROPORTIONAL_TO_HOURS solo identifica los repartos históricos guardados,
+// que se conservan, confirman, pagan y consultan tal cual.
+export const TIP_POOL_RULES = [
+  'PROPORTIONAL_TO_HOURS',
+  'EQUAL_SHARES',
+] as const;
+export type TipPoolRule = (typeof TIP_POOL_RULES)[number];
+
+// Copia de la regla que guarda el reparto equitativo en agreement_snapshot.
+// No hay pacto (agreement_id NULL): la regla es la del flujo operativo y los
+// triggers de la base la leen desde el snapshot para exigir horas NULL.
+export const EQUAL_SHARES_RULE_NAME =
+  'Reparto equitativo diario entre los participantes de cada operación';
 
 // Causas que impiden generar la vista previa. Los códigos son estables (los
 // usa el frontend) y el mensaje va en español para el contador.
 export const TIP_POOL_ISSUE_CODE = {
-  AGREEMENT_MISSING: 'AGREEMENT_MISSING',
-  AGREEMENT_CHANGES_IN_PERIOD: 'AGREEMENT_CHANGES_IN_PERIOD',
-  AGREEMENT_RULE_UNSUPPORTED: 'AGREEMENT_RULE_UNSUPPORTED',
-  TIP_ENTRIES_MISSING: 'TIP_ENTRIES_MISSING',
-  TIP_ENTRY_ALREADY_USED: 'TIP_ENTRY_ALREADY_USED',
-  WORK_HOURS_MISSING: 'WORK_HOURS_MISSING',
-  WORK_HOURS_PERIOD_MISMATCH: 'WORK_HOURS_PERIOD_MISMATCH',
-  WORK_HOURS_TOTAL_ZERO: 'WORK_HOURS_TOTAL_ZERO',
-  WORKER_NOT_IN_STORE: 'WORKER_NOT_IN_STORE',
+  DAILY_OPERATIONS_MISSING: 'DAILY_OPERATIONS_MISSING',
+  DAILY_OPERATION_ALREADY_USED: 'DAILY_OPERATION_ALREADY_USED',
+  DAILY_PARTICIPANTS_MISSING: 'DAILY_PARTICIPANTS_MISSING',
 } as const;
 
 export type TipPoolIssueCode =
@@ -36,7 +45,9 @@ export interface TipPoolValidationErrorBody {
 }
 
 // Copia del pacto aplicado que se guarda en tip_pools.agreement_snapshot.
-// Mismas claves que el seed demo de SPRINT-3-T09 (TIP_DEMO_POOL).
+// Mismas claves que el seed demo de SPRINT-3-T09 (TIP_DEMO_POOL). Solo los
+// repartos proporcionales históricos tienen pacto; los equitativos guardan
+// únicamente la regla (ver EQUAL_SHARES_RULE_NAME).
 export interface TipAgreementSnapshot {
   id: string;
   name: string;
@@ -49,7 +60,8 @@ export interface TipAgreementSnapshot {
 export interface TipPoolLineResponse {
   userId: string;
   workerName: string;
-  hoursWorked: string;
+  // Horas del cálculo proporcional histórico; null en el reparto equitativo.
+  hoursWorked: string | null;
   amount: number;
 }
 
@@ -58,6 +70,16 @@ export interface TipPoolSourceResponse {
   businessDate: string;
   paymentMethod: string;
   paymentMethodName: string;
+  amount: number;
+}
+
+// Operación diaria usada como fuente de un reparto equitativo. amount es el
+// fondo aplicado (copia); la base exige que coincida con tip_fund_amount.
+export interface TipPoolDailySourceResponse {
+  operationId: string;
+  businessDate: string;
+  cardTipAmount: number;
+  cashTipAmount: number;
   amount: number;
 }
 
@@ -74,13 +96,19 @@ export interface TipPoolResponse {
   store: { id: string; name: string };
   periodStart: string;
   periodEnd: string;
-  // null solo en repartos históricos sin snapshot del pacto.
+  rule: TipPoolRule;
+  // Solo los repartos proporcionales históricos tienen pacto; null en los
+  // equitativos y en los históricos sin snapshot.
   agreement: TipAgreementSnapshot | null;
   totalAmount: number;
-  totalHours: string;
+  // Suma de horas del reparto proporcional; null en el equitativo.
+  totalHours: string | null;
   lines: TipPoolLineResponse[];
+  // Registros diarios históricos (tip_entries) del reparto proporcional.
   sources: TipPoolSourceResponse[];
-  // Σ líneas = total y Σ fuentes = total.
+  // Operaciones diarias del reparto equitativo.
+  dailySources: TipPoolDailySourceResponse[];
+  // Σ líneas = total y Σ fuentes (de ambos tipos) = total.
   reconciled: boolean;
   calculatedBy: TipPoolPersonResponse;
   // Solo cambia al calcular o recalcular el borrador.
@@ -118,11 +146,13 @@ export interface TipPoolConflictBody {
 }
 
 // Foto del reparto al momento del pago, guardada en tip_pool_receipts.detail
-// para que cada constancia se explique sola.
+// para que cada constancia se explique sola. rule falta en las constancias
+// anteriores a SPRINT-4R-T04, que son todas proporcionales.
 export interface TipPoolReceiptDetail {
+  rule: TipPoolRule;
   agreementSnapshot: TipAgreementSnapshot | null;
   totalAmount: number;
-  totalHours: string;
+  totalHours: string | null;
   lines: TipPoolLineResponse[];
 }
 
@@ -134,7 +164,7 @@ export interface TipPoolReceiptResponse {
   store: { id: string; name: string };
   periodStart: string;
   periodEnd: string;
-  hoursWorked: string;
+  hoursWorked: string | null;
   amount: number;
   paymentDate: string;
   paidBy: TipPoolPersonResponse;

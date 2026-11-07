@@ -189,15 +189,15 @@ describe.skipIf(!databaseUrl)(
           totalAmount: new Prisma.Decimal(1500),
           calculatedById: base.supervisorId,
           agreementId,
-          agreementSnapshot: snapshot,
+          agreementSnapshot: snapshot ?? Prisma.DbNull,
         },
       });
       return pool.id;
     }
 
-    // Las líneas equitativas se insertan por SQL: el cliente de Prisma aún
-    // exige hoursWorked (se vuelve opcional en SPRINT-4R-T04) y aquí se
-    // demuestra la regla para cualquier vía de escritura.
+    // Las líneas equitativas se insertan por SQL para demostrar la regla en
+    // cualquier vía de escritura, no solo desde el cliente de Prisma (donde
+    // hoursWorked es opcional desde SPRINT-4R-T04).
     function insertarLineaSinHoras(
       tx: Prisma.TransactionClient,
       poolId: string,
@@ -270,7 +270,7 @@ describe.skipIf(!databaseUrl)(
             amount: new Prisma.Decimal(750),
           },
         });
-        expect(line.hoursWorked.toString()).toBe('8');
+        expect(line.hoursWorked?.toString()).toBe('8');
 
         await expect(
           insertarLineaSinHoras(tx, poolId, base.worker2Id, '750'),

@@ -5,7 +5,8 @@ import { AppModule } from '../src/app.module.js';
 import { createSwaggerDocument } from '../src/swagger.js';
 
 // Verifica la documentación Swagger de las acciones del contador sobre el
-// reparto de propinas (SPRINT-3-T13) leyendo el mismo documento OpenAPI que
+// reparto de propinas (SPRINT-3-T13) y del cálculo equitativo (SPRINT-4R-T04)
+// leyendo el mismo documento OpenAPI que
 // main.ts publica en /api/docs. No necesita base de datos: la aplicación se
 // compila pero no se inicializa, así que PrismaService no se conecta.
 
@@ -129,6 +130,66 @@ describe('Swagger de confirmación y pago del reparto (SPRINT-3-T13)', () => {
         },
       },
     });
+  });
+
+  it('documenta el cálculo equitativo: regla, residuo, fuentes diarias y horas nulas (SPRINT-4R-T04)', () => {
+    const schemas = document.components?.schemas ?? {};
+    const preview = operation('post', '/tip-pools/preview');
+    expect(preview.tags).toContain('tip-pools');
+    expect(preview.security).toEqual(expect.arrayContaining([{ bearer: [] }]));
+    expect(Object.keys(preview.responses).sort()).toEqual(
+      ['200', '201', '400', '401', '403', '404', '409', '422'].sort(),
+    );
+    expect(preview.description).toEqual(
+      expect.stringContaining('$3.334, $3.333 y $3.333'),
+    );
+    expect(preview.requestBody).toMatchObject({
+      content: {
+        'application/json': {
+          schema: { $ref: '#/components/schemas/CalculateTipPoolDto' },
+        },
+      },
+    });
+    const body = schemas.CalculateTipPoolDto as {
+      required?: string[];
+      properties: Record<string, { description?: string; example?: unknown }>;
+    };
+    expect(body.required).not.toContain('expectedVersion');
+    expect(body.properties.expectedVersion).toMatchObject({
+      description: expect.any(String) as unknown,
+      example: 2,
+    });
+
+    const pool = schemas.TipPoolResponseDto as {
+      properties: Record<string, Record<string, unknown>>;
+    };
+    expect(pool.properties.rule).toMatchObject({
+      enum: ['PROPORTIONAL_TO_HOURS', 'EQUAL_SHARES'],
+    });
+    expect(pool.properties.totalHours).toMatchObject({ nullable: true });
+    expect(pool.properties.dailySources).toMatchObject({
+      type: 'array',
+      items: { $ref: '#/components/schemas/TipPoolDailySourceResponseDto' },
+    });
+    const line = schemas.TipPoolLineResponseDto as {
+      properties: Record<string, Record<string, unknown>>;
+    };
+    expect(line.properties.hoursWorked).toMatchObject({ nullable: true });
+    const dailySource = schemas.TipPoolDailySourceResponseDto as {
+      properties: Record<string, { description?: string; example?: unknown }>;
+    };
+    for (const field of [
+      'operationId',
+      'businessDate',
+      'cardTipAmount',
+      'cashTipAmount',
+      'amount',
+    ]) {
+      expect(dailySource.properties[field]).toMatchObject({
+        description: expect.any(String) as unknown,
+        example: expect.anything() as unknown,
+      });
+    }
   });
 
   it('la descarga se documenta como PDF con nosniff y Content-Disposition', () => {

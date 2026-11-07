@@ -1,13 +1,17 @@
-import type {
-  TipAgreementSnapshot,
-  TipPoolLineResponse,
-  TipPoolPersonResponse,
-  TipPoolReceiptDetail,
-  TipPoolResponse,
+import {
+  TIP_POOL_RULES,
+  type TipAgreementSnapshot,
+  type TipPoolLineResponse,
+  type TipPoolPersonResponse,
+  type TipPoolReceiptDetail,
+  type TipPoolResponse,
+  type TipPoolRule,
 } from '../types/tip-pools.types.js';
 
 // Armado y lectura de la foto que guarda cada constancia de pago
-// (SPRINT-3-T13). Funciones puras, sin NestJS ni base de datos.
+// (SPRINT-3-T13). Funciones puras, sin NestJS ni base de datos. Desde
+// SPRINT-4R-T04 la foto incluye la regla aplicada y las horas son null en los
+// repartos equitativos.
 
 export interface TipPoolReceiptDraft {
   userId: string;
@@ -16,7 +20,7 @@ export interface TipPoolReceiptDraft {
   storeName: string;
   periodStart: string;
   periodEnd: string;
-  hoursWorked: string;
+  hoursWorked: string | null;
   amount: number;
   paymentDate: string;
   paidById: string;
@@ -32,6 +36,7 @@ export function buildTipPoolReceipts(
   paidBy: TipPoolPersonResponse,
 ): TipPoolReceiptDraft[] {
   const detail: TipPoolReceiptDetail = {
+    rule: pool.rule,
     agreementSnapshot: pool.agreement,
     totalAmount: pool.totalAmount,
     totalHours: pool.totalHours,
@@ -65,7 +70,7 @@ function parseLine(value: unknown): TipPoolLineResponse | null {
     !line ||
     typeof line.userId !== 'string' ||
     typeof line.workerName !== 'string' ||
-    typeof line.hoursWorked !== 'string' ||
+    (typeof line.hoursWorked !== 'string' && line.hoursWorked !== null) ||
     typeof line.amount !== 'number'
   ) {
     return null;
@@ -101,20 +106,28 @@ function parseAgreement(value: unknown): TipAgreementSnapshot | null {
   };
 }
 
+function isRule(value: unknown): value is TipPoolRule {
+  return TIP_POOL_RULES.some((rule) => rule === value);
+}
+
 // Lee el detalle JSON guardado sin confiar en su forma. Lo escribe solo
-// buildTipPoolReceipts, así que una forma inválida es un dato corrupto.
+// buildTipPoolReceipts, así que una forma inválida es un dato corrupto. Las
+// constancias anteriores a SPRINT-4R-T04 no guardan la regla: todas son del
+// reparto proporcional histórico.
 export function parseReceiptDetail(value: unknown): TipPoolReceiptDetail {
   const detail = asRecord(value);
   const lines = Array.isArray(detail?.lines) ? detail.lines.map(parseLine) : [];
   if (
     !detail ||
     typeof detail.totalAmount !== 'number' ||
-    typeof detail.totalHours !== 'string' ||
+    (typeof detail.totalHours !== 'string' && detail.totalHours !== null) ||
+    (detail.rule !== undefined && !isRule(detail.rule)) ||
     lines.some((line) => line === null)
   ) {
     throw new Error('El detalle guardado de la constancia no es válido');
   }
   return {
+    rule: isRule(detail.rule) ? detail.rule : 'PROPORTIONAL_TO_HOURS',
     agreementSnapshot: parseAgreement(detail.agreementSnapshot),
     totalAmount: detail.totalAmount,
     totalHours: detail.totalHours,

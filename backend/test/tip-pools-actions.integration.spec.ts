@@ -32,6 +32,7 @@ import type { PrismaService } from '../src/prisma/prisma.service.js';
 import { renderTipReceiptPdf } from '../src/tips/receipts/tip-receipt-pdf.js';
 import { StoresService } from '../src/stores/stores.service.js';
 import {
+  STALE_POOL_MESSAGE,
   TipPoolsService,
   VERSION_CONFLICT_MESSAGE,
 } from '../src/tips/tip-pools.service.js';
@@ -41,16 +42,16 @@ import type {
   TipPoolResponse,
 } from '../src/tips/types/tip-pools.types.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
-import {
-  ensureDefaultPaymentMethods,
-  paymentMethodIdOf,
-} from './helpers/payment-methods.js';
+import { createDailyOperation } from './helpers/daily-operations.js';
+import { ensureDefaultPaymentMethods } from './helpers/payment-methods.js';
 
 type App = Parameters<typeof request>[0];
 
 // Tests de integración de la confirmación, las observaciones y el pago del
-// reparto de propinas (SPRINT-3-T13) contra PostgreSQL real. Se omiten si no
-// se define TEST_DATABASE_URL.
+// reparto de propinas (SPRINT-3-T13) contra PostgreSQL real, con el cálculo
+// equitativo desde las operaciones diarias (SPRINT-4R-T04). El reparto
+// proporcional histórico se prueba con el reparto demo del seed, que se
+// confirma y paga sin recalcular. Se omiten si no se define TEST_DATABASE_URL.
 //
 // - Estados, constancias e inmutabilidad se prueban dentro de withinRollback:
 //   TipPoolsService recibe la transacción del test en lugar de PrismaService.
@@ -75,6 +76,7 @@ const CONFIRMED_IMMUTABLE = /No se pueden cambiar los montos/;
 const NOT_DRAFT = /ya no está en DRAFT/;
 const PAID_IMMUTABLE = /El reparto pagado .* es inmutable/;
 const RECEIPTS_IMMUTABLE = /Las constancias de pago son inmutables/;
+const SOURCE_FEEDS_CLOSED_POOL = /alimenta un reparto confirmado o pagado/;
 
 function day(value: string): Date {
   return new Date(`${value}T00:00:00.000Z`);
@@ -185,52 +187,48 @@ async function createFixture(tx: Prisma.TransactionClient): Promise<Fixture> {
   };
 }
 
-// Pacto vigente, dos registros del período (12.000) y 10/20/30 horas: el
-// reparto esperado es 2.000/4.000/6.000. Con zeroHoursForLast el tercer
-// trabajador queda con 0 horas y monto 0.
-async function seedPeriod(f: Fixture, zeroHoursForLast = false): Promise<void> {
-  await f.tx.tipAgreement.create({
-    data: {
-      name: 'Pacto pago test',
-      rule: 'PROPORTIONAL_TO_HOURS',
-      validFrom: day('2026-01-01'),
+// Tres operaciones diarias del período (fondo 12.000): el 02 se reparten
+// 6.000 (tarjeta 4.000 + efectivo 2.000) entre Ana, Beto y Carla; el 08,
+// 4.000 entre Beto y Carla, y el 15, 2.000 en efectivo solo para Carla. El
+// reparto esperado es 2.000/4.000/6.000 (divisiones exactas: no dependen del
+// residuo). Con zeroAmountForLast el 02 y el 08 son de 6.000 entre Ana y Beto
+// y solo Beto, y el 15 tiene fondo 0 con Carla como participante (la base lo
+// permite aunque la API no): 3.000/9.000/0.
+async function seedPeriod(
+  f: Fixture,
+  zeroAmountForLast = false,
+): Promise<void> {
+  const [ana, beto, carla] = f.workers;
+  const operations = zeroAmountForLast
+    ? [
+        { date: '2026-10-02', card: 4000, cash: 2000, people: [ana, beto] },
+        { date: '2026-10-08', card: 0, cash: 6000, people: [beto] },
+        { date: '2026-10-15', card: 0, cash: 0, people: [carla] },
+      ]
+    : [
+        {
+          date: '2026-10-02',
+          card: 4000,
+          cash: 2000,
+          people: [ana, beto, carla],
+        },
+        { date: '2026-10-08', card: 4000, cash: 0, people: [beto, carla] },
+        { date: '2026-10-15', card: 0, cash: 2000, people: [carla] },
+      ];
+  for (const operation of operations) {
+    await createDailyOperation(f.tx, {
       storeId: f.storeId,
-      createdById: f.supervisor.id,
-    },
-  });
-  const entries: [string, string, number][] = [
-    ['2026-10-02', 'CASH', 8000],
-    ['2026-10-15', 'DEBIT_CARD', 4000],
-  ];
-  for (const [businessDate, paymentMethodCode, amount] of entries) {
-    const paymentMethodId = await paymentMethodIdOf(f.tx, paymentMethodCode);
-    await f.tx.tipEntry.create({
-      data: {
-        businessDate: day(businessDate),
-        paymentMethodId,
-        amount,
-        storeId: f.storeId,
-        responsibleId: f.supervisor.id,
-      },
-    });
-  }
-  const hours = zeroHoursForLast ? [10, 20, 0] : [10, 20, 30];
-  for (const [index, workerId] of f.workers.entries()) {
-    await f.tx.workHoursRecord.create({
-      data: {
-        periodStart: day(PERIOD.start),
-        periodEnd: day(PERIOD.end),
-        hoursWorked: hours[index],
-        storeId: f.storeId,
-        workerId,
-        recordedById: f.supervisor.id,
-      },
+      responsibleId: f.supervisor.id,
+      businessDate: operation.date,
+      cardTipAmount: operation.card,
+      cashTipAmount: operation.cash,
+      participantIds: operation.people,
     });
   }
 }
 
-async function draft(f: Fixture, zeroHoursForLast = false) {
-  await seedPeriod(f, zeroHoursForLast);
+async function draft(f: Fixture, zeroAmountForLast = false) {
+  await seedPeriod(f, zeroAmountForLast);
   const result = await f.service.preview(
     { storeId: f.storeId, periodStart: PERIOD.start, periodEnd: PERIOD.end },
     f.accountant,
@@ -310,6 +308,12 @@ describe.skipIf(!databaseUrl)(
           expect(first).toMatchObject({
             status: 'DRAFT',
             version: 1,
+            rule: 'EQUAL_SHARES',
+            agreement: null,
+            totalAmount: 12000,
+            totalHours: null,
+            sources: [],
+            reconciled: true,
             notes: null,
             confirmedBy: null,
             paidBy: null,
@@ -319,13 +323,13 @@ describe.skipIf(!databaseUrl)(
 
           const observed = await f.service.observe(
             first.id,
-            { expectedVersion: 1, notes: 'Faltan horas de la semana 2' },
+            { expectedVersion: 1, notes: 'Falta un participante del día 8' },
             f.accountant,
           );
           expect(observed).toMatchObject({
             status: 'DRAFT',
             version: 2,
-            notes: 'Faltan horas de la semana 2',
+            notes: 'Falta un participante del día 8',
           });
 
           // El recálculo atiende la observación: la limpia y sube la versión.
@@ -377,7 +381,28 @@ describe.skipIf(!databaseUrl)(
           expect(paidPool.paidAt).toBeInstanceOf(Date);
           // El pago conserva la foto del reparto.
           expect(paidPool.lines).toEqual(confirmedPool.lines);
-          expect(paidPool.sources).toEqual(confirmedPool.sources);
+          expect(paidPool.dailySources).toEqual(confirmedPool.dailySources);
+          expect(
+            Object.fromEntries(
+              paidPool.lines.map((line) => [line.userId, line.amount]),
+            ),
+          ).toEqual({
+            [f.workers[0]]: 2000,
+            [f.workers[1]]: 4000,
+            [f.workers[2]]: 6000,
+          });
+          expect(
+            paidPool.dailySources.map((source) => [
+              source.businessDate,
+              source.cardTipAmount,
+              source.cashTipAmount,
+              source.amount,
+            ]),
+          ).toEqual([
+            ['2026-10-02', 4000, 2000, 6000],
+            ['2026-10-08', 4000, 0, 4000],
+            ['2026-10-15', 0, 2000, 2000],
+          ]);
         });
       });
 
@@ -543,6 +568,128 @@ describe.skipIf(!databaseUrl)(
           });
         });
       });
+
+      it('confirmar una foto equitativa desactualizada responde 422; tras recalcular, confirma', async () => {
+        await withinRollback(async (f) => {
+          const pool = await draft(f);
+          // Con el reparto en DRAFT la base permite corregir la operación: la
+          // foto (fuente 2.000) queda conciliada consigo misma pero obsoleta.
+          const operation = await f.tx.dailyOperation.findFirstOrThrow({
+            where: { storeId: f.storeId, businessDate: day('2026-10-15') },
+          });
+          await f.tx.dailyOperation.update({
+            where: { id: operation.id },
+            data: { cashTipAmount: BigInt(3000), tipFundAmount: BigInt(3000) },
+          });
+          expect(
+            (await f.service.findOne(pool.id, f.accountant)).reconciled,
+          ).toBe(true);
+
+          const attempt = f.service.confirm(
+            pool.id,
+            { expectedVersion: pool.version },
+            f.accountant,
+          );
+          await expect(attempt).rejects.toBeInstanceOf(
+            UnprocessableEntityException,
+          );
+          await expect(attempt).rejects.toThrow(STALE_POOL_MESSAGE);
+          expect(await f.service.findOne(pool.id, f.accountant)).toMatchObject({
+            status: 'DRAFT',
+            version: pool.version,
+          });
+
+          const recalculated = (
+            await f.service.preview(
+              {
+                storeId: f.storeId,
+                periodStart: PERIOD.start,
+                periodEnd: PERIOD.end,
+                expectedVersion: pool.version,
+              },
+              f.accountant,
+            )
+          ).pool;
+          expect(recalculated).toMatchObject({
+            id: pool.id,
+            version: pool.version + 1,
+            totalAmount: 13000,
+          });
+          expect(
+            recalculated.lines.find((line) => line.userId === f.workers[2])
+              ?.amount,
+          ).toBe(7000);
+          const confirmedPool = await f.service.confirm(
+            pool.id,
+            { expectedVersion: recalculated.version },
+            f.accountant,
+          );
+          expect(confirmedPool.status).toBe('CONFIRMED');
+        });
+      });
+
+      it('desde CONFIRMED la base congela montos y selección de las operaciones fuente', async () => {
+        await withinRollback(async (f) => {
+          const pool = await confirmed(f);
+          const operation = await f.tx.dailyOperation.findFirstOrThrow({
+            where: { storeId: f.storeId, businessDate: day('2026-10-02') },
+            select: { id: true },
+          });
+          // Cada intento rechazado aborta la transacción: se aísla con un
+          // savepoint para seguir usándola en el resto del test.
+          async function rejected(attempt: () => Promise<unknown>) {
+            await f.tx.$executeRaw`SAVEPOINT intento`;
+            try {
+              await attempt();
+            } catch (error) {
+              await f.tx.$executeRaw`ROLLBACK TO SAVEPOINT intento`;
+              return error;
+            }
+            throw new Error('Se esperaba un rechazo de la base');
+          }
+          expect(
+            await rejected(
+              () =>
+                f.tx
+                  .$executeRaw`DELETE FROM daily_operation_participants WHERE operation_id = ${operation.id}::uuid AND worker_id = ${f.workers[0]}::uuid`,
+            ),
+          ).toMatchObject({
+            message: expect.stringMatching(SOURCE_FEEDS_CLOSED_POOL) as unknown,
+          });
+          expect(
+            await rejected(
+              () =>
+                f.tx
+                  .$executeRaw`UPDATE daily_operations SET cash_tip_amount = 9000, tip_fund_amount = 13000 WHERE id = ${operation.id}::uuid`,
+            ),
+          ).toMatchObject({
+            message: expect.stringMatching(SOURCE_FEEDS_CLOSED_POOL) as unknown,
+          });
+
+          const paidPool = await f.service.pay(
+            pool.id,
+            { expectedVersion: pool.version, paymentDate: '2026-10-20' },
+            f.accountant,
+          );
+          expect(paidPool.lines).toEqual(pool.lines);
+          const receipts = await f.service.listReceipts(pool.id, f.accountant);
+          expect(
+            Object.fromEntries(
+              receipts.map((receipt) => [receipt.userId, receipt.amount]),
+            ),
+          ).toEqual(
+            Object.fromEntries(
+              pool.lines.map((line) => [line.userId, line.amount]),
+            ),
+          );
+          expect(sumAmounts(receipts)).toBe(12000);
+          expect(
+            await f.tx.dailyOperationParticipant.count({
+              where: { operationId: operation.id },
+            }),
+          ).toBe(3);
+        });
+      });
     });
 
     describe('concurrencia (versión)', () => {
@@ -648,13 +795,14 @@ describe.skipIf(!databaseUrl)(
               store: { id: f.storeId, name: store.name },
               periodStart: PERIOD.start,
               periodEnd: PERIOD.end,
-              hoursWorked: line?.hoursWorked,
+              hoursWorked: null,
               amount: line?.amount,
               paymentDate: '2026-10-20',
               paidBy: { id: f.accountant.id, name: 'Lucas Pago' },
             });
             // El detalle es la foto completa del reparto al pagar.
             expect(receipt.detail).toEqual({
+              rule: 'EQUAL_SHARES',
               agreementSnapshot: pool.agreement,
               totalAmount: pool.totalAmount,
               totalHours: pool.totalHours,
@@ -701,7 +849,7 @@ describe.skipIf(!databaseUrl)(
           const receipts = await f.service.listReceipts(pool.id, f.accountant);
           expect(
             receipts.find((receipt) => receipt.userId === zeroLine?.userId),
-          ).toMatchObject({ amount: 0, hoursWorked: '0.00' });
+          ).toMatchObject({ amount: 0, hoursWorked: null });
         });
       });
 
@@ -715,9 +863,17 @@ describe.skipIf(!databaseUrl)(
             includeDemoData: true,
           });
           const demo = await f.service.findOne(TIP_DEMO_POOL.id, f.accountant);
-          // Si el seed ya existía en la base, el reparto demo puede haberse
-          // recalculado o confirmado antes: se exige solo que esté sin pagar.
+          // Compatibilidad histórica: el reparto demo es proporcional a horas
+          // y se confirma y paga con su foto guardada, sin recalcularlo con la
+          // regla equitativa. Si el seed ya existía en la base, el reparto
+          // demo puede haberse confirmado antes: se exige solo que esté sin
+          // pagar.
           expect(demo.status).not.toBe('PAID');
+          expect(demo).toMatchObject({
+            rule: 'PROPORTIONAL_TO_HOURS',
+            dailySources: [],
+          });
+          expect(demo.totalHours).toMatch(/^\d+\.\d{2}$/);
           const ready =
             demo.status === 'DRAFT'
               ? await f.service.confirm(
@@ -746,6 +902,12 @@ describe.skipIf(!databaseUrl)(
             [TIP_DEMO_IDS.workerOne]: 10000,
             [TIP_DEMO_IDS.workerTwo]: 15000,
           });
+          // Las constancias proporcionales conservan sus horas y la regla.
+          for (const receipt of receipts) {
+            expect(receipt.hoursWorked).toMatch(/^\d+\.\d{2}$/);
+            expect(receipt.detail.rule).toBe('PROPORTIONAL_TO_HOURS');
+            expect(receipt.detail.totalHours).toBe(demo.totalHours);
+          }
           expect(
             receipts.every(
               (receipt) =>
@@ -947,7 +1109,7 @@ describe.skipIf(!databaseUrl)(
           const pool = await confirmed(f);
           await expect(
             f.tx
-              .$executeRaw`DELETE FROM tip_pool_sources WHERE pool_id = ${pool.id}::uuid`,
+              .$executeRaw`DELETE FROM tip_pool_daily_operation_sources WHERE pool_id = ${pool.id}::uuid`,
           ).rejects.toThrow(NOT_DRAFT);
         });
       });
@@ -1094,7 +1256,7 @@ describe.skipIf(!databaseUrl)(
                 storeName: pool.store.name,
                 periodStart: day(PERIOD.start),
                 periodEnd: day(PERIOD.end),
-                hoursWorked: 1,
+                hoursWorked: null,
                 amount: 1,
                 paymentDate: day('2026-10-20'),
                 paidById: f.accountant.id,
@@ -1156,10 +1318,32 @@ describe.skipIf(!databaseUrl)(
         await tx.tipPoolSource.deleteMany({
           where: { pool: { store: storeWhere } },
         });
+        await tx.tipPoolDailyOperationSource.deleteMany({
+          where: { pool: { store: storeWhere } },
+        });
         await tx.tipPoolLine.deleteMany({
           where: { pool: { store: storeWhere } },
         });
         await tx.tipPool.deleteMany({ where: { store: storeWhere } });
+        // En modo replica tampoco corren las cascadas (son triggers): cada
+        // tabla de la operación diaria se limpia explícitamente.
+        const vouchers = await tx.dailyOperation.findMany({
+          where: { store: storeWhere, voucherId: { not: null } },
+          select: { voucherId: true },
+        });
+        await tx.dailyOperationParticipant.deleteMany({
+          where: { operation: { store: storeWhere } },
+        });
+        await tx.dailyOperation.deleteMany({ where: { store: storeWhere } });
+        await tx.dailyOperationVoucher.deleteMany({
+          where: {
+            id: {
+              in: vouchers.flatMap((item) =>
+                item.voucherId ? [item.voucherId] : [],
+              ),
+            },
+          },
+        });
         await tx.tipAgreement.deleteMany({ where: { store: storeWhere } });
         await tx.workHoursRecord.deleteMany({ where: { store: storeWhere } });
         await tx.tipEntry.deleteMany({ where: { store: storeWhere } });
@@ -1204,43 +1388,26 @@ describe.skipIf(!databaseUrl)(
       tokens[name] = await jwt.signAsync(payload);
     }
 
-    // 7.000 + 3.001 = 10.001 con 12,5 y 37,5 horas: 2.500 y 7.501.
+    // Fondo 10.001: el primer día 5.000 en efectivo entre ambos trabajadores
+    // (2.500 cada uno) y el último 5.001 con tarjeta solo para workerTwo:
+    // 2.500 y 7.501.
     async function seedPeriod(period: {
       start: string;
       end: string;
     }): Promise<void> {
-      const cashId = await paymentMethodIdOf(prisma, 'CASH');
-      const creditId = await paymentMethodIdOf(prisma, 'CREDIT_CARD');
-      await prisma.tipEntry.createMany({
-        data: [
-          {
-            businessDate: day(period.start),
-            paymentMethodId: cashId,
-            amount: 7000,
-            storeId,
-            responsibleId: ids.supervisor,
-          },
-          {
-            businessDate: day(period.end),
-            paymentMethodId: creditId,
-            amount: 3001,
-            storeId,
-            responsibleId: ids.supervisor,
-          },
-        ],
+      await createDailyOperation(prisma, {
+        storeId,
+        responsibleId: ids.supervisor,
+        businessDate: period.start,
+        cashTipAmount: 5000,
+        participantIds: [ids.workerOne, ids.workerTwo],
       });
-      await prisma.workHoursRecord.createMany({
-        data: [
-          { worker: 'workerOne', hours: 12.5 },
-          { worker: 'workerTwo', hours: 37.5 },
-        ].map(({ worker, hours }) => ({
-          periodStart: day(period.start),
-          periodEnd: day(period.end),
-          hoursWorked: hours,
-          storeId,
-          workerId: ids[worker],
-          recordedById: ids.supervisor,
-        })),
+      await createDailyOperation(prisma, {
+        storeId,
+        responsibleId: ids.supervisor,
+        businessDate: period.end,
+        cardTipAmount: 5001,
+        participantIds: [ids.workerTwo],
       });
     }
 
@@ -1335,16 +1502,6 @@ describe.skipIf(!databaseUrl)(
       await createApiUser('supervisor', ROLE.SUPERVISOR, storeId);
       await createApiUser('workerOne', ROLE.TRABAJADOR, storeId);
       await createApiUser('workerTwo', ROLE.TRABAJADOR, storeId);
-
-      await prisma.tipAgreement.create({
-        data: {
-          name: 'Pacto API Pago Test',
-          rule: 'PROPORTIONAL_TO_HOURS',
-          validFrom: day('2026-01-01'),
-          storeId,
-          createdById: ids.supervisor,
-        },
-      });
     }, 60_000);
 
     afterAll(async () => {
@@ -1359,12 +1516,12 @@ describe.skipIf(!databaseUrl)(
       const observed = (
         await action(created.id, 'observations', {
           expectedVersion: 1,
-          notes: '  Revisar las horas de workerTwo  ',
+          notes: '  Revisar los participantes de workerTwo  ',
         }).expect(200)
       ).body as TipPoolResponse;
       expect(observed).toMatchObject({
         version: 2,
-        notes: 'Revisar las horas de workerTwo',
+        notes: 'Revisar los participantes de workerTwo',
       });
 
       const recalculated = (
@@ -1449,7 +1606,7 @@ describe.skipIf(!databaseUrl)(
       expect(audits.every((audit) => audit.storeId === storeId)).toBe(true);
       // El texto de la observación queda en la auditoría (ya recortado) y el
       // recálculo registra cuál descartó; el reparto ya no la tiene.
-      const notes = 'Revisar las horas de workerTwo';
+      const notes = 'Revisar los participantes de workerTwo';
       expect(audits[1].detail).toEqual({
         version: 2,
         notes,

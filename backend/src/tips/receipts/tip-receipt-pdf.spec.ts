@@ -8,7 +8,8 @@ import {
   renderTipReceiptPdf,
 } from './tip-receipt-pdf.js';
 
-// Tests unitarios de la constancia de pago en PDF (SPRINT-3-T13).
+// Tests unitarios de la constancia de pago en PDF (SPRINT-3-T13 y regla
+// equitativa de SPRINT-4R-T04).
 
 const RECEIPT: TipPoolReceiptResponse = {
   id: '3f1c2b9a-6d4e-4c1a-9b7f-2a8e5d0c4b11',
@@ -23,6 +24,7 @@ const RECEIPT: TipPoolReceiptResponse = {
   paymentDate: '2026-10-27',
   paidBy: { id: 'acc-1', name: 'Lucas Contador' },
   detail: {
+    rule: 'PROPORTIONAL_TO_HOURS',
     agreementSnapshot: {
       id: 'agreement-1',
       name: 'Pacto proporcional',
@@ -75,6 +77,39 @@ describe('formato de la constancia', () => {
       'Fecha de emisión': '27-10-2026 15:05 (hora de Chile)',
     });
   });
+
+  it('la constancia equitativa explica la regla y no muestra horas', () => {
+    const equal: TipPoolReceiptResponse = {
+      ...RECEIPT,
+      hoursWorked: null,
+      amount: 3334,
+      detail: {
+        rule: 'EQUAL_SHARES',
+        agreementSnapshot: null,
+        totalAmount: 10000,
+        totalHours: null,
+        lines: [],
+      },
+    };
+    const rows = Object.fromEntries(receiptRows(equal, ISSUED_AT));
+
+    expect(rows).toEqual({
+      Local: 'Melipilla Centro',
+      Período: '01-10-2026 al 15-10-2026',
+      Trabajador: 'Ñandú Pérez',
+      'Monto pagado': '$3.334',
+      'Fecha de pago': '27-10-2026',
+      'Responsable del pago': 'Lucas Contador',
+      'Regla aplicada':
+        'Reparto equitativo: el fondo de cada día se divide en partes iguales entre los trabajadores participantes de ese día',
+      'Total del reparto': '$10.000',
+      'ID de la constancia': RECEIPT.id,
+      'Fecha de emisión': '27-10-2026 15:05 (hora de Chile)',
+    });
+    expect(Object.keys(rows).some((label) => label.includes('Horas'))).toBe(
+      false,
+    );
+  });
 });
 
 describe('renderTipReceiptPdf', () => {
@@ -103,6 +138,24 @@ describe('renderTipReceiptPdf', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('genera el PDF de una constancia equitativa', async () => {
+    const bytes = await renderTipReceiptPdf(
+      {
+        ...RECEIPT,
+        hoursWorked: null,
+        detail: {
+          ...RECEIPT.detail,
+          rule: 'EQUAL_SHARES',
+          agreementSnapshot: null,
+          totalHours: null,
+        },
+      },
+      ISSUED_AT,
+    );
+    const pdf = await PDFDocument.load(bytes);
+    expect(pdf.getPageCount()).toBe(1);
   });
 
   it('no falla con caracteres que la fuente no puede dibujar', async () => {

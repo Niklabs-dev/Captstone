@@ -58,27 +58,53 @@ function formatIssuedAt(instant: Date): string {
   return `${get('day')}-${get('month')}-${get('year')} ${get('hour')}:${get('minute')} (hora de Chile)`;
 }
 
-function formatHours(hours: string): string {
-  return hours.replace('.', ',');
+// La base exige horas en los repartos proporcionales; null solo llegaría con
+// un dato corrupto y no se reemplaza por un valor inventado.
+function formatHours(hours: string | null): string {
+  return hours === null ? 'Sin horas registradas' : hours.replace('.', ',');
 }
 
-// Filas etiqueta/valor de la constancia, en orden.
+const EQUAL_SHARES_RULE_LABEL =
+  'Reparto equitativo: el fondo de cada día se divide en partes iguales entre los trabajadores participantes de ese día';
+
+// Filas etiqueta/valor de la constancia, en orden. La constancia del reparto
+// equitativo (SPRINT-4R-T04) explica la regla y no muestra horas: no se usan
+// ni se inventan.
 export function receiptRows(
   receipt: TipPoolReceiptResponse,
   issuedAt: Date,
 ): [string, string][] {
-  const agreement = receipt.detail.agreementSnapshot;
-  return [
+  const header: [string, string][] = [
     ['Local', receipt.store.name],
     [
       'Período',
       `${formatChileanDate(receipt.periodStart)} al ${formatChileanDate(receipt.periodEnd)}`,
     ],
     ['Trabajador', receipt.workerName],
-    ['Horas trabajadas', formatHours(receipt.hoursWorked)],
+  ];
+  const payment: [string, string][] = [
     ['Monto pagado', formatClp(receipt.amount)],
     ['Fecha de pago', formatChileanDate(receipt.paymentDate)],
     ['Responsable del pago', receipt.paidBy.name],
+  ];
+  const footer: [string, string][] = [
+    ['ID de la constancia', receipt.id],
+    ['Fecha de emisión', formatIssuedAt(issuedAt)],
+  ];
+  if (receipt.detail.rule === 'EQUAL_SHARES') {
+    return [
+      ...header,
+      ...payment,
+      ['Regla aplicada', EQUAL_SHARES_RULE_LABEL],
+      ['Total del reparto', formatClp(receipt.detail.totalAmount)],
+      ...footer,
+    ];
+  }
+  const agreement = receipt.detail.agreementSnapshot;
+  return [
+    ...header,
+    ['Horas trabajadas', formatHours(receipt.hoursWorked)],
+    ...payment,
     [
       'Pacto aplicado',
       agreement
@@ -87,8 +113,7 @@ export function receiptRows(
     ],
     ['Total del reparto', formatClp(receipt.detail.totalAmount)],
     ['Horas del reparto', formatHours(receipt.detail.totalHours)],
-    ['ID de la constancia', receipt.id],
-    ['Fecha de emisión', formatIssuedAt(issuedAt)],
+    ...footer,
   ];
 }
 
