@@ -7,6 +7,7 @@ import {
   MAX_VOUCHER_BYTES,
   dailyOperationErrorMessage,
   dailyOperationFieldErrors,
+  dailyParticipantSelectionError,
   formatSignedClp,
   isCashDifference,
   isDailyAmount,
@@ -14,6 +15,7 @@ import {
   parseDailyAmount,
   parseDailyOperation,
   parseDailyOperations,
+  parseEligibleWorkers,
   voucherFileError,
   type DailyOperationFormFields,
 } from './daily-operations';
@@ -22,12 +24,16 @@ import {
   DailyOperationRequestError,
   loadDailyOperationById,
   loadDailyOperations,
+  loadEligibleWorkers,
+  patchDailyOperation,
 } from './daily-operations-client';
 
 const storeId = '61000000-0000-4000-8000-000000000311';
 const responsibleId = '63000000-0000-4000-8000-000000000311';
 const operationId = '62000000-0000-4000-8000-000000000311';
 const voucherId = '64000000-0000-4000-8000-000000000311';
+const participantId = '65000000-0000-4000-8000-000000000311';
+const secondParticipantId = '65000000-0000-4000-8000-000000000312';
 const voucher = {
   id: voucherId,
   fileName: 'voucher-comedor.jpg',
@@ -36,6 +42,10 @@ const voucher = {
   sha256Hash: 'a'.repeat(64),
   createdAt: '2026-10-26T12:05:00Z',
 };
+const participants = [
+  { id: participantId, name: 'Benito Trabajador' },
+  { id: secondParticipantId, name: 'Ana Trabajadora' },
+];
 const operation = {
   id: operationId,
   store: { id: storeId, name: 'Centro' },
@@ -46,6 +56,7 @@ const operation = {
   cashDifference: -1500,
   differenceReason: 'Vale de caja firmado por la encargada',
   voucher,
+  participants,
   responsible: { id: responsibleId, name: 'Camila Supervisora' },
   createdAt: '2026-10-26T12:00:00Z',
   updatedAt: '2026-10-26T12:00:00Z',
@@ -170,6 +181,10 @@ test('La proyección conserva solo los datos públicos de la operación', () => 
         token: 'secret',
         filePath: '/private',
         voucher: { ...voucher, storagePath: '/private' },
+        participants: [
+          { ...participants[0], email: 'privado@example.test', phone: '+56' },
+          participants[1],
+        ],
         responsible: { ...operation.responsible, passwordHash: 'secret' },
       },
       storeId,
@@ -195,6 +210,11 @@ test('Se rechazan operaciones de otro local o fecha y fondos inconsistentes', ()
     { ...operation, voucher: { ...voucher, sizeBytes: MAX_VOUCHER_BYTES + 1 } },
     { ...operation, voucher: { ...voucher, sha256Hash: 'zz' } },
     { ...operation, voucher: { ...voucher, id: 'no-uuid' } },
+    { ...operation, participants: 'nadie' },
+    { ...operation, participants: null },
+    { ...operation, participants: [participants[0], participants[0]] },
+    { ...operation, participants: [{ id: participantId, name: '  ' }] },
+    { ...operation, participants: [{ id: 'no-uuid', name: 'Ana' }] },
     { ...operation, responsible: null },
     { ...operation, createdAt: 'incorrecta' },
   ])
@@ -220,6 +240,38 @@ test('Se rechazan operaciones de otro local o fecha y fondos inconsistentes', ()
   assert.equal(zero.cashDifference, 0);
   assert.equal(zero.differenceReason, null);
   assert.equal(zero.voucher, null);
+});
+test('El catálogo de elegibles conserva el orden y exige identidades únicas', () => {
+  const ordered = [
+    { id: secondParticipantId, name: 'Ana Trabajadora' },
+    { id: participantId, name: 'Benito Trabajador' },
+  ];
+  assert.deepEqual(parseEligibleWorkers(ordered), ordered);
+  assert.deepEqual(parseEligibleWorkers([]), []);
+  for (const bad of [
+    null,
+    {},
+    [ordered[0], ordered[0]],
+    [{ id: participantId, name: '' }],
+    [{ id: 'no-uuid', name: 'Ana' }],
+    [[ordered[0]]],
+  ])
+    assert.equal(parseEligibleWorkers(bad), null, JSON.stringify(bad));
+});
+test('La selección de participantes se exige solo con fondo mayor que cero', () => {
+  assert.equal(dailyParticipantSelectionError(null, 0, 0), null);
+  assert.equal(dailyParticipantSelectionError(0, null, 0), null);
+  assert.equal(dailyParticipantSelectionError(0, 0, 0), null);
+  assert.equal(dailyParticipantSelectionError(0, 0, 2), null);
+  assert.equal(dailyParticipantSelectionError(12500, 8000, 2), null);
+  assert.equal(
+    dailyParticipantSelectionError(0, 8000, 0),
+    'Selecciona al menos un trabajador participante: hay propinas por repartir.',
+  );
+  assert.equal(
+    dailyParticipantSelectionError(12500, 0, 0),
+    'Selecciona al menos un trabajador participante: hay propinas por repartir.',
+  );
 });
 test('La colección solo admite cero o una operación por local y fecha', () => {
   assert.deepEqual(
@@ -274,6 +326,7 @@ test('El cliente conserva la distinción entre alta y reintento idéntico', asyn
     cashTipAmount: 8000,
     cashDifference: -1500,
     differenceReason: fields.differenceReason,
+    participantIds: [participantId, secondParticipantId],
   };
   assert.equal((await createDailyOperation(input, file)).created, true);
   status = 200;
@@ -285,6 +338,7 @@ test('El cliente conserva la distinción entre alta y reintento idéntico', asyn
   assert.equal(body.get('cashTipAmount'), '8000');
   assert.equal(body.get('cashDifference'), '-1500');
   assert.equal(body.get('differenceReason'), input.differenceReason);
+  assert.deepEqual(body.getAll('participantIds'), input.participantIds);
   assert.ok(body.get('voucher') instanceof File);
 });
 test('El cliente reenvía el motivo solo cuando hay contenido y omite el voucher ausente', async (context) => {
@@ -307,6 +361,7 @@ test('El cliente reenvía el motivo solo cuando hay contenido y omite el voucher
       cashTipAmount: 8000,
       cashDifference: 0,
       differenceReason: '   ',
+      participantIds: [],
     },
     null,
   );
@@ -333,6 +388,7 @@ test('El conflicto expone el ID consultable de la operación existente', async (
         cashTipAmount: 0,
         cashDifference: 0,
         differenceReason: '',
+        participantIds: [],
       },
       null,
     ),
@@ -359,6 +415,7 @@ test('El local inactivo se traduce sin mostrar mensajes externos', async (contex
         cashTipAmount: 0,
         cashDifference: 0,
         differenceReason: '',
+        participantIds: [],
       },
       null,
     ),
@@ -377,6 +434,7 @@ test('El local inactivo se traduce sin mostrar mensajes externos', async (contex
         cashTipAmount: 0,
         cashDifference: 0,
         differenceReason: '',
+        participantIds: [],
       },
       null,
     ),
@@ -445,10 +503,109 @@ test('Los fallos de red se presentan como servicio no disponible', async (contex
         cashTipAmount: 0,
         cashDifference: 0,
         differenceReason: '',
+        participantIds: [],
       },
       null,
     ),
     (error: unknown) =>
       error instanceof DailyOperationRequestError && error.status === 503,
+  );
+});
+test('El catálogo de elegibles se consulta por el local y rechaza respuestas privadas', async (context) => {
+  const eligible = [
+    { id: secondParticipantId, name: 'Ana Trabajadora' },
+    { id: participantId, name: 'Benito Trabajador' },
+  ];
+  let payload: unknown = eligible;
+  const mock = context.mock.method(globalThis, 'fetch', async () =>
+    Response.json(payload, { status: 200 }),
+  );
+  const signal = new AbortController().signal;
+  assert.deepEqual(await loadEligibleWorkers(storeId, signal), eligible);
+  assert.equal(
+    mock.mock.calls[0].arguments[0],
+    '/api/daily-operations/eligible-workers?storeId=' + storeId,
+  );
+  payload = [...eligible, { id: participantId, name: 'Duplicada' }];
+  await assert.rejects(
+    loadEligibleWorkers(storeId, signal),
+    (error: unknown) =>
+      error instanceof DailyOperationRequestError && error.status === 502,
+  );
+  payload = { email: 'privado@example.test' };
+  await assert.rejects(
+    loadEligibleWorkers(storeId, signal),
+    (error: unknown) =>
+      error instanceof DailyOperationRequestError && error.status === 502,
+  );
+  payload = eligible;
+  context.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('network down');
+  });
+  await assert.rejects(
+    loadEligibleWorkers(storeId, signal),
+    (error: unknown) =>
+      error instanceof DailyOperationRequestError && error.status === 503,
+  );
+});
+test('La corrección envía solo los campos definidos con participantIds repetidos', async (context) => {
+  const mock = context.mock.method(globalThis, 'fetch', async () =>
+    Response.json(
+      {
+        ...operation,
+        cashTipAmount: 9000,
+        tipFundAmount: 21500,
+        participants: [participants[1]],
+      },
+      { status: 200 },
+    ),
+  );
+  const corrected = await patchDailyOperation(
+    operationId,
+    {
+      cashTipAmount: 9000,
+      participantIds: [secondParticipantId],
+    },
+    null,
+  );
+  assert.equal(corrected.cashTipAmount, 9000);
+  assert.equal(corrected.participants.length, 1);
+  const request = mock.mock.calls[0].arguments;
+  assert.equal(request[0], '/api/daily-operations/' + operationId);
+  assert.equal(request[1]?.method, 'PATCH');
+  const body = request[1]?.body as FormData;
+  assert.equal(body.get('cashTipAmount'), '9000');
+  assert.deepEqual(body.getAll('participantIds'), [secondParticipantId]);
+  assert.equal(body.get('cardTipAmount'), null);
+  assert.equal(body.get('voucher'), null);
+});
+test('La corrección conserva el voucher de reemplazo y mapea el conflicto', async (context) => {
+  const file = new File(['nuevo'], 'voucher2.png', { type: 'image/png' });
+  const mock = context.mock.method(globalThis, 'fetch', async () =>
+    Response.json(operation, { status: 200 }),
+  );
+  await patchDailyOperation(
+    operationId,
+    { cardTipAmount: 12500, differenceReason: 'Voucher reemplazado' },
+    file,
+  );
+  const body = mock.mock.calls[0].arguments[1]?.body as FormData;
+  assert.ok(body.get('voucher') instanceof File);
+  assert.equal(body.get('differenceReason'), 'Voucher reemplazado');
+  mock.mock.restore();
+  context.mock.method(globalThis, 'fetch', async () =>
+    Response.json(
+      { message: 'SQL secret', existingOperationId: operationId },
+      { status: 409 },
+    ),
+  );
+  await assert.rejects(
+    patchDailyOperation(operationId, { cashTipAmount: 1 }, null),
+    (error: unknown) => {
+      assert.ok(error instanceof DailyOperationRequestError);
+      assert.equal(error.status, 409);
+      assert.equal(error.existingOperationId, operationId);
+      return true;
+    },
   );
 });

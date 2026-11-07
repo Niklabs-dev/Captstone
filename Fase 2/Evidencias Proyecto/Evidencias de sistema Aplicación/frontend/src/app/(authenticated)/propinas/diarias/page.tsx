@@ -29,8 +29,9 @@ export default async function DailyOperationPage(): Promise<ReactElement> {
     <>
       <p className={introClass}>
         Registra la operación diaria de tu local: propinas con tarjeta y su
-        voucher, propinas en efectivo y la diferencia de efectivo declarada. Los
-        montos se expresan en pesos chilenos.
+        voucher, propinas en efectivo, la diferencia de efectivo declarada y los
+        trabajadores participantes del reparto. Los montos se expresan en pesos
+        chilenos.
       </p>
       <DailyOperationPanel
         store={{ id: store.id, name: store.name, isActive: store.isActive }}
