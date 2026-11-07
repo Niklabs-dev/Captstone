@@ -36,7 +36,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(output).toContain('is valid');
   });
 
-  it('las migraciones crean las 29 tablas del modelo', () => {
+  it('las migraciones crean las 31 tablas del modelo', () => {
     const sql = readMigrations();
     const tablasEsperadas = [
       'stores',
@@ -63,6 +63,8 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'cash_closing_tip_entries',
       'daily_operations',
       'daily_operation_vouchers',
+      'daily_operation_participants',
+      'tip_pool_daily_operation_sources',
       'products',
       'inventory_movements',
       'inventory_counts',
@@ -441,5 +443,104 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     );
     expect(down).toContain('DROP TABLE "daily_operations"');
     expect(down).toContain('DROP TABLE "daily_operation_vouchers"');
+  });
+
+  it('modela participantes diarios y reparto equitativo (SPRINT-4R-T02)', () => {
+    const sql = readMigration('participantes_diarios_reparto_equitativo');
+
+    // Regla equitativa explícita que convive con la proporcional histórica.
+    expect(sql).toContain(
+      'ALTER TYPE "TipAgreementRule" ADD VALUE \'EQUAL_SHARES\'',
+    );
+
+    // Horas NULLables solo para líneas y constancias (los valores existentes
+    // no se reescriben: solo cae el NOT NULL).
+    expect(sql).toContain(
+      'ALTER TABLE "tip_pool_lines" ALTER COLUMN "hours_worked" DROP NOT NULL',
+    );
+    expect(sql).toContain(
+      'ALTER TABLE "tip_pool_receipts" ALTER COLUMN "hours_worked" DROP NOT NULL',
+    );
+
+    // Una sola selección por operación y trabajador, sin duplicados.
+    expect(sql).toContain('CREATE TABLE "daily_operation_participants"');
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "daily_operation_participants_operation_id_worker_id_key"',
+    );
+    // El trabajador con historial no se borra (Restrict); la participación
+    // muere con su operación (Cascade).
+    expect(sql).toContain(
+      'ADD CONSTRAINT "daily_operation_participants_worker_id_fkey" FOREIGN KEY ("worker_id") REFERENCES "users"("id") ON DELETE RESTRICT',
+    );
+    expect(sql).toContain(
+      'ADD CONSTRAINT "daily_operation_participants_operation_id_fkey" FOREIGN KEY ("operation_id") REFERENCES "daily_operations"("id") ON DELETE CASCADE',
+    );
+
+    // Fuente del reparto alimentada por la operación diaria: separada de
+    // tip_pool_sources, monto BIGINT y una sola operación por fuente.
+    expect(sql).toContain('CREATE TABLE "tip_pool_daily_operation_sources"');
+    expect(sql).toContain('"amount" BIGINT NOT NULL');
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "tip_pool_daily_operation_sources_operation_id_key"',
+    );
+    expect(sql).toContain(
+      'ADD CONSTRAINT "tip_pool_daily_operation_sources_operation_id_fkey" FOREIGN KEY ("operation_id") REFERENCES "daily_operations"("id") ON DELETE RESTRICT',
+    );
+
+    // Triggers: validación del trabajador al escribir la participación,
+    // bloqueo de cambios con reparto CONFIRMED/PAID y conciliación exacta de
+    // la fuente (monto = fondo de la operación, mismo local).
+    expect(sql).toContain(
+      'CREATE TRIGGER "daily_operation_participants_validate_worker_rows"',
+    );
+    expect(sql).toContain(
+      'CREATE TRIGGER "daily_operation_participants_require_draft_pool_rows"',
+    );
+    expect(sql).toContain(
+      'CREATE TRIGGER "daily_operations_require_draft_pool_rows"',
+    );
+    expect(sql).toContain(
+      'CREATE TRIGGER "tip_pool_daily_operation_sources_enforce_rows"',
+    );
+    expect(sql).toContain(
+      'BEFORE INSERT OR UPDATE ON "daily_operation_participants"',
+    );
+    expect(sql).toContain('r."code" = \'TRABAJADOR\'');
+    expect(sql).toContain('NEW."amount" = o."tip_fund_amount"');
+    expect(sql).toContain(
+      'CREATE TRIGGER "tip_pool_lines_hours_consistent_rows"',
+    );
+    expect(sql).toContain(
+      'CREATE TRIGGER "tip_pool_receipts_hours_consistent_rows"',
+    );
+    // Las horas de la constancia se comparan NULL-safe contra su línea.
+    expect(sql).toContain(
+      'l."hours_worked" IS NOT DISTINCT FROM NEW."hours_worked"',
+    );
+
+    // La migración no toca los históricos de propinas ni de cierres.
+    expect(sql).not.toContain('ALTER TABLE "tip_entries"');
+    expect(sql).not.toContain('ALTER TABLE "tip_pool_sources"');
+    expect(sql).not.toContain('ALTER TABLE "cash_closings"');
+
+    // La reversa vive junto a la migración y devuelve el enum y los NOT NULL.
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('participantes_diarios_reparto_equitativo'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toContain('DROP TABLE "daily_operation_participants"');
+    expect(down).toContain('DROP TABLE "tip_pool_daily_operation_sources"');
+    expect(down).toContain(
+      'ALTER TABLE "tip_pool_lines" ALTER COLUMN "hours_worked" SET NOT NULL',
+    );
+    expect(down).toContain(
+      'CREATE TYPE "TipAgreementRule_new" AS ENUM (\'PROPORTIONAL_TO_HOURS\')',
+    );
+    expect(down).toContain(
+      'DROP TRIGGER "daily_operation_participants_validate_worker_rows" ON "daily_operation_participants"',
+    );
   });
 });
