@@ -23,6 +23,13 @@ function trim({ value }: { value: unknown }): unknown {
   return typeof value === 'string' ? value.trim() : value;
 }
 
+// Multipart repite el campo para enviar varios IDs; Multer entrega un solo
+// valor como string y varios como arreglo: se normaliza siempre a arreglo.
+function toIdArray({ value }: { value: unknown }): unknown {
+  if (value === undefined || value === null) return value;
+  return Array.isArray(value) ? value : [value];
+}
+
 // Campos del formulario multipart de la operación diaria (SPRINT-4R-T01). El
 // voucher llega aparte (campo "voucher"), lo procesa Multer; los montos
 // llegan como texto y se transforman a entero.
@@ -105,6 +112,25 @@ export class CreateDailyOperationDto {
     message: 'differenceReason no puede superar 500 caracteres',
   })
   differenceReason?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Trabajadores que participan del reparto del día. Se repite el campo ' +
+      '(FormData.append por cada ID) y cada valor debe ser el UUID de un ' +
+      'trabajador activo del local (rol TRABAJADOR), tal como entrega ' +
+      'GET /daily-operations/eligible-workers. Obligatorio (al menos uno) ' +
+      'cuando el fondo del día (cardTipAmount + cashTipAmount) es mayor que 0; ' +
+      'con fondo 0 la selección debe venir vacía.',
+    example: ['b2c3d4e5-f6a7-4890-b1c2-d3e4f5a6b7c8'],
+    type: [String],
+  })
+  @IsOptional()
+  @Transform(toIdArray)
+  @IsUUID(undefined, {
+    each: true,
+    message: 'cada participantIds debe ser el UUID de un trabajador',
+  })
+  participantIds?: string[];
 }
 
 // Solo para Swagger: el formulario completo, con el voucher, para que
