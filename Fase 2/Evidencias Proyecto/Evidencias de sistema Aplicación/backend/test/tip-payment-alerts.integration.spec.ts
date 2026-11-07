@@ -308,7 +308,7 @@ describe.skipIf(!databaseUrl)(
 
     it('mantiene DRAFT y CONFIRMED, y el pago antes del plazo elimina la alerta del reparto enterado', async () => {
       const entryId = await seedEntry(todayText, 'DEBIT_CARD', 9000);
-      await prisma.workHoursRecord.create({
+      const hours = await prisma.workHoursRecord.create({
         data: {
           periodStart: day(todayText),
           periodEnd: day(todayText),
@@ -317,18 +317,44 @@ describe.skipIf(!databaseUrl)(
           workerId: ids.worker,
           recordedById: ids.supervisor,
         },
+        select: { id: true },
       });
-      const created = (
-        await server()
-          .post('/tip-pools/preview')
-          .set('Authorization', `Bearer ${tokens.accountant}`)
-          .send({
-            storeId,
-            periodStart: todayText,
-            periodEnd: todayText,
-          })
-          .expect(201)
-      ).body as TipPoolResponse;
+      // Desde SPRINT-4R-T04 la vista previa calcula siempre el reparto
+      // equitativo desde las operaciones diarias; las alertas siguen sobre los
+      // registros diarios (tip_entries). El reparto proporcional histórico que
+      // los usa como fuente se construye directamente en la base, como lo
+      // hacía el motor anterior, y se confirma y paga por la API.
+      const agreement = await prisma.tipAgreement.findFirstOrThrow({
+        where: { storeId },
+        select: { id: true, name: true },
+      });
+      const created = await prisma.tipPool.create({
+        data: {
+          storeId,
+          periodStart: day(todayText),
+          periodEnd: day(todayText),
+          totalAmount: 9000,
+          agreementId: agreement.id,
+          agreementSnapshot: {
+            id: agreement.id,
+            name: agreement.name,
+            rule: 'PROPORTIONAL_TO_HOURS',
+            validFrom: '2026-01-01',
+            validTo: null,
+          },
+          calculatedById: ids.accountant,
+          sources: { create: { tipEntryId: entryId, amount: 9000 } },
+          lines: {
+            create: {
+              userId: ids.worker,
+              workHoursRecordId: hours.id,
+              hoursWorked: 10,
+              amount: 9000,
+            },
+          },
+        },
+        select: { id: true, version: true },
+      });
 
       const draftAlert = (await ownAlerts()).find(
         (alert) => alert.tipEntryId === entryId,

@@ -35,7 +35,10 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import { StoreScoped } from '../auth/decorators/store-scoped.decorator.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import { contentDisposition } from '../documents/utils/download-name.util.js';
-import { PreviewTipPoolDto } from './dto/preview-tip-pool.dto.js';
+import {
+  CalculateTipPoolDto,
+  PreviewTipPoolDto,
+} from './dto/preview-tip-pool.dto.js';
 import {
   ConfirmTipPoolDto,
   ObserveTipPoolDto,
@@ -95,15 +98,15 @@ export class TipPoolsController {
       storeId: 'store.id',
       periodStart: 'periodStart',
       periodEnd: 'periodEnd',
-      agreementId: 'agreement.id',
+      rule: 'rule',
       totalAmount: 'totalAmount',
-      totalHours: 'totalHours',
     },
   })
   @ApiOperation({
-    summary: 'Calcula y guarda la vista previa (DRAFT) del reparto de propinas',
+    summary:
+      'Calcula y guarda la vista previa (DRAFT) del reparto equitativo de propinas',
     description:
-      'Usa el pacto vigente, los registros diarios del período y las horas del período exacto. Si ya existe un borrador del mismo local y período, lo reemplaza conservando su ID.',
+      'Regla equitativa (SPRINT-4R-T04): para cada operación diaria del período se suman la propina de tarjeta y la de efectivo, y ese fondo se divide una sola vez en partes iguales entre los participantes de ese día; cada trabajador recibe la suma de sus asignaciones diarias (no se divide el total del período entre la unión de trabajadores). Residuo CLP: los pesos sobrantes de cada día van de a $1 a los participantes ordenados por ID, comenzando en la posición (días desde 1970-01-01) mod n, así el peso extra rota día a día; las líneas siempre suman el fondo exacto (ej. $10.000 entre 3 → $3.334, $3.333 y $3.333). Un no seleccionado no recibe línea y no se usan horas. Si ya existe un borrador del mismo local y período, lo reemplaza conservando su ID y subiendo su versión; con expectedVersion el recálculo exige que la versión revisada siga vigente.',
   })
   @ApiCreatedResponse({
     description: 'Primer cálculo del período: borrador creado.',
@@ -123,15 +126,16 @@ export class TipPoolsController {
   @ApiNotFoundResponse({ description: 'Local no encontrado.' })
   @ApiConflictResponse({
     description:
-      'El reparto del período ya está confirmado o pagado, o hubo un cálculo simultáneo.',
+      'El reparto del período ya está confirmado o pagado, expectedVersion no coincide con el borrador (cuerpo con currentStatus y currentVersion), o hubo un cálculo simultáneo.',
+    type: TipPoolConflictDto,
   })
   @ApiUnprocessableEntityResponse({
     description:
-      'Faltan datos o son inconsistentes; se informan todas las causas y no se guarda nada.',
+      'No hay operaciones diarias en el período, alguna ya forma parte de otro reparto o un día con propinas no tiene participantes; se informan todas las causas y no se guarda nada.',
     type: TipPoolValidationErrorDto,
   })
   async preview(
-    @Body() dto: PreviewTipPoolDto,
+    @Body() dto: CalculateTipPoolDto,
     @CurrentUser() currentUser: AuthUser,
     @Res({ passthrough: true }) res: Response,
   ): Promise<TipPoolResponse> {
@@ -142,7 +146,7 @@ export class TipPoolsController {
       detail: {
         recalculated: !result.created,
         workers: result.pool.lines.length,
-        sources: result.pool.sources.length,
+        sources: result.pool.dailySources.length,
         // El recálculo limpia la observación: el registro guarda qué atendió.
         ...(result.created ? {} : { previousNotes: result.previousNotes }),
       },
@@ -238,7 +242,7 @@ export class TipPoolsController {
   @ApiOperation({
     summary: 'Valida el cálculo del reparto y lo confirma (DRAFT → CONFIRMED)',
     description:
-      'Revalida que el reparto esté conciliado (Σ líneas = total y Σ fuentes = total). Desde la confirmación los montos no se pueden modificar.',
+      'Revalida que el reparto esté conciliado (Σ líneas = total y Σ fuentes = total). En el reparto equitativo además recalcula con las operaciones diarias vigentes del período y exige que fuentes y líneas coincidan con la foto: si una operación se corrigió, agregó o cambió su selección, responde 422 y hay que recalcular. Desde la confirmación los montos, las operaciones fuente y su selección no se pueden modificar.',
   })
   @ApiOkResponse({
     description: 'Reparto confirmado.',
@@ -260,7 +264,7 @@ export class TipPoolsController {
   })
   @ApiUnprocessableEntityResponse({
     description:
-      'El reparto no está conciliado; no se confirma y hay que recalcularlo.',
+      'El reparto no está conciliado o su foto equitativa quedó desactualizada; no se confirma y hay que recalcularlo.',
   })
   async confirm(
     @Param('id', new ParseUUIDPipe()) id: string,

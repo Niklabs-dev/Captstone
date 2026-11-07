@@ -1,8 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   TIP_POOL_ISSUE_CODE,
+  TIP_POOL_RULES,
   TIP_POOL_STATUSES,
   type TipAgreementSnapshot,
+  type TipPoolDailySourceResponse,
   type TipPoolIssue,
   type TipPoolIssueCode,
   type TipPoolConflictBody,
@@ -10,6 +12,7 @@ import {
   type TipPoolReceiptDetail,
   type TipPoolReceiptResponse,
   type TipPoolResponse,
+  type TipPoolRule,
   type TipPoolSourceResponse,
   type TipPoolStatusCode,
   type TipPoolValidationErrorBody,
@@ -94,14 +97,51 @@ class TipPoolLineResponseDto implements TipPoolLineResponse {
   workerName: string;
 
   @ApiProperty({
-    description: 'Horas usadas en el cálculo, con 2 decimales (copia).',
-    example: '40.00',
+    description:
+      'Horas usadas en un reparto proporcional histórico, con 2 decimales (copia); null en el reparto equitativo, que no usa horas.',
+    example: null,
+    nullable: true,
+    type: String,
   })
-  hoursWorked: string;
+  hoursWorked: string | null;
 
   @ApiProperty({
-    description: 'Monto asignado en CLP enteros.',
+    description:
+      'Monto a pagar en CLP enteros: en el reparto equitativo, la suma de las asignaciones diarias del trabajador en el período.',
     example: 16000,
+  })
+  amount: number;
+}
+
+class TipPoolDailySourceResponseDto implements TipPoolDailySourceResponse {
+  @ApiProperty({
+    description: 'ID de la operación diaria usada como fuente.',
+    example: 'c4a1b2d3-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+  })
+  operationId: string;
+
+  @ApiProperty({
+    description: 'Día de negocio de la operación (YYYY-MM-DD).',
+    example: '2026-10-02',
+  })
+  businessDate: string;
+
+  @ApiProperty({
+    description: 'Propina con tarjeta de la operación en CLP.',
+    example: 31602,
+  })
+  cardTipAmount: number;
+
+  @ApiProperty({
+    description: 'Propina en efectivo de la operación en CLP.',
+    example: 4500,
+  })
+  cashTipAmount: number;
+
+  @ApiProperty({
+    description:
+      'Fondo del día aplicado al reparto (tarjeta + efectivo, copia); se divide una sola vez entre los participantes de ese día.',
+    example: 36102,
   })
   amount: number;
 }
@@ -180,7 +220,15 @@ export class TipPoolResponseDto implements TipPoolResponse {
 
   @ApiProperty({
     description:
-      'Copia del pacto aplicado; null solo en repartos históricos sin copia.',
+      'Regla aplicada. Todo cálculo nuevo es EQUAL_SHARES: el fondo de cada operación diaria (tarjeta + efectivo) se divide en partes iguales entre sus participantes y cada trabajador recibe la suma de sus asignaciones diarias. Los pesos sobrantes de cada día se entregan de a $1 a los participantes ordenados por ID, comenzando en la posición (días desde 1970-01-01) mod n, de modo que el peso extra rota día a día. PROPORTIONAL_TO_HOURS identifica los repartos históricos guardados.',
+    enum: TIP_POOL_RULES,
+    example: 'EQUAL_SHARES',
+  })
+  rule: TipPoolRule;
+
+  @ApiProperty({
+    description:
+      'Copia del pacto aplicado en los repartos proporcionales históricos; null en los equitativos (no usan pacto) y en los históricos sin copia.',
     type: TipAgreementSnapshotDto,
     nullable: true,
   })
@@ -193,20 +241,25 @@ export class TipPoolResponseDto implements TipPoolResponse {
   totalAmount: number;
 
   @ApiProperty({
-    description: 'Suma de horas de las líneas, con 2 decimales.',
-    example: '312.50',
+    description:
+      'Suma de horas de las líneas en un reparto proporcional histórico, con 2 decimales; null en el reparto equitativo.',
+    example: null,
+    nullable: true,
+    type: String,
   })
-  totalHours: string;
+  totalHours: string | null;
 
   @ApiProperty({
-    description: 'Monto por trabajador, ordenado por userId.',
+    description:
+      'Monto a pagar por trabajador, ordenado por userId. En el reparto equitativo solo aparecen los trabajadores que participaron de algún día.',
     type: TipPoolLineResponseDto,
     isArray: true,
   })
   lines: TipPoolLineResponseDto[];
 
   @ApiProperty({
-    description: 'Registros diarios usados como fuente del fondo.',
+    description:
+      'Registros diarios históricos (tip_entries) usados como fuente de un reparto proporcional; vacío en el reparto equitativo.',
     type: TipPoolSourceResponseDto,
     isArray: true,
   })
@@ -214,7 +267,15 @@ export class TipPoolResponseDto implements TipPoolResponse {
 
   @ApiProperty({
     description:
-      'true si la suma de las líneas y la de las fuentes son iguales al total.',
+      'Operaciones diarias usadas como fuente del reparto equitativo, ordenadas por fecha; vacío en los repartos históricos.',
+    type: TipPoolDailySourceResponseDto,
+    isArray: true,
+  })
+  dailySources: TipPoolDailySourceResponseDto[];
+
+  @ApiProperty({
+    description:
+      'true si la suma de las líneas y la de las fuentes (registros históricos más operaciones diarias) son iguales al total.',
     example: true,
   })
   reconciled: boolean;
@@ -317,6 +378,14 @@ export class TipPoolConflictDto implements TipPoolConflictBody {
 
 class TipPoolReceiptDetailDto implements TipPoolReceiptDetail {
   @ApiProperty({
+    description:
+      'Regla aplicada al reparto pagado; las constancias anteriores a la regla equitativa son PROPORTIONAL_TO_HOURS.',
+    enum: TIP_POOL_RULES,
+    example: 'EQUAL_SHARES',
+  })
+  rule: TipPoolRule;
+
+  @ApiProperty({
     description: 'Copia del pacto aplicado al momento del pago.',
     type: TipAgreementSnapshotDto,
     nullable: true,
@@ -327,10 +396,13 @@ class TipPoolReceiptDetailDto implements TipPoolReceiptDetail {
   totalAmount: number;
 
   @ApiProperty({
-    description: 'Horas totales del reparto, con 2 decimales.',
-    example: '100.00',
+    description:
+      'Horas totales de un reparto proporcional, con 2 decimales; null en el reparto equitativo.',
+    example: null,
+    nullable: true,
+    type: String,
   })
-  totalHours: string;
+  totalHours: string | null;
 
   @ApiProperty({
     description: 'Todas las líneas del reparto al momento del pago.',
@@ -384,10 +456,13 @@ export class TipPoolReceiptResponseDto implements TipPoolReceiptResponse {
   periodEnd: string;
 
   @ApiProperty({
-    description: 'Horas del trabajador, con 2 decimales.',
-    example: '40.00',
+    description:
+      'Horas del trabajador en un reparto proporcional, con 2 decimales; null en el reparto equitativo.',
+    example: null,
+    nullable: true,
+    type: String,
   })
-  hoursWorked: string;
+  hoursWorked: string | null;
 
   @ApiProperty({ description: 'Monto pagado en CLP.', example: 10000 })
   amount: number;
@@ -422,26 +497,25 @@ class TipPoolIssueDto implements TipPoolIssue {
   @ApiProperty({
     description: 'Código estable de la causa.',
     enum: Object.values(TIP_POOL_ISSUE_CODE),
-    example: TIP_POOL_ISSUE_CODE.AGREEMENT_MISSING,
+    example: TIP_POOL_ISSUE_CODE.DAILY_PARTICIPANTS_MISSING,
   })
   code: TipPoolIssueCode;
 
   @ApiProperty({
     description: 'Explicación para el contador.',
     example:
-      'No hay un pacto de reparto vigente para el local entre el 2026-10-01 y el 2026-10-15.',
+      '1 día(s) del período tienen propinas por repartir y ningún trabajador participante; corrige la operación diaria antes de calcular.',
   })
   message: string;
 
   @ApiPropertyOptional({
-    description: 'Datos que identifican los registros involucrados.',
+    description: 'Datos que identifican las operaciones diarias involucradas.',
     example: {
-      tipEntries: [
+      operations: [
         {
-          tipEntryId: 'a9000000-0000-4000-8000-000000000005',
+          operationId: 'c4a1b2d3-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
           businessDate: '2026-10-02',
-          paymentMethod: 'CASH',
-          poolId: 'a9000000-0000-4000-8000-000000000009',
+          tipFundAmount: 36102,
         },
       ],
     },

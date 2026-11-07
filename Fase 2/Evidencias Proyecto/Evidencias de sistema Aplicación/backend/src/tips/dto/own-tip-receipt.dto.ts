@@ -28,8 +28,14 @@ export class OwnTipReceiptDto {
   periodStart: string;
   @ApiProperty({ description: 'Fin del período.', example: '2026-01-11' })
   periodEnd: string;
-  @ApiProperty({ description: 'Horas propias consideradas.', example: '40.00' })
-  hoursWorked: string;
+  @ApiProperty({
+    description:
+      'Horas propias consideradas en un reparto proporcional histórico; null en el reparto equitativo, que no usa horas.',
+    example: '40.00',
+    nullable: true,
+    type: String,
+  })
+  hoursWorked: string | null;
   @ApiProperty({ description: 'Monto propio enterado en CLP.', example: 15000 })
   amount: number;
   @ApiProperty({ description: 'Fecha de entrega.', example: '2026-01-12' })
