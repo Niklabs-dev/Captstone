@@ -314,6 +314,34 @@ con detalle limitado a local, fecha y montos (lista blanca: sin correos,
 nombres, RUT ni contenido del archivo). El contrato completo está en Swagger
 (`/api/docs`).
 
+### Participantes del reparto y regla equitativa (SPRINT-4R-T02, solo modelo)
+
+Desde SPRINT-4R-T02 la operación diaria conserva, a nivel de base de datos, la
+selección de trabajadores que participan de su reparto
+(`daily_operation_participants`): una única selección por operación, compartida
+por la propina de tarjeta y la de efectivo del mismo local/día (la operación ya
+acumula ambas en `tipFundAmount`), sin duplicados
+(`UNIQUE(operation_id, worker_id)`) y validada al insertar o cambiar (el
+trabajador debe ser del mismo local, con rol `TRABAJADOR` y activo): una baja
+lógica posterior no borra la selección histórica. El pacto de reparto admite la
+regla equitativa explícita `EQUAL_SHARES` junto a la proporcional histórica
+`PROPORTIONAL_TO_HOURS`, que sigue funcionando con `tip_entries` sin cambios;
+las líneas y constancias de un reparto equitativo guardan `hoursWorked`
+`NULL` — la regla no usa horas y no se inventan — mientras los repartos
+proporcionales e históricos conservan las suyas. El reparto se alimenta de la
+operación por una fuente propia (`tip_pool_daily_operation_sources`, CLP
+entero igual al fondo del día, una operación como máximo por reparto) que da la
+conciliación exacta contra el fondo, y los repartos `CONFIRMED`/`PAID` son
+inmutables: la base rechaza corregir participantes o los montos, fecha y local
+de una operación que ya alimentó un reparto cerrado (con el reparto en
+`DRAFT` sí se permite ajustarla).
+
+Esta tarea **no agrega endpoints ni cálculo**: la API para consultar y corregir
+la selección de participantes es SPRINT-4R-T03 y el cálculo diario equitativo
+(es decir, crear el reparto desde la operación) es SPRINT-4R-T04. Detalle del
+modelo en
+[`docs/modelo-datos.md`](docs/modelo-datos.md#participantes-diarios-y-regla-equitativa-sprint-4r-t02).
+
 ## Registro diario de propinas (flujo anterior — histórico, modo lectura)
 
 > **Reemplazado por la [Operación diaria](#operación-diaria-sprint-4r-t01)
