@@ -1,24 +1,22 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { CashClosingStatus } from '../../generated/prisma/client.js';
 import {
-  CashClosingStatus,
-  PaymentMethod,
-} from '../../generated/prisma/client.js';
-import type {
-  AlertCounts,
-  PaymentMethodSales,
-  PendingClosingDifference,
-  SalesDashboard,
-  SalesDashboardStore,
-  SalesDashboardTotals,
-  StoreAlertsSummary,
-  StoreCardTipsSummary,
-  StoreClosingsSummary,
-  StoreDashboard,
-  StoreSalesSummary,
+  CLOSING_BALANCE_STATUSES,
+  type AlertCounts,
+  type ClosingLineDifference,
+  type PendingClosingDifference,
+  type SalesDashboard,
+  type SalesDashboardStore,
+  type SalesDashboardTotals,
+  type StoreAlertsSummary,
+  type StoreCardTipsSummary,
+  type StoreClosingsSummary,
+  type StoreDashboard,
+  type StoreSalesSummary,
 } from '../types/sales-dashboard.types.js';
 
-// Documentación Swagger de la consulta consolidada (SPRINT-4-T13). Montos en
-// CLP enteros.
+// Documentación Swagger de la consulta consolidada (SPRINT-4-T13, medios de
+// pago dinámicos en SPRINT-4-T32). Montos en CLP enteros.
 
 class SalesDashboardStoreDto implements SalesDashboardStore {
   @ApiProperty({
@@ -40,13 +38,19 @@ class SalesDashboardStoreDto implements SalesDashboardStore {
   isActive: boolean;
 }
 
-class PaymentMethodSalesDto implements PaymentMethodSales {
+class PaymentMethodSalesDto {
   @ApiProperty({
-    description: 'Medio de pago.',
-    enum: PaymentMethod,
-    example: PaymentMethod.DEBIT_CARD,
+    description: 'Código del medio de pago del catálogo.',
+    example: 'DEBIT_CARD',
   })
-  paymentMethod: PaymentMethod;
+  paymentMethod: string;
+
+  @ApiProperty({
+    description:
+      'Nombre del medio de pago según el catálogo; se resuelve aunque el medio esté desactivado.',
+    example: 'Tarjeta de débito',
+  })
+  paymentMethodName: string;
 
   @ApiProperty({ description: 'Cantidad de ventas del medio.', example: 42 })
   salesCount: number;
@@ -98,7 +102,7 @@ class StoreSalesSummaryDto implements StoreSalesSummary {
 
   @ApiProperty({
     description:
-      'Desglose por medio de pago; siempre incluye los cuatro medios.',
+      'Desglose dinámico por medio de pago: incluye los medios activos del catálogo y los históricos (inactivos) con ventas del día, ordenados por sortOrder/código del catálogo.',
     type: [PaymentMethodSalesDto],
   })
   byPaymentMethod: PaymentMethodSalesDto[];
@@ -107,7 +111,7 @@ class StoreSalesSummaryDto implements StoreSalesSummary {
 class StoreCardTipsSummaryDto implements StoreCardTipsSummary {
   @ApiProperty({
     description:
-      'Propina con débito o crédito del registro diario de propinas (fuente de los repartos).',
+      'Propina con medio conciliable con tarjeta del registro diario de propinas (fuente de los repartos).',
     example: 31602,
   })
   registeredAmount: number;
@@ -149,7 +153,7 @@ class StoreClosingsSummaryDto implements StoreClosingsSummary {
 
   @ApiProperty({
     description:
-      'Diferencia de caja (contado menos esperado) sumada en los cierres del día.',
+      'Diferencia de caja (contado menos esperado) sumada en los cierres del día. Cifra informativa: no decide el cuadre, pues un faltante y un sobrante pueden compensarse a 0.',
     example: -1000,
   })
   cashDifference: number;
@@ -174,6 +178,39 @@ class StoreClosingsSummaryDto implements StoreClosingsSummary {
   mercadoPagoNetSales: number;
 }
 
+class ClosingLineDifferenceDto implements ClosingLineDifference {
+  @ApiProperty({
+    description: 'Código del medio de pago de la línea.',
+    example: 'CASH',
+  })
+  paymentMethod: string;
+
+  @ApiProperty({
+    description:
+      'Nombre del medio de pago según el catálogo; se resuelve aunque el medio esté desactivado.',
+    example: 'Efectivo',
+  })
+  paymentMethodName: string;
+
+  @ApiProperty({
+    description: 'Monto esperado según el sistema (ventas, más fondo en CASH).',
+    example: 150000,
+  })
+  expectedAmount: number;
+
+  @ApiProperty({
+    description: 'Monto contado declarado por el supervisor.',
+    example: 149000,
+  })
+  countedAmount: number;
+
+  @ApiProperty({
+    description: 'Diferencia de la línea (contado menos esperado).',
+    example: -1000,
+  })
+  difference: number;
+}
+
 class PendingClosingDifferenceDto implements PendingClosingDifference {
   @ApiProperty({
     description: 'ID del cierre de caja (UUID), consultable en /cash-closings.',
@@ -192,7 +229,8 @@ class PendingClosingDifferenceDto implements PendingClosingDifference {
   status: CashClosingStatus;
 
   @ApiProperty({
-    description: 'Diferencia de caja del cierre (contado menos esperado).',
+    description:
+      'Diferencia de caja del cierre (contado menos esperado), suma de sus líneas. Cifra informativa.',
     example: -1000,
   })
   cashDifference: number;
@@ -202,6 +240,34 @@ class PendingClosingDifferenceDto implements PendingClosingDifference {
     example: 1600,
   })
   voucherDifference: number;
+
+  @ApiProperty({
+    description:
+      'Líneas del cierre con diferencia distinta de cero, con medio y montos; vacío si el descuadre viene solo de los vouchers.',
+    type: [ClosingLineDifferenceDto],
+  })
+  lineDifferences: ClosingLineDifferenceDto[];
+
+  @ApiProperty({
+    description:
+      'true si alguna línea o la conciliación de vouchers está descuadrada; una compensación a 0 en cashDifference no cuadra el cierre.',
+    example: true,
+  })
+  hasDifferences: boolean;
+
+  @ApiProperty({
+    description: 'Negado de hasDifferences.',
+    example: false,
+  })
+  isBalanced: boolean;
+
+  @ApiProperty({
+    description:
+      'CUADRADO sin diferencias en líneas ni vouchers; NO_CUADRADO con cualquiera de ellas, aunque el total compense.',
+    enum: CLOSING_BALANCE_STATUSES,
+    example: 'NO_CUADRADO',
+  })
+  balanceStatus: 'CUADRADO' | 'NO_CUADRADO';
 
   @ApiProperty({
     description: 'Motivo declarado por el supervisor.',
@@ -268,7 +334,7 @@ class StoreDashboardDto implements StoreDashboard {
 
   @ApiProperty({
     description:
-      'Cierres del día con alguna línea descuadrada o descuadre de vouchers.',
+      'Cierres del día con alguna línea descuadrada o descuadre de vouchers, con su detalle y estado de cuadre.',
     type: [PendingClosingDifferenceDto],
   })
   pendingDifferences: PendingClosingDifferenceDto[];
@@ -320,7 +386,11 @@ class SalesDashboardTotalsDto implements SalesDashboardTotals {
   @ApiProperty({ description: 'Cierres de caja del día.', example: 5 })
   closingsCount: number;
 
-  @ApiProperty({ description: 'Diferencia de caja total.', example: -1000 })
+  @ApiProperty({
+    description:
+      'Diferencia de caja total (informativa; nunca criterio de cuadre).',
+    example: -1000,
+  })
   cashDifference: number;
 
   @ApiProperty({ description: 'Descuadre de vouchers total.', example: 1600 })

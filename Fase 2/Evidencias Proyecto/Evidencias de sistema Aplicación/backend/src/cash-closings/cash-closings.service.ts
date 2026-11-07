@@ -20,14 +20,17 @@ import {
   calculateClosingLines,
   hasClosingDifferences,
   summarizeVouchers,
+  type CatalogPaymentMethod,
   type VoucherSummary,
 } from './calculation/cash-closing.calculator.js';
 import { isIdenticalCashClosingRetry } from './calculation/cash-closing-retry.js';
 import type { CreateCashClosingDto } from './dto/create-cash-closing.dto.js';
-import type {
-  CashClosingCreateResult,
-  CashClosingPersonResponse,
-  CashClosingResponse,
+import {
+  BALANCE_STATUS,
+  type BalanceStatus,
+  type CashClosingCreateResult,
+  type CashClosingPersonResponse,
+  type CashClosingResponse,
 } from './types/cash-closings.types.js';
 
 const PERSON_SELECT = {
@@ -55,12 +58,13 @@ const CASH_CLOSING_SELECT = {
   lines: {
     select: {
       id: true,
-      paymentMethod: true,
       expectedAmount: true,
       countedAmount: true,
       difference: true,
+      paymentMethod: {
+        select: { id: true, code: true, name: true, sortOrder: true },
+      },
     },
-    orderBy: { paymentMethod: 'asc' },
   },
   vouchers: {
     select: {
@@ -71,13 +75,18 @@ const CASH_CLOSING_SELECT = {
       amount: true,
       tipIncludedAmount: true,
       reference: true,
+      paymentMethod: { select: { code: true, name: true } },
     },
     orderBy: [{ periodStart: 'asc' }, { id: 'asc' }],
   },
   tipEntries: {
     select: {
       tipEntry: {
-        select: { id: true, paymentMethod: true, amount: true },
+        select: {
+          id: true,
+          amount: true,
+          paymentMethod: { select: { code: true, name: true } },
+        },
       },
     },
     orderBy: { tipEntryId: 'asc' },
@@ -106,18 +115,33 @@ function toPerson(
 function toCashClosingResponse(
   closing: CashClosingRecord,
 ): CashClosingResponse {
-  const lines = closing.lines.map((line) => ({
-    id: line.id,
-    paymentMethod: line.paymentMethod,
-    expectedAmount: Number(line.expectedAmount),
-    countedAmount: Number(line.countedAmount),
-    difference: Number(line.difference),
-  }));
+  const lines = closing.lines
+    .map((line) => ({
+      id: line.id,
+      paymentMethod: line.paymentMethod.code,
+      paymentMethodName: line.paymentMethod.name,
+      sortOrder: line.paymentMethod.sortOrder,
+      expectedAmount: Number(line.expectedAmount),
+      countedAmount: Number(line.countedAmount),
+      difference: Number(line.difference),
+    }))
+    .sort(
+      (left, right) =>
+        left.sortOrder - right.sortOrder ||
+        left.paymentMethod.localeCompare(right.paymentMethod),
+    )
+    .map(({ sortOrder: _sortOrder, ...line }) => line);
   const tipEntries = closing.tipEntries.map(({ tipEntry }) => ({
     id: tipEntry.id,
-    paymentMethod: tipEntry.paymentMethod,
+    paymentMethod: tipEntry.paymentMethod.code,
+    paymentMethodName: tipEntry.paymentMethod.name,
     amount: Number(tipEntry.amount),
   }));
+  const reconciliationDifference = Number(closing.reconciliationDifference);
+  const hasDifferences = hasClosingDifferences(lines, reconciliationDifference);
+  const balanceStatus: BalanceStatus = hasDifferences
+    ? BALANCE_STATUS.NO_CUADRADO
+    : BALANCE_STATUS.CUADRADO;
   return {
     id: closing.id,
     store: closing.store,
@@ -143,6 +167,8 @@ function toCashClosingResponse(
     vouchers: closing.vouchers.map((voucher) => ({
       id: voucher.id,
       source: voucher.source,
+      paymentMethod: voucher.paymentMethod?.code ?? null,
+      paymentMethodName: voucher.paymentMethod?.name ?? null,
       periodStart: voucher.periodStart,
       periodEnd: voucher.periodEnd,
       amount: Number(voucher.amount),
@@ -155,10 +181,13 @@ function toCashClosingResponse(
     mercadoPagoNetSales:
       Number(closing.mercadoPagoGrossAmount) -
       Number(closing.mercadoPagoTipAmount),
-    reconciliationDifference: Number(closing.reconciliationDifference),
+    reconciliationDifference,
     tipEntries,
     tipFundAmount: tipEntries.reduce((total, entry) => total + entry.amount, 0),
     salesCount: closing._count.sales,
+    hasDifferences,
+    isBalanced: !hasDifferences,
+    balanceStatus,
     createdAt: closing.createdAt,
     updatedAt: closing.updatedAt,
   };
@@ -178,28 +207,53 @@ export class CashClosingsService {
     this.assertStoreAccess(dto.storeId, currentUser);
     await this.stores.assertActive(dto.storeId);
     const businessDate = this.parseBusinessDate(dto.businessDate);
-    const voucherSummary = summarizeVouchers(dto.vouchers);
-    this.assertVoucherBusinessDate(voucherSummary, dto.businessDate);
-    const differenceReason = dto.differenceReason ?? null;
+    // El duplicado natural se resuelve antes de cualquier validación nueva
+    // (p. ej. la clasificación de vouchers MrComanda): un reintento idéntico
+    // de un cierre pre-T32, cuyos vouchers no traen medio de pago, debe
+    // devolver el existente con created = false y no un 400 por la regla
+    // nueva (la comparación ya trata undefined y null por igual).
     const existing = await this.findByNaturalKey(dto, businessDate);
     if (existing) return this.resolveDuplicate(existing, dto, currentUser);
+    const methods = await this.fetchPaymentMethods();
+    const voucherSummary = summarizeVouchers(dto.vouchers, methods);
+    this.assertVoucherBusinessDate(voucherSummary, dto.businessDate);
+    const differenceReason = dto.differenceReason ?? null;
 
     try {
       const closing = await this.prisma.$transaction(async (tx) => {
+        // Toma el mismo bloqueo de la fila del local que el ingreso de
+        // ventas MrComanda antes de leer nada: ingreso y cierre quedan
+        // ordenados por local y no puede quedar una venta huérfana (creada
+        // después de cerrar, invisible para el cierre) ni un ingreso que
+        // ignore un cierre recién confirmado.
+        await tx.$queryRaw`SELECT id FROM stores WHERE id = ${dto.storeId}::uuid FOR UPDATE`;
         const sales = await tx.sale.findMany({
           where: {
             storeId: dto.storeId,
-            soldAt: {
-              gte: voucherSummary.periodStart,
-              lt: voucherSummary.periodEnd,
-            },
+            OR: [
+              {
+                soldAt: {
+                  gte: voucherSummary.periodStart,
+                  lt: voucherSummary.periodEnd,
+                },
+              },
+              {
+                periodStart: { lt: voucherSummary.periodEnd },
+                periodEnd: { gt: voucherSummary.periodStart },
+              },
+            ],
           },
           select: {
             id: true,
-            paymentMethod: true,
+            soldAt: true,
+            periodStart: true,
+            periodEnd: true,
             grossAmount: true,
             tipAmount: true,
             cashClosingId: true,
+            paymentMethod: {
+              select: { code: true },
+            },
           },
           orderBy: [{ soldAt: 'asc' }, { id: 'asc' }],
         });
@@ -208,7 +262,19 @@ export class CashClosingsService {
             'Una o más ventas del período ya pertenecen a otro cierre',
           );
         }
-        const lines = calculateClosingLines(sales, dto.lines, dto.openingCash);
+        const lines = calculateClosingLines(
+          sales.map((sale) => ({
+            paymentMethod: sale.paymentMethod.code,
+            grossAmount: sale.grossAmount,
+            tipAmount: sale.tipAmount,
+            periodStart: sale.periodStart,
+            periodEnd: sale.periodEnd,
+          })),
+          dto.lines,
+          dto.openingCash,
+          methods,
+          { start: voucherSummary.periodStart, end: voucherSummary.periodEnd },
+        );
         if (
           hasClosingDifferences(
             lines,
@@ -253,8 +319,17 @@ export class CashClosingsService {
           select: { id: true },
         });
         await tx.cashClosingLine.createMany({
-          data: lines.map((line) => ({ ...line, closingId: closing.id })),
+          data: lines.map((line) => ({
+            closingId: closing.id,
+            paymentMethodId: line.paymentMethodId,
+            expectedAmount: line.expectedAmount,
+            countedAmount: line.countedAmount,
+            difference: line.difference,
+          })),
         });
+        const methodIdByCode = new Map(
+          methods.map((method) => [method.code, method.id]),
+        );
         await tx.cashClosingVoucher.createMany({
           data: dto.vouchers.map((voucher) => ({
             closingId: closing.id,
@@ -264,6 +339,9 @@ export class CashClosingsService {
             amount: voucher.amount,
             tipIncludedAmount: voucher.tipIncludedAmount ?? 0,
             reference: voucher.reference ?? null,
+            paymentMethodId: voucher.paymentMethod
+              ? (methodIdByCode.get(voucher.paymentMethod) ?? null)
+              : null,
           })),
         });
         if (tipEntries.length > 0) {
@@ -324,6 +402,19 @@ export class CashClosingsService {
     if (!closing) throw new NotFoundException('Cierre de caja no encontrado');
     this.assertStoreAccess(closing.store.id, currentUser);
     return toCashClosingResponse(closing);
+  }
+
+  private async fetchPaymentMethods(): Promise<CatalogPaymentMethod[]> {
+    return this.prisma.paymentMethod.findMany({
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        behavior: true,
+        sortOrder: true,
+        isActive: true,
+      },
+    });
   }
 
   private async findByNaturalKey(

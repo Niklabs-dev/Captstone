@@ -36,7 +36,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(output).toContain('is valid');
   });
 
-  it('las migraciones crean las 24 tablas del modelo', () => {
+  it('las migraciones crean las 29 tablas del modelo', () => {
     const sql = readMigrations();
     const tablasEsperadas = [
       'stores',
@@ -48,6 +48,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'documents',
       'document_versions',
       'payslips',
+      'payment_methods',
       'tip_entries',
       'tip_agreements',
       'work_hours_records',
@@ -60,6 +61,8 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'cash_closing_lines',
       'cash_closing_vouchers',
       'cash_closing_tip_entries',
+      'daily_operations',
+      'daily_operation_vouchers',
       'products',
       'inventory_movements',
       'inventory_counts',
@@ -106,6 +109,86 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(down).toContain(
       'CREATE UNIQUE INDEX "cash_closings_store_id_business_date_key"',
     );
+  });
+
+  it('modela medios de pago administrables y ventas MrComanda (SPRINT-4-T32)', () => {
+    const sql = readMigration('medios_pago_catalogo');
+
+    // Catálogo relacional con comportamiento y disponibilidad para propinas.
+    expect(sql).toContain('CREATE TYPE "PaymentMethodBehavior" AS ENUM');
+    expect(sql).toContain("'CASH', 'RECONCILABLE_CARD', 'EXTERNAL_OTHER'");
+    expect(sql).toContain('CREATE TABLE "payment_methods"');
+    expect(sql).toContain('"available_for_tips" BOOLEAN');
+    expect(sql).toContain('CREATE UNIQUE INDEX "payment_methods_code_key"');
+    // Catálogo base con los cuatro códigos del enum reemplazado.
+    expect(sql).toContain("'CASH', 'Efectivo', 10");
+    expect(sql).toContain("'DEBIT_CARD', 'Tarjeta de débito', 20");
+    expect(sql).toContain("'TRANSFER', 'Transferencia', 40");
+
+    // Backfill de los tres FKs por el texto del enum y retiro posterior del
+    // enum; el backfill se verifica completo antes de exigir las columnas.
+    expect(sql).toContain('m."code" = s."payment_method"::text');
+    expect(sql).toContain('m."code" = e."payment_method"::text');
+    expect(sql).toContain('m."code" = l."payment_method"::text');
+    expect(sql).toContain('ALTER COLUMN "payment_method_id" SET NOT NULL');
+    expect(sql).toContain('DROP TYPE "PaymentMethod"');
+
+    // Claves únicas recreadas sobre el FK y totales MrComanda por
+    // local/medio/período.
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "tip_entries_store_id_business_date_payment_method_id_key"',
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "cash_closing_lines_closing_id_payment_method_id_key"',
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "sales_store_id_payment_method_id_period_start_period_end_key"',
+    );
+    expect(sql).toContain('"sales_source_period_consistency" CHECK');
+    expect(sql).toContain('"sales_valid_period" CHECK');
+    expect(sql).toContain('"sales_mrcomanda_no_tip" CHECK');
+    expect(sql).toContain('CREATE TYPE "SaleSource" AS ENUM');
+    expect(sql).toContain("'MANUAL', 'MRCOMANDA'");
+
+    // Voucher clasificado y conciliación solo de vouchers MrComanda
+    // RECONCILABLE_CARD o sin clasificar.
+    expect(sql).toContain(
+      'ADD CONSTRAINT "cash_closing_vouchers_payment_method_id_fkey"',
+    );
+    expect(sql).toContain(
+      'v."source" = \'MRCOMANDA\' AND (v."payment_method_id" IS NULL OR m."behavior" = \'RECONCILABLE_CARD\')',
+    );
+
+    // Solo se retiran y restauran los triggers necesarios para el backfill,
+    // sin session_replication_role, y se actualizan a los nuevos FKs.
+    expect(sql).toContain(
+      'DROP TRIGGER "sales_cash_closing_require_open" ON "sales"',
+    );
+    expect(sql).toContain(
+      'DROP TRIGGER "cash_closing_lines_require_open" ON "cash_closing_lines"',
+    );
+    expect(sql).not.toContain('SET session_replication_role');
+    expect(sql).toContain('e."payment_method_id" = NEW."payment_method_id"');
+    expect(sql).toContain('CREATE TRIGGER "sales_tip_entry_consistency"');
+    expect(sql).toContain('CREATE TRIGGER "sales_cash_closing_require_open"');
+    expect(sql).toContain('CREATE TRIGGER "cash_closing_lines_require_open"');
+
+    // La reversa vive junto a la migración y devuelve el enum y los triggers.
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('medios_pago_catalogo'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toContain('CREATE TYPE "PaymentMethod" AS ENUM');
+    expect(down).toContain(
+      'CREATE UNIQUE INDEX "cash_closing_lines_closing_id_payment_method_key"',
+    );
+    expect(down).toContain(
+      'CREATE UNIQUE INDEX "tip_entries_store_id_business_date_payment_method_key"',
+    );
+    expect(down).toContain('DELETE FROM "_prisma_migrations"');
   });
 
   it('modela propinas diarias, pacto, horas y fuentes sin doble contabilización (SPRINT-3-T09)', () => {
@@ -308,5 +391,55 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(sql).toContain('DROP INDEX "stores_name_normalized_key"');
     expect(sql).toContain('upper(translate(');
     expect(sql).not.toContain('unaccent');
+  });
+
+  it('modela la operación diaria por local y fecha con voucher privado (SPRINT-4R-T01)', () => {
+    const sql = readMigration('operacion_diaria');
+
+    // Una sola operación por local y día; el voucher es 1:1 (FK única en
+    // daily_operations, lo que permite exigirlo con CHECK cuando hay
+    // propina de tarjeta).
+    expect(sql).toContain('CREATE TABLE "daily_operations"');
+    expect(sql).toContain('CREATE TABLE "daily_operation_vouchers"');
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "daily_operations_store_id_business_date_key"',
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "daily_operations_voucher_id_key"',
+    );
+
+    // Montos CLP enteros en BIGINT con sus reglas: no negativos, fondo
+    // consistente, motivo exigido con diferencia y voucher con propina.
+    expect(sql).toContain('"card_tip_amount" BIGINT NOT NULL');
+    expect(sql).toContain('"cash_tip_amount" BIGINT NOT NULL');
+    expect(sql).toContain('"tip_fund_amount" BIGINT NOT NULL');
+    expect(sql).toContain('"cash_difference" BIGINT NOT NULL');
+    expect(sql).toContain('"daily_operations_card_tip_non_negative" CHECK');
+    expect(sql).toContain('"daily_operations_cash_tip_non_negative" CHECK');
+    expect(sql).toContain('"daily_operations_tip_fund_consistent" CHECK');
+    // El motivo se exige con IS NOT NULL: un CHECK satisfecho por NULL no
+    // rechaza la fila.
+    expect(sql).toContain(
+      '"daily_operations_difference_reason_required" CHECK ("cash_difference" = 0 OR ("difference_reason" IS NOT NULL AND btrim("difference_reason") <> \'\'))',
+    );
+    expect(sql).toContain('"daily_operations_voucher_required" CHECK');
+    expect(sql).toContain(
+      'ADD CONSTRAINT "daily_operations_voucher_id_fkey" FOREIGN KEY ("voucher_id") REFERENCES "daily_operation_vouchers"("id") ON DELETE RESTRICT ON UPDATE CASCADE',
+    );
+
+    // La migración no toca los históricos de cierres ni de propinas.
+    expect(sql).not.toContain('ALTER TABLE "cash_closings"');
+    expect(sql).not.toContain('ALTER TABLE "tip_entries"');
+
+    // La reversa vive junto a la migración y solo deshace el esquema nuevo.
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('operacion_diaria'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toContain('DROP TABLE "daily_operations"');
+    expect(down).toContain('DROP TABLE "daily_operation_vouchers"');
   });
 });

@@ -33,15 +33,18 @@
     "test:my-payslips:e2e": "playwright test --config playwright.my-payslips.config.ts",
     "test:stores": "tsc -p tsconfig.test.json && node --test .test-build/stores.test.js .test-build/navigation.test.js",
     "test:stores:e2e": "playwright test --config playwright.stores.config.ts",
-    "test:tips": "tsc -p tsconfig.test.json && node --test .test-build/tips.test.js .test-build/navigation.test.js",
-    "test:tips:integration": "npm run build && tsc -p tsconfig.test.json && node --test .test-build/tips-http.integration.test.js",
-    "test:tips:real": "playwright test --config playwright.tips.config.ts",
+    "test:daily-operations": "tsc -p tsconfig.test.json && node --test .test-build/daily-operations.test.js .test-build/tips.test.js .test-build/navigation.test.js",
+    "test:daily-operations:integration": "npm run build && tsc -p tsconfig.test.json && node --test .test-build/daily-operations-http.integration.test.js",
+    "test:daily-operations:real": "playwright test --config playwright.daily-operations.config.ts",
     "test:tip-pools": "tsc -p tsconfig.test.json && node --test .test-build/tip-pools.test.js .test-build/navigation.test.js",
     "test:tip-pools:real": "playwright test --config playwright.tip-pools.config.ts",
     "test:my-tip-receipts": "tsc -p tsconfig.test.json && node --test .test-build/my-tip-receipts.test.js .test-build/navigation.test.js",
     "test:my-tip-receipts:real": "playwright test --config playwright.my-tip-receipts.config.ts",
     "test:mobile-design": "playwright test --config playwright.mobile-design.config.ts",
-    "test:mobile-navigation": "tsc -p tsconfig.test.json && node --test .test-build/mobile-navigation.test.js .test-build/navigation.test.js"
+    "test:mobile-navigation": "tsc -p tsconfig.test.json && node --test .test-build/mobile-navigation.test.js .test-build/navigation.test.js",
+    "test:payment-methods": "tsc -p tsconfig.test.json && node --test .test-build/payment-methods.test.js .test-build/tips.test.js .test-build/navigation.test.js .test-build/mobile-navigation.test.js .test-build/tip-pools.test.js",
+    "test:payment-methods:integration": "npm run build && tsc -p tsconfig.test.json && node --test .test-build/payment-methods-http.integration.test.js",
+    "test:payment-methods:e2e": "playwright test --config playwright.payment-methods.config.ts"
   },
   "dependencies": {
     "next": "16.3.6",

@@ -1,5 +1,4 @@
 import type { TipPoolStatusCode } from './tip-pools.types.js';
-import type { PaymentMethodCode } from './tips.types.js';
 
 export const TIP_PAYMENT_ALERT_STATUSES = ['UPCOMING', 'OVERDUE'] as const;
 export type TipPaymentAlertStatus = (typeof TIP_PAYMENT_ALERT_STATUSES)[number];
@@ -16,7 +15,8 @@ export interface TipPaymentAlert {
   tipEntryId: string;
   store: { id: string; name: string };
   businessDate: string;
-  paymentMethod: PaymentMethodCode;
+  paymentMethod: string;
+  paymentMethodName: string;
   amount: number;
   pool: TipPaymentAlertPool | null;
   deadline: string;

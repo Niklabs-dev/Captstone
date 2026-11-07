@@ -32,9 +32,9 @@ const introductions: Record<
   SUPERVISOR: {
     title: 'Tu jornada, organizada',
     description:
-      'Registra las propinas del día y mantén la información de tu local al día.',
+      'Registra la operación diaria de tu local: propinas, voucher y diferencia de efectivo.',
     href: '/propinas/diarias',
-    action: 'Registrar propinas',
+    action: 'Registrar operación',
   },
   TRABAJADOR: {
     title: 'Tu información, a mano',
@@ -50,6 +50,7 @@ const actionLabels: Partial<Record<NavigationItem['href'], string>> = {
   '/admin/auditoria': 'Consultar auditoría',
   '/admin/documentos': 'Gestionar documentos',
   '/admin/alertas-dt': 'Abrir alertas DT',
+  '/admin/medios-pago': 'Gestionar medios de pago',
   '/liquidaciones': 'Abrir liquidaciones',
 };
 

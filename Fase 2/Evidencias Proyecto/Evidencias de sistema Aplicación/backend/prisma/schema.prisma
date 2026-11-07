@@ -53,6 +53,7 @@ model Store {
   cashClosings       CashClosing[]
   inventoryMovements InventoryMovement[]
   inventoryCounts    InventoryCount[]
+  dailyOperations    DailyOperation[]
 
   @@map("stores")
 }
@@ -119,6 +120,7 @@ model User {
   registeredSales            Sale[]               @relation("RegisteredSales")
   responsibleCashClosings    CashClosing[]        @relation("ResponsibleCashClosings")
   closedCashClosings         CashClosing[]        @relation("ClosedCashClosings")
+  responsibleDailyOperations DailyOperation[]   @relation("ResponsibleDailyOperations")
   inventoryMovements         InventoryMovement[]  @relation("CreatedInventoryMovements")
   inventoryCounts            InventoryCount[]     @relation("CreatedInventoryCounts")
   ownDataRightsRequests      DataRightsRequest[]  @relation("OwnDataRightsRequests")
@@ -344,22 +346,23 @@ enum TipAgreementRule {
 /// alimenta los repartos: sales.tip_amount se reconcilia con este registro y
 /// nunca se vuelve a sumar como una fuente independiente.
 model TipEntry {
-  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  businessDate  DateTime      @map("business_date") @db.Date
-  paymentMethod PaymentMethod @map("payment_method")
-  amount        Decimal       @db.Decimal(12, 2)
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessDate  DateTime @map("business_date") @db.Date
+  amount        Decimal  @db.Decimal(12, 2)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   store            Store                 @relation(fields: [storeId], references: [id], onDelete: Restrict)
   storeId          String                @map("store_id") @db.Uuid
+  paymentMethod    PaymentMethod         @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId  String                @map("payment_method_id") @db.Uuid
   responsible      User                  @relation("ResponsibleTipEntries", fields: [responsibleId], references: [id], onDelete: Restrict)
   responsibleId    String                @map("responsible_id") @db.Uuid
   sales            Sale[]
   poolSource       TipPoolSource?
   cashClosingLinks CashClosingTipEntry[]
 
-  @@unique([storeId, businessDate, paymentMethod])
+  @@unique([storeId, businessDate, paymentMethodId])
   @@index([storeId, businessDate])
   @@map("tip_entries")
 }
@@ -515,15 +518,54 @@ model TipPoolReceipt {
 }
 
 // -------------------------------------------------------------
-// MÓDULO VENTAS Y CAJA: ventas por local y cierre de caja diario
-// con responsable asociado y diferencia calculada.
+// MÓDULO VENTAS Y CAJA: catálogo administrable de medios de pago,
+// ventas por local y cierre de caja diario con responsable
+// asociado y diferencia calculada.
 // -------------------------------------------------------------
 
-enum PaymentMethod {
+/// Comportamiento del medio de pago ante el cierre y la conciliación
+/// (SPRINT-4-T32): CASH recibe el fondo de caja y no se concilia contra
+/// vouchers; RECONCILABLE_CARD alimenta mrcomanda_net_sales con los vouchers
+/// MrComanda clasificados; EXTERNAL_OTHER (transferencias, Junaeb, etc.)
+/// queda fuera de esa conciliación para no sumarse dos veces.
+enum PaymentMethodBehavior {
   CASH
-  DEBIT_CARD
-  CREDIT_CARD
-  TRANSFER
+  RECONCILABLE_CARD
+  EXTERNAL_OTHER
+}
+
+/// Origen de la venta (SPRINT-4-T32): MANUAL (registro del supervisor) o
+/// MRCOMANDA (total neto agregado del punto de venta por local, medio y
+/// período; tip_amount siempre 0 porque PROPINAS conserva su fuente propia).
+enum SaleSource {
+  MANUAL
+  MRCOMANDA
+}
+
+/// Medio de pago del catálogo administrable (SPRINT-4-T32), única fuente para
+/// ventas, propinas, líneas de cierre y clasificación de vouchers. Reemplaza
+/// al enum PaymentMethod: el código es estable e inmutable (es el contrato
+/// operativo con el frontend y los DTO) y el resto de los atributos se
+/// administran por API sin borrar historial (desactivar no elimina ni oculta
+/// movimientos pasados). Los cuatro medios iniciales conservan su código
+/// (backfill desde el enum en la migración y seed idempotente por código).
+model PaymentMethod {
+  id               String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code             String                @unique @db.VarChar(40)
+  name             String                @db.VarChar(100)
+  sortOrder        Int                   @map("sort_order")
+  isActive         Boolean               @default(true) @map("is_active")
+  behavior         PaymentMethodBehavior
+  availableForTips Boolean               @default(false) @map("available_for_tips")
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sales               Sale[]
+  tipEntries          TipEntry[]
+  cashClosingLines    CashClosingLine[]
+  cashClosingVouchers CashClosingVoucher[]
+
+  @@map("payment_methods")
 }
 
 enum SaleChannel {
@@ -533,24 +575,33 @@ enum SaleChannel {
 
 /// Venta registrada en un local. tip_amount detalla la propina de la venta y
 /// se reconcilia con una sola tip_entry; no es una segunda fuente del reparto.
+/// Las ventas MRCOMANDA agregan el total neto (gross - tip, con tip 0) por
+/// local, medio y período: una sola venta por combinación (restricción única;
+/// los períodos NULL de las ventas manuales no colisionan). sold_at sigue
+/// marcando el día de negocio en hora de Chile para la reconciliación.
 model Sale {
-  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  soldAt        DateTime      @map("sold_at") @db.Timestamptz(6)
-  paymentMethod PaymentMethod @map("payment_method")
-  channel       SaleChannel   @default(IN_STORE)
-  grossAmount   Decimal       @map("gross_amount") @db.Decimal(12, 2)
-  tipAmount     Decimal       @default(0) @map("tip_amount") @db.Decimal(12, 2)
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  soldAt      DateTime   @map("sold_at") @db.Timestamptz(6)
+  channel     SaleChannel @default(IN_STORE)
+  grossAmount Decimal    @map("gross_amount") @db.Decimal(12, 2)
+  tipAmount   Decimal    @default(0) @map("tip_amount") @db.Decimal(12, 2)
+  source      SaleSource @default(MANUAL)
+  periodStart DateTime?  @map("period_start") @db.Timestamptz(6)
+  periodEnd   DateTime?  @map("period_end") @db.Timestamptz(6)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  store          Store        @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  storeId        String       @map("store_id") @db.Uuid
-  cashClosing    CashClosing? @relation(fields: [cashClosingId], references: [id], onDelete: Restrict)
-  cashClosingId  String?      @map("cash_closing_id") @db.Uuid
-  registeredBy   User         @relation("RegisteredSales", fields: [registeredById], references: [id], onDelete: Restrict)
-  registeredById String       @map("registered_by_id") @db.Uuid
-  tipEntry       TipEntry?    @relation(fields: [tipEntryId], references: [id], onDelete: Restrict)
-  tipEntryId     String?      @map("tip_entry_id") @db.Uuid
+  store          Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId        String        @map("store_id") @db.Uuid
+  paymentMethod  PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId String       @map("payment_method_id") @db.Uuid
+  cashClosing    CashClosing?  @relation(fields: [cashClosingId], references: [id], onDelete: Restrict)
+  cashClosingId  String?       @map("cash_closing_id") @db.Uuid
+  registeredBy   User          @relation("RegisteredSales", fields: [registeredById], references: [id], onDelete: Restrict)
+  registeredById String        @map("registered_by_id") @db.Uuid
+  tipEntry       TipEntry?     @relation(fields: [tipEntryId], references: [id], onDelete: Restrict)
+  tipEntryId     String?       @map("tip_entry_id") @db.Uuid
 
+  @@unique([storeId, paymentMethodId, periodStart, periodEnd])
   @@index([storeId, soldAt])
   @@index([cashClosingId])
   @@index([tipEntryId])
@@ -574,21 +625,27 @@ enum CashClosingVoucherSource {
 /// cierre por local, día y turno (restricción única compuesta); shift es el
 /// número de turno (>= 1) y cada local define cuántos tiene.
 ///
-/// El supervisor declara lo contado por cada medio de pago en
-/// cash_closing_lines (efectivo, débito, crédito, transferencia) y el sistema
-/// lo compara contra lo esperado según las ventas, calculando la diferencia
-/// por línea; la diferencia total del cierre es la suma de las líneas.
-/// opening_cash (fondo de caja) se suma a lo esperado de la línea CASH.
+/// El supervisor declara lo contado por cada medio de pago activo del
+/// catálogo (payment_methods, ordenado por sort_order) en cash_closing_lines y
+/// el sistema lo compara contra lo esperado según las ventas, calculando la
+/// diferencia por línea; la diferencia total del cierre es la suma de las
+/// líneas. opening_cash (fondo de caja) es un monto único: se suma una sola
+/// vez a lo esperado, en la primera línea cuyo medio tiene comportamiento
+/// CASH (por sort_order/código), aunque el catálogo tenga más de un medio
+/// CASH. Un fondo positivo sin una línea CASH hace que la API rechace el cierre.
 ///
 /// Conciliación con los proveedores externos (CHECK en la base):
 ///   reconciliation_difference = mercado_pago_gross_amount
 ///                               - mercado_pago_tip_amount
 ///                               - mrcomanda_net_sales
 /// Positiva: Mercado Pago cobró más de lo vendido. Al cerrar, los tres totales
-/// deben coincidir con la suma de los vouchers del cierre.
-/// SUPUESTO pendiente de confirmar con el PO: (a) mrcomanda_net_sales es solo
-/// la porción de la venta cobrada por Mercado Pago y (b) todos los montos
-/// incluyen IVA.
+/// deben coincidir con la suma de los vouchers del cierre: mrcomanda_net_sales
+/// solo recibe vouchers MrComanda clasificados con un medio RECONCILABLE_CARD
+/// (o sin clasificar, que conservan el comportamiento heredado); los vouchers
+/// MrComanda de medios CASH u EXTERNAL_OTHER quedan fuera y no se suman dos
+/// veces. SUPUESTO pendiente de confirmar con el PO: (a) mrcomanda_net_sales
+/// es solo la porción de la venta cobrada por Mercado Pago y (b) todos los
+/// montos incluyen IVA.
 ///
 /// La propina NO es venta: no se suma a lo esperado de ninguna línea ni a la
 /// venta neta, y no se copia al cierre. Su única fuente sigue siendo
@@ -631,22 +688,23 @@ model CashClosing {
   @@map("cash_closings")
 }
 
-/// Desglose del cierre de caja por medio de pago: lo esperado según el sistema
-/// (suma de las ventas del medio, más el fondo de caja si es efectivo) contra
-/// lo declarado/contado por el supervisor, con su diferencia. Un medio de pago
-/// por línea (restricción única compuesta). CHECK: montos >= 0 y
-/// difference = counted_amount - expected_amount.
+/// Desglose del cierre de caja por medio de pago del catálogo: lo esperado
+/// según el sistema (suma de las ventas del medio, más el fondo de caja único
+/// si es la primera línea CASH del cierre) contra lo declarado/contado por el
+/// supervisor, con su diferencia. Un medio de pago por línea (restricción
+/// única compuesta). CHECK: montos >= 0 y difference = counted - expected.
 model CashClosingLine {
-  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  paymentMethod  PaymentMethod @map("payment_method")
-  expectedAmount Decimal       @map("expected_amount") @db.Decimal(12, 2)
-  countedAmount  Decimal       @map("counted_amount") @db.Decimal(12, 2)
-  difference     Decimal       @db.Decimal(12, 2)
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  expectedAmount Decimal @map("expected_amount") @db.Decimal(12, 2)
+  countedAmount  Decimal @map("counted_amount") @db.Decimal(12, 2)
+  difference     Decimal @db.Decimal(12, 2)
 
-  closing   CashClosing @relation(fields: [closingId], references: [id], onDelete: Cascade)
-  closingId String      @map("closing_id") @db.Uuid
+  closing         CashClosing   @relation(fields: [closingId], references: [id], onDelete: Cascade)
+  closingId       String        @map("closing_id") @db.Uuid
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId String        @map("payment_method_id") @db.Uuid
 
-  @@unique([closingId, paymentMethod])
+  @@unique([closingId, paymentMethodId])
   @@map("cash_closing_lines")
 }
 
@@ -654,6 +712,10 @@ model CashClosingLine {
 /// corte que cubre (timestamptz, fin > inicio) y monto. Solo Mercado Pago
 /// informa propina incluida en el bruto; en MrComanda es siempre 0 (CHECK).
 /// Puede haber varios por fuente y turno (terminales o cortes parciales).
+/// payment_method clasifica los vouchers MrComanda nuevos (obligatorio vía
+/// API): solo los de comportamiento RECONCILABLE_CARD alimentan
+/// mrcomanda_net_sales; los vouchers históricos sin clasificación conservan
+/// el comportamiento heredado y siguen sumando (NULL).
 model CashClosingVoucher {
   id                String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   source            CashClosingVoucherSource
@@ -664,8 +726,10 @@ model CashClosingVoucher {
   reference         String?                  @db.VarChar(100)
   createdAt         DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  closing   CashClosing @relation(fields: [closingId], references: [id], onDelete: Cascade)
-  closingId String      @map("closing_id") @db.Uuid
+  closing         CashClosing   @relation(fields: [closingId], references: [id], onDelete: Cascade)
+  closingId       String        @map("closing_id") @db.Uuid
+  paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId String?       @map("payment_method_id") @db.Uuid
 
   @@index([closingId, source])
   @@map("cash_closing_vouchers")
@@ -685,6 +749,71 @@ model CashClosingTipEntry {
   @@id([closingId, tipEntryId])
   @@index([tipEntryId])
   @@map("cash_closing_tip_entries")
+}
+
+// -------------------------------------------------------------
+// MÓDULO OPERACIÓN DIARIA: un único registro por local y día de
+// negocio con ambos montos de propina y la diferencia de efectivo
+// declarada (SPRINT-4R-T01). Reemplaza al flujo previo de cierres
+// por turno con conciliación y a la captura separada de propinas;
+// los históricos de cash_closings, cash_closing_vouchers y
+// tip_entries se conservan solo de lectura.
+// -------------------------------------------------------------
+
+/// Operación diaria de un local: la propina de tarjeta (con su voucher
+/// fotográfico privado), la propina en efectivo y la diferencia de efectivo
+/// declarada por el supervisor con su motivo cuando no es cero. Un solo
+/// registro por local y día de negocio (restricción única compuesta).
+///
+/// Es la fuente de ambos montos de propina (card_tip_amount y
+/// cash_tip_amount); tip_fund_amount es su suma (CHECK) y alimenta el fondo
+/// del reparto. Los montos son CLP enteros en BIGINT (el tope de validación
+/// de la API supera el entero de 32 bits). La diferencia de efectivo lleva
+/// signo: positiva sobrante, negativa faltante, y exige motivo si no es cero
+/// (CHECK). El voucher es obligatorio siempre que card_tip_amount > 0 (CHECK
+/// sobre la misma fila, porque la FK al voucher vive aquí).
+model DailyOperation {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessDate     DateTime @map("business_date") @db.Date
+  cardTipAmount    BigInt   @map("card_tip_amount")
+  cashTipAmount    BigInt   @map("cash_tip_amount")
+  tipFundAmount    BigInt   @map("tip_fund_amount")
+  cashDifference   BigInt   @map("cash_difference")
+  differenceReason String?  @map("difference_reason") @db.VarChar(500)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store         Store                 @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId       String                @map("store_id") @db.Uuid
+  responsible   User                  @relation("ResponsibleDailyOperations", fields: [responsibleId], references: [id], onDelete: Restrict)
+  responsibleId String                @map("responsible_id") @db.Uuid
+  voucher       DailyOperationVoucher? @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  voucherId     String?               @unique @map("voucher_id") @db.Uuid
+
+  @@unique([storeId, businessDate])
+  @@map("daily_operations")
+}
+
+/// Foto del voucher de propinas de tarjeta de una operación diaria. Guarda
+/// solo metadatos: el archivo vive en el volumen privado de almacenamiento
+/// (mismo volumen que el gestor documental, subcarpeta vouchers/) con un
+/// nombre físico aleatorio, y se descarga únicamente por la API autorizada
+/// (GET /daily-operations/:id/voucher); nunca se sirve de forma pública. Su
+/// integridad se verifica con sha256_hash. Relación 1:1 con la operación: la
+/// FK con valor único vive en daily_operations, lo que además permite el
+/// CHECK que exige voucher cuando hay propina de tarjeta.
+model DailyOperationVoucher {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fileName   String   @map("file_name") @db.VarChar(255)
+  filePath   String   @map("file_path") @db.VarChar(500)
+  mimeType   String   @map("mime_type") @db.VarChar(100)
+  sizeBytes  BigInt   @map("size_bytes")
+  sha256Hash String   @map("sha256_hash") @db.Char(64)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  operation DailyOperation?
+
+  @@map("daily_operation_vouchers")
 }
 
 // -------------------------------------------------------------

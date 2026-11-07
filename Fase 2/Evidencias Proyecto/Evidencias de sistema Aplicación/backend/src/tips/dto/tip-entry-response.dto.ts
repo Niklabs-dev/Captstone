@@ -1,9 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  PAYMENT_METHODS,
-  type PaymentMethodCode,
-  type TipEntryResponse,
-} from '../types/tips.types.js';
+import type { TipEntryResponse } from '../types/tips.types.js';
 
 class TipStoreResponseDto {
   @ApiProperty({
@@ -44,11 +40,17 @@ export class TipEntryResponseDto implements TipEntryResponse {
   businessDate: string;
 
   @ApiProperty({
-    description: 'Medio de pago.',
-    enum: PAYMENT_METHODS,
+    description: 'Código del medio de pago del catálogo.',
     example: 'DEBIT_CARD',
   })
-  paymentMethod: PaymentMethodCode;
+  paymentMethod: string;
+
+  @ApiProperty({
+    description:
+      'Nombre del medio de pago según el catálogo; permite mostrar medios desactivados en registros históricos.',
+    example: 'Tarjeta de débito',
+  })
+  paymentMethodName: string;
 
   @ApiProperty({ description: 'Monto en CLP.', example: 12500 })
   amount: number;

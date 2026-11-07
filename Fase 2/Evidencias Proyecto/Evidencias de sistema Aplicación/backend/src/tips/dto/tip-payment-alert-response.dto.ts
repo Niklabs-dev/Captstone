@@ -10,7 +10,6 @@ import {
   TIP_POOL_STATUSES,
   type TipPoolStatusCode,
 } from '../types/tip-pools.types.js';
-import type { PaymentMethodCode } from '../types/tips.types.js';
 
 class TipPaymentAlertStoreDto {
   @ApiProperty({
@@ -76,11 +75,17 @@ export class TipPaymentAlertDto implements TipPaymentAlert {
   businessDate: string;
 
   @ApiProperty({
-    description: 'Medio de pago con tarjeta.',
-    enum: ['DEBIT_CARD', 'CREDIT_CARD'],
+    description: 'Código del medio de pago conciliable con tarjeta.',
     example: 'DEBIT_CARD',
   })
-  paymentMethod: PaymentMethodCode;
+  paymentMethod: string;
+
+  @ApiProperty({
+    description:
+      'Nombre del medio de pago según el catálogo; se muestra aunque el medio esté desactivado.',
+    example: 'Tarjeta de débito',
+  })
+  paymentMethodName: string;
 
   @ApiProperty({ description: 'Monto pendiente en CLP.', example: 4000 })
   amount: number;

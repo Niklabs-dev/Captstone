@@ -30,6 +30,7 @@ export function getNavigationIcon(href: NavigationItem['href']) {
     '/admin/auditoria': 'audit',
     '/admin/documentos': 'document',
     '/admin/alertas-dt': 'bell',
+    '/admin/medios-pago': 'wallet',
     '/liquidaciones': 'wallet',
     '/propinas/diarias': 'tips',
     '/propinas/repartos': 'tips',
@@ -43,6 +44,7 @@ export function getNavigationIcon(href: NavigationItem['href']) {
 export function getMobileLabel(item: NavigationItem): string {
   // Distingue las constancias propias de los módulos de gestión de propinas.
   if (item.href === '/portal/propinas') return 'Mis propinas';
+  if (item.href === '/propinas/diarias') return 'Operación';
   if (item.href.includes('propinas')) return 'Propinas';
   if (item.href.includes('documentos')) return 'Documentos';
   if (item.href.includes('liquidaciones')) return 'Liquidaciones';

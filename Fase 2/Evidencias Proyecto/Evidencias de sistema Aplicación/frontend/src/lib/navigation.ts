@@ -11,6 +11,7 @@ export interface NavigationItem {
     | '/admin/auditoria'
     | '/admin/documentos'
     | '/admin/alertas-dt'
+    | '/admin/medios-pago'
     | '/liquidaciones'
     | '/propinas/diarias'
     | '/propinas/repartos'
@@ -30,9 +31,10 @@ export function getNavigationView(pathname: string): {
     { href: '/portal/liquidaciones', title: 'Mis liquidaciones' },
     { href: '/admin/documentos', title: 'Gestor documental' },
     { href: '/admin/alertas-dt', title: 'Alertas de registro en la DT' },
+    { href: '/admin/medios-pago', title: 'Medios de pago' },
     { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
     { href: '/propinas/repartos', title: 'Reparto de propinas' },
-    { href: '/propinas/diarias', title: 'Registro diario de propinas' },
+    { href: '/propinas/diarias', title: 'Operación diaria' },
     { href: '/dashboard', title: 'Inicio' },
     { href: '/admin/usuarios', title: 'Usuarios y roles' },
     { href: '/admin/locales', title: 'Locales' },
@@ -67,7 +69,7 @@ export function getNavigationItems(
   if (role === 'SUPERVISOR')
     return [
       home,
-      { href: '/propinas/diarias', label: 'Propinas diarias' },
+      { href: '/propinas/diarias', label: 'Operación diaria' },
       MY_TIPS,
       { href: '/portal/documentos', label: 'Mis documentos' },
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
@@ -80,6 +82,7 @@ export function getNavigationItems(
         { href: '/admin/auditoria', label: 'Auditoría' },
         { href: '/admin/documentos', label: 'Documentos' },
         { href: '/admin/alertas-dt', label: 'Alertas DT' },
+        { href: '/admin/medios-pago', label: 'Medios de pago' },
         { href: '/liquidaciones', label: 'Liquidaciones' },
         { href: '/propinas/repartos', label: 'Reparto de propinas' },
       ]

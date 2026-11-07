@@ -1,5 +1,3 @@
-import type { PaymentMethodCode } from './tips.types.js';
-
 // Tipos del cálculo y vista previa del reparto de propinas (SPRINT-3-T12).
 
 export const TIP_POOL_STATUSES = ['DRAFT', 'CONFIRMED', 'PAID'] as const;
@@ -58,7 +56,8 @@ export interface TipPoolLineResponse {
 export interface TipPoolSourceResponse {
   tipEntryId: string;
   businessDate: string;
-  paymentMethod: PaymentMethodCode;
+  paymentMethod: string;
+  paymentMethodName: string;
   amount: number;
 }
 

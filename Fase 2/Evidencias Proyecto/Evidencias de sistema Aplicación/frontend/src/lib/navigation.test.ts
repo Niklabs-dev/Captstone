@@ -40,6 +40,7 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
     { href: '/admin/auditoria', label: 'Auditoría' },
     { href: '/admin/documentos', label: 'Documentos' },
     { href: '/admin/alertas-dt', label: 'Alertas DT' },
+    { href: '/admin/medios-pago', label: 'Medios de pago' },
     { href: '/liquidaciones', label: 'Liquidaciones' },
     { href: '/propinas/repartos', label: 'Reparto de propinas' },
   ]);
@@ -223,6 +224,44 @@ test('El módulo de SPRINT-2-T17 usa la navegación común y respeta los roles',
       getPageRedirect(role, '/portal/liquidaciones') === null,
       allowed,
     );
+  }
+});
+test('El módulo de SPRINT-4-T32 usa la navegación común y respeta los roles', () => {
+  assert.deepEqual(getNavigationView('/admin/medios-pago'), {
+    href: '/admin/medios-pago',
+    title: 'Medios de pago',
+  });
+  for (const role of ROLES) {
+    const allowed = role === 'ADMINISTRADOR';
+    assert.equal(
+      getNavigationItems(role).some(
+        (item) => item.href === '/admin/medios-pago',
+      ),
+      allowed,
+    );
+    assert.equal(getPageRedirect(role, '/admin/medios-pago') === null, allowed);
+  }
+});
+test('El módulo de SPRINT-4R-T01 usa la navegación común y respeta los roles', () => {
+  assert.deepEqual(getNavigationView('/propinas/diarias'), {
+    href: '/propinas/diarias',
+    title: 'Operación diaria',
+  });
+  assert.deepEqual(getNavigationView('/propinas/diarias/ajuste'), {
+    href: '/propinas/diarias',
+    title: 'Operación diaria',
+  });
+  for (const role of ROLES) {
+    const allowed = role === 'SUPERVISOR';
+    assert.equal(
+      getNavigationItems(role).some(
+        (item) =>
+          item.href === '/propinas/diarias' &&
+          item.label === 'Operación diaria',
+      ),
+      allowed,
+    );
+    assert.equal(getPageRedirect(role, '/propinas/diarias') === null, allowed);
   }
 });
 test('Mis documentos y Mis liquidaciones permanecen separados para trabajadores y supervisores', () => {

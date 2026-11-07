@@ -91,4 +91,45 @@ describe('Swagger de la consulta consolidada (SPRINT-4-T13)', () => {
       expect.arrayContaining(['cashDifference', 'voucherDifference']),
     );
   });
+
+  it('documenta el desglose dinámico por medio y el estado de cuadre (SPRINT-4-T32)', () => {
+    const schemas = (document.components?.schemas ?? {}) as Record<
+      string,
+      { properties?: Record<string, unknown> }
+    >;
+    const keys = (name: string): string[] =>
+      Object.keys(schemas[name]?.properties ?? {});
+
+    expect(keys('PaymentMethodSalesDto')).toEqual([
+      'paymentMethod',
+      'paymentMethodName',
+      'salesCount',
+      'netAmount',
+    ]);
+    expect(keys('PendingClosingDifferenceDto')).toEqual(
+      expect.arrayContaining([
+        'closingId',
+        'shift',
+        'status',
+        'cashDifference',
+        'voucherDifference',
+        'lineDifferences',
+        'hasDifferences',
+        'isBalanced',
+        'balanceStatus',
+        'differenceReason',
+        'closedAt',
+      ]),
+    );
+    expect(keys('ClosingLineDifferenceDto')).toEqual([
+      'paymentMethod',
+      'paymentMethodName',
+      'expectedAmount',
+      'countedAmount',
+      'difference',
+    ]);
+    const balanceStatus = (schemas['PendingClosingDifferenceDto']?.properties ??
+      {})['balanceStatus'] as { enum?: string[] };
+    expect(balanceStatus.enum).toEqual(['CUADRADO', 'NO_CUADRADO']);
+  });
 });
