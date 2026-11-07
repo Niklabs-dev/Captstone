@@ -53,6 +53,7 @@ model Store {
   cashClosings       CashClosing[]
   inventoryMovements InventoryMovement[]
   inventoryCounts    InventoryCount[]
+  dailyOperations    DailyOperation[]
 
   @@map("stores")
 }
@@ -119,6 +120,7 @@ model User {
   registeredSales            Sale[]               @relation("RegisteredSales")
   responsibleCashClosings    CashClosing[]        @relation("ResponsibleCashClosings")
   closedCashClosings         CashClosing[]        @relation("ClosedCashClosings")
+  responsibleDailyOperations DailyOperation[]   @relation("ResponsibleDailyOperations")
   inventoryMovements         InventoryMovement[]  @relation("CreatedInventoryMovements")
   inventoryCounts            InventoryCount[]     @relation("CreatedInventoryCounts")
   ownDataRightsRequests      DataRightsRequest[]  @relation("OwnDataRightsRequests")
@@ -747,6 +749,71 @@ model CashClosingTipEntry {
   @@id([closingId, tipEntryId])
   @@index([tipEntryId])
   @@map("cash_closing_tip_entries")
+}
+
+// -------------------------------------------------------------
+// MÓDULO OPERACIÓN DIARIA: un único registro por local y día de
+// negocio con ambos montos de propina y la diferencia de efectivo
+// declarada (SPRINT-4R-T01). Reemplaza al flujo previo de cierres
+// por turno con conciliación y a la captura separada de propinas;
+// los históricos de cash_closings, cash_closing_vouchers y
+// tip_entries se conservan solo de lectura.
+// -------------------------------------------------------------
+
+/// Operación diaria de un local: la propina de tarjeta (con su voucher
+/// fotográfico privado), la propina en efectivo y la diferencia de efectivo
+/// declarada por el supervisor con su motivo cuando no es cero. Un solo
+/// registro por local y día de negocio (restricción única compuesta).
+///
+/// Es la fuente de ambos montos de propina (card_tip_amount y
+/// cash_tip_amount); tip_fund_amount es su suma (CHECK) y alimenta el fondo
+/// del reparto. Los montos son CLP enteros en BIGINT (el tope de validación
+/// de la API supera el entero de 32 bits). La diferencia de efectivo lleva
+/// signo: positiva sobrante, negativa faltante, y exige motivo si no es cero
+/// (CHECK). El voucher es obligatorio siempre que card_tip_amount > 0 (CHECK
+/// sobre la misma fila, porque la FK al voucher vive aquí).
+model DailyOperation {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessDate     DateTime @map("business_date") @db.Date
+  cardTipAmount    BigInt   @map("card_tip_amount")
+  cashTipAmount    BigInt   @map("cash_tip_amount")
+  tipFundAmount    BigInt   @map("tip_fund_amount")
+  cashDifference   BigInt   @map("cash_difference")
+  differenceReason String?  @map("difference_reason") @db.VarChar(500)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store         Store                 @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId       String                @map("store_id") @db.Uuid
+  responsible   User                  @relation("ResponsibleDailyOperations", fields: [responsibleId], references: [id], onDelete: Restrict)
+  responsibleId String                @map("responsible_id") @db.Uuid
+  voucher       DailyOperationVoucher? @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  voucherId     String?               @unique @map("voucher_id") @db.Uuid
+
+  @@unique([storeId, businessDate])
+  @@map("daily_operations")
+}
+
+/// Foto del voucher de propinas de tarjeta de una operación diaria. Guarda
+/// solo metadatos: el archivo vive en el volumen privado de almacenamiento
+/// (mismo volumen que el gestor documental, subcarpeta vouchers/) con un
+/// nombre físico aleatorio, y se descarga únicamente por la API autorizada
+/// (GET /daily-operations/:id/voucher); nunca se sirve de forma pública. Su
+/// integridad se verifica con sha256_hash. Relación 1:1 con la operación: la
+/// FK con valor único vive en daily_operations, lo que además permite el
+/// CHECK que exige voucher cuando hay propina de tarjeta.
+model DailyOperationVoucher {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fileName   String   @map("file_name") @db.VarChar(255)
+  filePath   String   @map("file_path") @db.VarChar(500)
+  mimeType   String   @map("mime_type") @db.VarChar(100)
+  sizeBytes  BigInt   @map("size_bytes")
+  sha256Hash String   @map("sha256_hash") @db.Char(64)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  operation DailyOperation?
+
+  @@map("daily_operation_vouchers")
 }
 
 // -------------------------------------------------------------

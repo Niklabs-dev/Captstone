@@ -34,7 +34,7 @@ $ cp .env.example .env   # completar valores por ambiente (nunca commitear .env)
 
 ## Base de datos (Prisma + PostgreSQL)
 
-El modelo de datos completo (6 módulos, 23 tablas) está documentado en
+El modelo de datos completo está documentado en
 [`docs/modelo-datos.md`](docs/modelo-datos.md), incluidos los diagramas
 (Mermaid y DBML para dbdiagram.io) y el cumplimiento de la Ley N°21.719 y el
 Código del Trabajo.
@@ -189,6 +189,13 @@ Los endpoints marcados con `@Audited()` quedan registrados automáticamente (`Au
 | `PAYMENT_METHOD_DEACTIVATED` / `PAYMENT_METHOD_REACTIVATED` | Baja lógica y reactivación de medios de pago; desactivar no borra ni oculta el historial. |
 | `MRCOMANDA_SALES_IMPORTED` | Ingreso de totales netos de ventas MrComanda por local y período (detalle: local, período, si creó ventas y neto total); el reintento idéntico no se audita de nuevo. |
 | `CASH_CLOSING_CREATED` | Confirmación de un cierre de caja con sus totales de conciliación, fondo de propinas y motivo de diferencia. |
+| `DAILY_OPERATION_CREATED` | Registro de la operación diaria de un local (detalle limitado a local, fecha de negocio, montos de propina, diferencia de efectivo y hash SHA-256 del voucher; sin datos personales). |
+| `DAILY_OPERATION_VOUCHER_DOWNLOADED` | Descarga autorizada del voucher de una operación diaria (detalle limitado a la operación y el local). |
+
+`TIP_ENTRY_*`, `CASH_CLOSING_CREATED` y `MRCOMANDA_SALES_IMPORTED` corresponden
+al flujo anterior de captura: sus registros históricos siguen listándose en
+auditoría, pero las escrituras ya no forman parte del flujo operativo vigente
+(ver [Operación diaria](#operación-diaria-sprint-4r-t01)).
 
 El detalle se arma solo con campos declarados (listas blancas): nunca incluye contraseñas ni el contenido de los archivos.
 
@@ -261,18 +268,69 @@ eliminarla mientras no venza la conservación de su documento, `TRUNCATE` sobre
 que en la auditoría, solo se omiten con `session_replication_role = replica`
 (superusuario).
 
-## Registro diario de propinas
+## Operación diaria (SPRINT-4R-T01)
 
-El CRUD de propinas diarias usa `tip_entries` como única fuente de los repartos.
-`sales.tipAmount` se reconcilia con un registro mediante `sales.tipEntryId` y no
-se suma como una segunda fuente. El responsable se obtiene siempre del JWT;
-el body no acepta `responsibleId` ni datos personales del trabajador. El medio
-de pago se resuelve contra el catálogo (`payment_methods`, ver
+Una sola operación por local y fecha de negocio reemplaza al flujo anterior de
+cierre de caja por turno con conciliación, a la captura de ventas (manual o
+MrComanda) y al registro de propinas por medio. El supervisor declara una vez al
+día la propina recibida con tarjeta (con su voucher), la propina en efectivo y
+la diferencia de efectivo observada; **las ventas dejan de capturarse** y
+ningún total se calcula ni se infiere desde ellas.
+
+Solo existe una operación por `(storeId, businessDate)`. El alta es
+**multipart** (`multipart/form-data`):
+
+| Campo | Regla |
+| --- | --- |
+| `storeId` | UUID del local. El alta es exclusiva del `SUPERVISOR` de su local asignado; `ADMINISTRADOR` y `CONTADOR` solo consultan, en cualquier local según los GET. |
+| `businessDate` | Fecha de negocio `YYYY-MM-DD` (hora de Chile). |
+| `cardTipAmount` | Entero CLP `>= 0`: propina recibida con tarjeta del día. |
+| `cashTipAmount` | Entero CLP `>= 0`: propina recibida en efectivo del día. |
+| `cashDifference` | Entero CLP **con signo**: diferencia de efectivo declarada por el supervisor. Positivo = sobrante, negativo = faltante. |
+| `differenceReason` | Obligatorio si `cashDifference != 0`; ausente o en blanco con diferencia distinta de cero responde 400. |
+| `voucher` | Foto del voucher de propinas con tarjeta. Obligatorio si `cardTipAmount > 0`; JPEG/PNG/WebP, máximo 5 MiB. Se guarda en el volumen **privado** del backend con su SHA-256 y jamás se sirve como archivo público. |
+
+`tipFundAmount` no se recibe del cliente: se calcula como `cardTipAmount +
+cashTipAmount` y es el fondo de propinas del día. La operación diaria es la
+**fuente de ambos montos de propina**: no se crean registros `TipEntry`
+paralelos ni se infieren propinas desde ventas o vouchers.
+
+| Endpoint | Roles | Descripción |
+| --- | --- | --- |
+| `POST /daily-operations` | `SUPERVISOR` (solo su local) | Crea la operación del local y día. **201** al crear; un **reintento idéntico** (mismos campos, incluido el mismo archivo de voucher por su hash) responde **200** con la operación existente y no duplica fila ni auditoría; otro contenido para la misma clave responde **409** con `existingOperationId` consultable. |
+| `GET /daily-operations?storeId=<uuid>&businessDate=<fecha>` | `SUPERVISOR` (su local), `ADMINISTRADOR`, `CONTADOR` | Arreglo de 0 o 1 operaciones para el local y día. |
+| `GET /daily-operations/:id` | `SUPERVISOR` (su local), `ADMINISTRADOR`, `CONTADOR` | Detalle de la operación. |
+| `GET /daily-operations/:id/voucher` | `SUPERVISOR` (su local), `ADMINISTRADOR`, `CONTADOR` | Descarga privada y autorizada del voucher; no existe una URL pública del archivo. |
+
+Respuesta (`DailyOperationResponse`): `id`, `store` (`id`, `name`),
+`businessDate`, `cardTipAmount`, `cashTipAmount`, `tipFundAmount`,
+`cashDifference`, `differenceReason`, `voucher` (`null` u objeto con `id`,
+`fileName`, `mimeType`, `sizeBytes`, `sha256Hash`, `createdAt`),
+`responsible` (`id`, `name`; siempre desde el JWT — el body no acepta
+`responsibleId`), `createdAt` y `updatedAt`. Los montos son enteros en CLP: se
+rechazan negativos en las propinas, decimales y campos obligatorios vacíos con
+400 identificando el campo. El alta se audita como `DAILY_OPERATION_CREATED`
+con detalle limitado a local, fecha y montos (lista blanca: sin correos,
+nombres, RUT ni contenido del archivo). El contrato completo está en Swagger
+(`/api/docs`).
+
+## Registro diario de propinas (flujo anterior — histórico, modo lectura)
+
+> **Reemplazado por la [Operación diaria](#operación-diaria-sprint-4r-t01)
+> (SPRINT-4R-T01).** Las lecturas (`GET /tips`, `GET /tips/:id`) se conservan
+> para consultar el histórico por local y día; las escrituras (`POST`, `PATCH`,
+> `DELETE`) ya no forman parte del flujo operativo vigente.
+
+El CRUD histórico de propinas diarias usaba `tip_entries` como única fuente de
+los repartos. `sales.tipAmount` se reconciliaba con un registro mediante
+`sales.tipEntryId` y no se sumaba como una segunda fuente. El responsable se
+obtenía siempre del JWT; el body no aceptaba `responsibleId` ni datos personales
+del trabajador. El medio de pago se resolvía contra el catálogo
+(`payment_methods`, ver
 [Catálogo de medios de pago](#catálogo-de-medios-de-pago-sprint-4-t32)): al
-crear se exige medio activo y habilitado para propinas (`availableForTips`),
-mientras que la lectura, el reintento idéntico y la edición de registros
-históricos siguen funcionando aunque el medio se desactive después, mostrando
-siempre su código y nombre.
+crear se exigía medio activo y habilitado para propinas (`availableForTips`),
+mientras que la lectura y el reintento idéntico seguían funcionando aunque el
+medio se desactivara después, mostrando siempre su código y nombre.
 
 | Endpoint | Roles | Descripción |
 | --- | --- | --- |
@@ -297,6 +355,10 @@ Las mutaciones generan `TIP_ENTRY_CREATED`, `TIP_ENTRY_UPDATED` y
 fecha, medio y monto, sin correo, nombre, RUT ni contraseña.
 
 ## Alerta legal de entrega de propinas
+
+Su fuente de captura era el registro diario por medio (hoy histórico desde
+SPRINT-4R-T01); la fuente operativa del monto con tarjeta es la
+[Operación diaria](#operación-diaria-sprint-4r-t01).
 
 | Endpoint | Roles | Descripción |
 | --- | --- | --- |
@@ -329,6 +391,10 @@ está documentada en `.env.example` y se propaga al contenedor mediante
 
 ## Catálogo de medios de pago (SPRINT-4-T32)
 
+> Se conserva íntegro con SPRINT-4R-T01: su uso en cierres, ventas y registro
+> de propinas por medio quedó histórico, y el catálogo se mantiene para ese
+> historial y para la futura importación de ventas desde Excel.
+
 Los medios de pago viven en la tabla relacional `payment_methods`, única
 fuente para ventas, propinas, líneas de cierre y clasificación de vouchers.
 Reemplaza al enum fijo anterior: el `code` es estable e inmutable (contrato
@@ -357,14 +423,19 @@ serializan con bloqueo de fila y se auditan (`PAYMENT_METHOD_CREATED`,
 `PAYMENT_METHOD_REACTIVATED`) sin registrar el cuerpo completo de la
 solicitud.
 
-## Ingreso de ventas MrComanda (SPRINT-4-T32)
+## Ingreso de ventas MrComanda (flujo anterior — histórico)
 
-`POST /sales/mrcomanda` (`SUPERVISOR` de su local o `ADMINISTRADOR`) registra
-atómicamente los totales **netos** del punto de venta por local, período y
-medio de pago, como ventas agregadas con fuente `MRCOMANDA` (`tipAmount`
-siempre 0: PROPINAS conserva su fuente propia en `tip_entries`). El período
-debe venir con zona horaria explícita y quedar dentro de un único día de
-negocio en Chile.
+> **Fuera del flujo operativo desde SPRINT-4R-T01:** las ventas dejaron de
+> capturarse (por el supervisor o por importación MrComanda) y ningún cálculo
+> actual las utiliza. La descripción siguiente queda como referencia del
+> comportamiento histórico; los datos cargados siguen consultables en modo
+> lectura.
+
+`POST /sales/mrcomanda` (ahora legado) registraba atómicamente los totales
+**netos** del punto de venta por local, período y medio de pago, como ventas
+agregadas con fuente `MRCOMANDA` (`tipAmount` siempre 0: PROPINAS conservaba su
+fuente propia en `tip_entries`). El período debía venir con zona horaria
+explícita y quedar dentro de un único día de negocio en Chile.
 
 - El lote se serializa por local (bloqueo de la fila del local) y cada medio
   es independiente: el solape de uno no bloquea a otro.
@@ -385,12 +456,21 @@ negocio en Chile.
 - El ingreso efectivo se audita como `MRCOMANDA_SALES_IMPORTED` con local,
   período, si creó ventas y neto total.
 
-## Cierre de caja por turno (SPRINT-4-T09, dinámico en SPRINT-4-T32)
+## Cierre de caja por turno (flujo anterior — histórico, modo lectura)
 
-Un cierre por local, día de negocio y turno (`UNIQUE(storeId, businessDate,
-shift)`). El supervisor declara lo contado por medio en `lines` y adjunta los
-vouchers de respaldo; el sistema calcula lo esperado según las ventas del
-período y cierra en una transición única `OPEN → CLOSED`.
+> **Reemplazado por la [Operación diaria](#operación-diaria-sprint-4r-t01)
+> (SPRINT-4R-T01).** La doble captura por turno con conciliación y la foto de
+> voucher del cierre quedaron fuera del flujo operativo: la diferencia de
+> efectivo se declara una sola vez al día en la operación diaria. Los cierres,
+> sus líneas, vouchers y vínculos a propinas se conservan íntegros y
+> consultables (`GET /cash-closings/:id`); no se borran tablas, columnas ni
+> datos históricos.
+
+El flujo histórico cerraba por local, día de negocio y turno
+(`UNIQUE(storeId, businessDate, shift)`). El supervisor declaraba lo contado por
+medio en `lines` y adjuntaba los vouchers de respaldo; el sistema calculaba lo
+esperado según las ventas del período y cerraba en una transición única
+`OPEN → CLOSED`.
 
 | Endpoint | Roles | Descripción |
 | --- | --- | --- |
@@ -430,6 +510,11 @@ cierre, sus líneas, vouchers, vínculos a propinas y ventas asociadas (para
 cualquier rol y vía de escritura), y el `TRUNCATE` de las tablas involucradas.
 
 ## Consulta consolidada de ventas, alertas y diferencias (SPRINT-4-T13)
+
+> Lee las fuentes del flujo anterior (ventas, cierres por turno y registro
+> diario de propinas por medio), hoy históricas desde SPRINT-4R-T01. Las cifras
+> operativas del día (propina tarjeta, propina efectivo y diferencia de
+> efectivo) nacen en la [Operación diaria](#operación-diaria-sprint-4r-t01).
 
 | Endpoint | Roles | Descripción |
 | --- | --- | --- |

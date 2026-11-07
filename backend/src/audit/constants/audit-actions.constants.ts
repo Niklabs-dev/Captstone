@@ -52,6 +52,12 @@ export const AUDIT_ACTION = {
   // Ingreso de totales netos de ventas MrComanda por local y período
   // (SPRINT-4-T32); el reintento idéntico no se audita de nuevo.
   MRCOMANDA_SALES_IMPORTED: 'MRCOMANDA_SALES_IMPORTED',
+  // Operación diaria por local y fecha (SPRINT-4R-T01): captura de ambos
+  // montos de propina, diferencia de efectivo y voucher fotográfico; el
+  // reintento idéntico no se audita de nuevo. El detalle usa listas blancas
+  // y jamás incluye contenido del archivo.
+  DAILY_OPERATION_CREATED: 'DAILY_OPERATION_CREATED',
+  DAILY_OPERATION_VOUCHER_DOWNLOADED: 'DAILY_OPERATION_VOUCHER_DOWNLOADED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

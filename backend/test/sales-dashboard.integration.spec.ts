@@ -90,74 +90,113 @@ async function createUser(
   return { id, email, role, storeId };
 }
 
-// Líneas de cierre para el POST /cash-closings: cubre todos los medios
-// activos del catálogo (el cierre los exige), con los montos contados del
-// caso y, para medios ajenos al caso (creados por otros tests en paralelo),
-// lo contado igual a lo esperado para no descuadrar el escenario. El fondo
-// se contabiliza una sola vez, en la primera línea CASH del orden del
-// catálogo (misma regla del calculador): los demás medios CASH ajenos se
-// cuadran en cero.
-async function closingLinesFor(
-  f: Fixture,
-  openingCash: number,
-  countedByCode: Record<string, number>,
-): Promise<object[]> {
-  // El fondo se contabiliza una sola vez, en la primera línea CASH del orden
-  // del catálogo (misma regla del calculador). Se fija en la transacción que
-  // el CASH del caso quede primero: si un medio CASH ajeno (creado por otro
-  // test en paralelo) lo precediera, recibiría el fondo y el descuadre del
-  // escenario recaería en la línea equivocada. Se revierte con el rollback.
-  await f.tx.paymentMethod.update({
-    where: { code: 'CASH' },
-    data: { sortOrder: -1 },
-  });
-  const methods = await f.tx.paymentMethod.findMany({
-    where: { isActive: true },
-    select: { code: true, behavior: true },
-    orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
-  });
-  const fundCode = methods.find((method) => method.behavior === 'CASH')?.code;
-  return methods.map((method) => ({
-    paymentMethod: method.code,
-    countedAmount:
-      countedByCode[method.code] ??
-      (method.code === fundCode ? openingCash : 0),
-  }));
+// Línea de cierre para la creación directa en transacción: los montos
+// esperados replican lo que calculaba la API del flujo histórico (venta neta
+// del medio dentro del corte, más el fondo de caja en la primera línea
+// CASH), así el escenario queda idéntico al caso de aceptación de
+// SPRINT-4-T09.
+interface ClosingLineSpec {
+  code: string;
+  expected: number;
+  counted: number;
 }
 
-// Mismo caso de aceptación del cierre de SPRINT-4-T09: faltante de efectivo
-// de 1.000 y descuadre de vouchers de 1.600. Los líneas y vouchers usan el
-// código del medio de pago del catálogo (contrato operativo estable).
-function closingPayload(
-  storeId: string,
-  tipEntryId: string,
-  lines: object[],
-): object {
-  return {
-    storeId,
-    businessDate: BUSINESS_DATE,
-    shift: 1,
-    openingCash: 50000,
-    lines,
-    vouchers: [
-      {
-        source: 'MRCOMANDA',
-        periodStart: START,
-        periodEnd: END,
-        amount: 555530,
-        paymentMethod: 'DEBIT_CARD',
+interface ClosingVoucherSpec {
+  source: 'MRCOMANDA' | 'MERCADO_PAGO';
+  periodStart: string;
+  periodEnd: string;
+  amount: number;
+  tipIncludedAmount?: number;
+  methodCode?: string;
+}
+
+interface ClosingSpec {
+  storeId: string;
+  supervisorId: string;
+  businessDate: string;
+  shift: number;
+  openingCash: number;
+  lines: ClosingLineSpec[];
+  vouchers: ClosingVoucherSpec[];
+  mrcomandaNetSales: number;
+  mercadoPagoGrossAmount: number;
+  mercadoPagoTipAmount: number;
+  tipEntryId?: string;
+  saleIds: string[];
+  differenceReason?: string;
+}
+
+// Crea en la transacción el mismo grafo que registraba la API histórica:
+// cierre OPEN con líneas, vouchers, vínculo a propinas y ventas asociadas, y
+// cierre del ciclo (CLOSED con responsable y fecha). El POST /cash-closings
+// se retiró en SPRINT-4R-T01; los dashboards leen el histórico conservado.
+async function createClosedClosing(tx: Tx, spec: ClosingSpec): Promise<string> {
+  const closing = await tx.cashClosing.create({
+    data: {
+      storeId: spec.storeId,
+      businessDate: new Date(`${spec.businessDate}T00:00:00.000Z`),
+      shift: spec.shift,
+      openingCash: spec.openingCash,
+      status: 'OPEN',
+      responsibleId: spec.supervisorId,
+      mrcomandaNetSales: spec.mrcomandaNetSales,
+      mercadoPagoGrossAmount: spec.mercadoPagoGrossAmount,
+      mercadoPagoTipAmount: spec.mercadoPagoTipAmount,
+      reconciliationDifference:
+        spec.mercadoPagoGrossAmount -
+        spec.mercadoPagoTipAmount -
+        spec.mrcomandaNetSales,
+      differenceReason: spec.differenceReason ?? null,
+    },
+  });
+  for (const line of spec.lines) {
+    const paymentMethod = await paymentMethodIdOf(tx, line.code);
+    await tx.cashClosingLine.create({
+      data: {
+        closingId: closing.id,
+        paymentMethodId: paymentMethod,
+        expectedAmount: line.expected,
+        countedAmount: line.counted,
+        difference: line.counted - line.expected,
       },
-      {
-        source: 'MERCADO_PAGO',
-        periodStart: START,
-        periodEnd: END,
-        amount: 588732,
-        tipIncludedAmount: 31602,
+    });
+  }
+  for (const voucher of spec.vouchers) {
+    const paymentMethodId = voucher.methodCode
+      ? await paymentMethodIdOf(tx, voucher.methodCode)
+      : null;
+    await tx.cashClosingVoucher.create({
+      data: {
+        closingId: closing.id,
+        source: voucher.source,
+        periodStart: new Date(voucher.periodStart),
+        periodEnd: new Date(voucher.periodEnd),
+        amount: voucher.amount,
+        tipIncludedAmount: voucher.tipIncludedAmount ?? 0,
+        paymentMethodId,
       },
-    ],
-    tipEntryIds: [tipEntryId],
-    differenceReason: 'Faltante de efectivo y descuadre de conciliación',
-  };
+    });
+  }
+  if (spec.tipEntryId) {
+    await tx.cashClosingTipEntry.create({
+      data: { closingId: closing.id, tipEntryId: spec.tipEntryId },
+    });
+  }
+  if (spec.saleIds.length > 0) {
+    await tx.sale.updateMany({
+      where: { id: { in: spec.saleIds }, cashClosingId: null },
+      data: { cashClosingId: closing.id },
+    });
+  }
+  await tx.cashClosing.update({
+    where: { id: closing.id },
+    data: {
+      status: 'CLOSED',
+      closedAt: new Date('2026-03-10T16:05:00-03:00'),
+      closedById: spec.supervisorId,
+    },
+  });
+  return closing.id;
 }
 
 function storeOf(body: SalesDashboard, storeId: string): StoreDashboard {
@@ -189,40 +228,6 @@ describe.skipIf(!databaseUrl)(
       const req = request(app.getHttpServer()).get(`/sales-dashboard${query}`);
       if (user) req.set('Authorization', `Bearer ${token(user)}`);
       return req;
-    }
-
-    // POST /cash-closings con reintento ante la carrera del catálogo
-    // compartido: otros archivos de test crean, activan o eliminan medios
-    // entre la lectura del catálogo y la validación del cierre; reconstruir
-    // las líneas y reintentar resuelve esos casos sin alterar el escenario.
-    const RACE_MARKERS = [
-      'Debes informar lo contado',
-      'no admite línea de cierre',
-      'no existe en el catálogo',
-    ];
-    async function postClosing(
-      f: Fixture,
-      user: AuthUser,
-      openingCash: number,
-      countedByCode: Record<string, number>,
-      buildPayload: (lines: object[]) => object,
-    ): Promise<request.Response> {
-      for (let attempt = 0; ; attempt += 1) {
-        const lines = await closingLinesFor(f, openingCash, countedByCode);
-        const response = await request(app.getHttpServer())
-          .post('/cash-closings')
-          .set('Authorization', `Bearer ${token(user)}`)
-          .send(buildPayload(lines));
-        const message = (response.body as { message?: unknown }).message;
-        const catalogRace =
-          (response.status === 400 &&
-            typeof message === 'string' &&
-            RACE_MARKERS.some((marker) => message.includes(marker))) ||
-          response.status === 500;
-        if (!catalogRace || attempt >= 3) {
-          return response;
-        }
-      }
     }
 
     async function createStore(tx: Tx, label: string): Promise<string> {
@@ -278,9 +283,9 @@ describe.skipIf(!databaseUrl)(
       paymentMethodCode: string,
       grossAmount: number,
       tipAmount = 0,
-    ): Promise<void> {
+    ): Promise<string> {
       const paymentMethodId = await paymentMethodIdOf(f.tx, paymentMethodCode);
-      await f.tx.sale.create({
+      const sale = await f.tx.sale.create({
         data: {
           soldAt: new Date(soldAt),
           paymentMethodId,
@@ -290,6 +295,7 @@ describe.skipIf(!databaseUrl)(
           registeredById: f.supervisor.id,
         },
       });
+      return sale.id;
     }
 
     // Documento laboral pendiente de registrar en la DT con el plazo dado.
@@ -340,14 +346,18 @@ describe.skipIf(!databaseUrl)(
     // Local con cierre: 4 ventas dentro del corte (iguales a SPRINT-4-T09),
     // una venta posterior al corte y una a las 23:30 de Chile (ya es el día
     // siguiente en UTC), todas del mismo día de negocio. La venta de las 00:30
-    // del día siguiente queda fuera.
+    // del día siguiente queda fuera. El cierre se crea directo en la
+    // transacción: el POST se retiró en SPRINT-4R-T01 y el escenario replica
+    // sus mismos totales (esperado = venta neta + fondo en la línea CASH).
     async function seedClosedStore(f: Fixture): Promise<void> {
       const store = f.closedStoreId;
       const noon = '2026-03-10T12:00:00-03:00';
-      await seedSale(f, store, noon, 'CASH', 100000);
-      await seedSale(f, store, noon, 'DEBIT_CARD', 521730, 10000);
-      await seedSale(f, store, noon, 'CREDIT_CARD', 53800, 10000);
-      await seedSale(f, store, noon, 'TRANSFER', 20000);
+      const inCutIds = [
+        await seedSale(f, store, noon, 'CASH', 100000),
+        await seedSale(f, store, noon, 'DEBIT_CARD', 521730, 10000),
+        await seedSale(f, store, noon, 'CREDIT_CARD', 53800, 10000),
+        await seedSale(f, store, noon, 'TRANSFER', 20000),
+      ];
       await seedSale(f, store, '2026-03-10T18:00:00-03:00', 'CASH', 30000);
       await seedSale(
         f,
@@ -369,19 +379,41 @@ describe.skipIf(!databaseUrl)(
           responsibleId: f.supervisor.id,
         },
       });
-      const response = await postClosing(
-        f,
-        f.supervisor,
-        50000,
-        {
-          CASH: 149000,
-          DEBIT_CARD: 511730,
-          CREDIT_CARD: 43800,
-          TRANSFER: 20000,
-        },
-        (lines) => closingPayload(store, tipEntry.id, lines),
-      );
-      expect(response.status).toBe(201);
+      await createClosedClosing(f.tx, {
+        storeId: store,
+        supervisorId: f.supervisor.id,
+        businessDate: BUSINESS_DATE,
+        shift: 1,
+        openingCash: 50000,
+        lines: [
+          { code: 'CASH', expected: 150000, counted: 149000 },
+          { code: 'DEBIT_CARD', expected: 511730, counted: 511730 },
+          { code: 'CREDIT_CARD', expected: 43800, counted: 43800 },
+          { code: 'TRANSFER', expected: 20000, counted: 20000 },
+        ],
+        vouchers: [
+          {
+            source: 'MRCOMANDA',
+            periodStart: START,
+            periodEnd: END,
+            amount: 555530,
+            methodCode: 'DEBIT_CARD',
+          },
+          {
+            source: 'MERCADO_PAGO',
+            periodStart: START,
+            periodEnd: END,
+            amount: 588732,
+            tipIncludedAmount: 31602,
+          },
+        ],
+        mrcomandaNetSales: 555530,
+        mercadoPagoGrossAmount: 588732,
+        mercadoPagoTipAmount: 31602,
+        tipEntryId: tipEntry.id,
+        saleIds: inCutIds,
+        differenceReason: 'Faltante de efectivo y descuadre de conciliación',
+      });
     }
 
     beforeAll(async () => {
@@ -662,8 +694,10 @@ describe.skipIf(!databaseUrl)(
           f.openStoreId,
         );
         const noon = '2026-03-10T12:00:00-03:00';
-        await seedSale(f, f.openStoreId, noon, 'CASH', 100000);
-        await seedSale(f, f.openStoreId, noon, 'DEBIT_CARD', 100000);
+        const saleIds = [
+          await seedSale(f, f.openStoreId, noon, 'CASH', 100000),
+          await seedSale(f, f.openStoreId, noon, 'DEBIT_CARD', 100000),
+        ];
         const debitId = await paymentMethodIdOf(f.tx, 'DEBIT_CARD');
         const tipEntry = await f.tx.tipEntry.create({
           data: {
@@ -674,37 +708,38 @@ describe.skipIf(!databaseUrl)(
             responsibleId: openSupervisor.id,
           },
         });
-        const closingResponse = await postClosing(
-          f,
-          openSupervisor,
-          0,
-          { CASH: 99500, DEBIT_CARD: 100500 },
-          (lines) => ({
-            storeId: f.openStoreId,
-            businessDate: BUSINESS_DATE,
-            shift: 1,
-            openingCash: 0,
-            lines,
-            vouchers: [
-              {
-                source: 'MRCOMANDA',
-                periodStart: START,
-                periodEnd: END,
-                amount: 100000,
-                paymentMethod: 'DEBIT_CARD',
-              },
-              {
-                source: 'MERCADO_PAGO',
-                periodStart: START,
-                periodEnd: END,
-                amount: 100000,
-              },
-            ],
-            tipEntryIds: [tipEntry.id],
-            differenceReason: 'Compensación efectivo/débito',
-          }),
-        );
-        expect(closingResponse.status).toBe(201);
+        await createClosedClosing(f.tx, {
+          storeId: f.openStoreId,
+          supervisorId: openSupervisor.id,
+          businessDate: BUSINESS_DATE,
+          shift: 1,
+          openingCash: 0,
+          lines: [
+            { code: 'CASH', expected: 100000, counted: 99500 },
+            { code: 'DEBIT_CARD', expected: 100000, counted: 100500 },
+          ],
+          vouchers: [
+            {
+              source: 'MRCOMANDA',
+              periodStart: START,
+              periodEnd: END,
+              amount: 100000,
+              methodCode: 'DEBIT_CARD',
+            },
+            {
+              source: 'MERCADO_PAGO',
+              periodStart: START,
+              periodEnd: END,
+              amount: 100000,
+            },
+          ],
+          mrcomandaNetSales: 100000,
+          mercadoPagoGrossAmount: 100000,
+          mercadoPagoTipAmount: 0,
+          tipEntryId: tipEntry.id,
+          saleIds,
+          differenceReason: 'Compensación efectivo/débito',
+        });
 
         const response = await get(`?date=${BUSINESS_DATE}`, f.admin).expect(
           200,

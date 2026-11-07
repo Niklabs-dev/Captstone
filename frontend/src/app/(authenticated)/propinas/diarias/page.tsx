@@ -1,15 +1,15 @@
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import type { ReactElement } from 'react';
-import { getTipsSession } from '@/lib/tips-session';
+import { getSupervisorSession } from '@/lib/supervisor-session';
 import { fetchStores } from '@/lib/stores-backend';
 import { tipBusinessDate } from '@/lib/tips';
-import { TipsPanel } from '@/components/tips/TipsPanel';
+import { DailyOperationPanel } from '@/components/daily-operations/DailyOperationPanel';
 import { introClass } from '@/components/ui/styles';
 
-export const metadata: Metadata = { title: 'Propinas diarias | MoiFood' };
-export default async function DailyTipsPage(): Promise<ReactElement> {
-  const session = await getTipsSession();
+export const metadata: Metadata = { title: 'Operación diaria | MoiFood' };
+export default async function DailyOperationPage(): Promise<ReactElement> {
+  const session = await getSupervisorSession();
   if (!session.ok) {
     if (session.status === 401) redirect('/session-expired');
     if (session.status === 403) redirect('/dashboard?reason=forbidden');
@@ -28,10 +28,11 @@ export default async function DailyTipsPage(): Promise<ReactElement> {
   return (
     <>
       <p className={introClass}>
-        Registra y consulta las propinas de tu local por fecha y medio de pago.
-        Los montos se expresan en pesos chilenos.
+        Registra la operación diaria de tu local: propinas con tarjeta y su
+        voucher, propinas en efectivo y la diferencia de efectivo declarada. Los
+        montos se expresan en pesos chilenos.
       </p>
-      <TipsPanel
+      <DailyOperationPanel
         store={{ id: store.id, name: store.name, isActive: store.isActive }}
         initialDate={tipBusinessDate()}
       />

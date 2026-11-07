@@ -242,6 +242,28 @@ test('El módulo de SPRINT-4-T32 usa la navegación común y respeta los roles',
     assert.equal(getPageRedirect(role, '/admin/medios-pago') === null, allowed);
   }
 });
+test('El módulo de SPRINT-4R-T01 usa la navegación común y respeta los roles', () => {
+  assert.deepEqual(getNavigationView('/propinas/diarias'), {
+    href: '/propinas/diarias',
+    title: 'Operación diaria',
+  });
+  assert.deepEqual(getNavigationView('/propinas/diarias/ajuste'), {
+    href: '/propinas/diarias',
+    title: 'Operación diaria',
+  });
+  for (const role of ROLES) {
+    const allowed = role === 'SUPERVISOR';
+    assert.equal(
+      getNavigationItems(role).some(
+        (item) =>
+          item.href === '/propinas/diarias' &&
+          item.label === 'Operación diaria',
+      ),
+      allowed,
+    );
+    assert.equal(getPageRedirect(role, '/propinas/diarias') === null, allowed);
+  }
+});
 test('Mis documentos y Mis liquidaciones permanecen separados para trabajadores y supervisores', () => {
   assert.deepEqual(getNavigationView('/portal/documentos'), {
     href: '/portal/documentos',

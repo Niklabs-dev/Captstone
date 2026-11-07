@@ -12,12 +12,16 @@
 | --- | --- | --- |
 | Núcleo | `stores`, `roles`, `users`, `refresh_tokens`, `audit_logs` | Locales, control de acceso por rol y local, autenticación JWT y auditoría inmutable |
 | Gestor Documental | `document_types`, `documents`, `document_versions`, `payslips` | Documentación laboral con hash SHA-256, versionado y conservación por 5 años; liquidaciones de sueldo con estado de publicación |
-| Propinas | `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources` | Registro diario de propinas, pacto de reparto vigente, horas trabajadas y reparto con snapshots (art. 64 CT) |
-| Ventas y Caja | `payment_methods`, `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries` | Catálogo administrable de medios de pago (código estable, comportamiento y disponibilidad para propinas), ventas por local (manuales y totales netos MrComanda por período) y cierre de caja por local, día y turno con responsable y quién cerró, desglosado por medio de pago (esperado vs. contado con diferencia por línea), conciliado contra MrComanda y Mercado Pago con sus vouchers y vinculado solo como referencia al registro diario de propinas |
+| Propinas | `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources` | Pacto de reparto vigente, horas trabajadas y reparto con snapshots (art. 64 CT); `tip_entries` conserva la captura histórica por medio (modo lectura desde SPRINT-4R-T01) |
+| Ventas y Caja | `payment_methods`, `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries` | **Histórico, modo lectura:** catálogo administrable de medios de pago (se conserva para historial y futura importación Excel), ventas por local (manuales y totales netos MrComanda) y cierre de caja por local, día y turno con conciliación y vouchers. Reemplazado operativamente por la operación diaria |
+| Operación diaria | `daily_operations`, `daily_operation_vouchers` | Una operación por local y fecha de negocio (SPRINT-4R-T01): propina tarjeta con voucher fotográfico, propina efectivo, fondo de propinas calculado y diferencia de efectivo con signo y motivo. Fuente operativa de ambos montos de propina |
 | Inventario | `products`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Stock por libro mayor de movimientos y conteos físicos que detectan mermas |
 | Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
 
-**27 tablas y 14 enums.** El Portal del Trabajador no agrega tablas: es una vista
+**27 tablas y 14 enums**, más las que agrega la migración de la operación diaria
+de SPRINT-4R-T01 (`daily_operations` y `daily_operation_vouchers`; fuente de
+verdad física: `prisma/schema.prisma`). El Portal del Trabajador no agrega
+tablas: es una vista
 de solo lectura sobre `users`, `documents`, `tip_pool_lines` y `sales`, con
 aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 
@@ -35,7 +39,9 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
   `float`, para evitar errores de redondeo en propinas, ventas e inventario.
 - **`date` para fechas de negocio** (períodos de reparto, día de cierre) y
   **`timestamptz` para marcas de tiempo** (Chile tiene horario de verano).
-- **Restricciones de negocio en la BD**: un cierre de caja por local, día y
+- **Restricciones de negocio en la BD**: una operación diaria por local y día
+  de negocio (`UNIQUE(store_id, business_date)`; el reintento idéntico devuelve
+  la existente y un contenido distinto responde 409 con el ID consultable), un cierre de caja por local, día y
   turno (`UNIQUE(store_id, business_date, shift)`), una línea por medio de pago por cierre
   (`UNIQUE(closing_id, payment_method_id)`), un reparto por local y período
   (`UNIQUE(store_id, period_start, period_end)`), una línea por trabajador por
@@ -57,6 +63,11 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
   de documento— viven como datos en `roles` y `document_types`, seed en T05).
 
 ### Propinas (SPRINT-3-T09)
+
+> Desde SPRINT-4R-T01 la captura por medio en `tip_entries` es **histórica**
+> (modo lectura) y la fuente operativa de los montos de propina es la
+> [operación diaria](#operación-diaria-sprint-4r-t01). Lo siguiente describe el
+> modelo del flujo anterior, conservado íntegro con sus repartos ya calculados.
 
 - **`tip_entries` es la única fuente de los repartos**: agrupa por local, día de
   negocio y medio de pago el monto disponible para repartir. Los repartos se
@@ -102,8 +113,11 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 - **Art. 9 bis (conservación de documentación laboral)**: `documents` +
   `document_versions` conservan contratos, anexos, finiquitos y liquidaciones
   con integridad verificable, versionado y conservación por 5 años.
-- **Art. 64 (reparto de propinas)**: `tip_entries` registra diariamente el monto
-  por local y medio de pago; `tip_pools` define el fondo y período por local;
+- **Art. 64 (reparto de propinas)**: desde SPRINT-4R-T01 el registro diario del
+  monto vive en la operación diaria (`daily_operations`), fuente de ambos
+  montos de propina; en el flujo anterior era `tip_entries` quien registraba
+  diariamente el monto por local y medio de pago. `tip_pools` define el fondo y
+  período por local;
   `tip_pool_lines.hours_worked` es la base del reparto proporcional y `amount`
   el registro escrito por trabajador; `calculated_by`/`confirmed_by`/
   `confirmed_at` dejan trazabilidad del cálculo validado por el contador. El
@@ -198,6 +212,10 @@ Reglas clave:
 
 ## Medios de pago y ventas MrComanda (SPRINT-4-T32)
 
+> Con SPRINT-4R-T01 las ventas (manuales y MrComanda) dejaron de capturarse y
+> pasaron a modo lectura histórica; el catálogo `payment_methods` se conserva
+> para ese historial y para la futura importación de ventas desde Excel.
+
 Migración `20261105021500_medios_pago_catalogo` (reversa manual en su
 `down.sql`, que Prisma no ejecuta). Reemplaza al enum `PaymentMethod` por el
 catálogo relacional `payment_methods`, única fuente para ventas, propinas,
@@ -238,6 +256,12 @@ Reglas clave:
   `CLOSED`), sin `session_replication_role`.
 
 ## Cierres de caja por turno (SPRINT-4-T08)
+
+> **Flujo anterior, hoy histórico (modo lectura) desde SPRINT-4R-T01:** las
+> tablas, columnas y datos se conservan íntegros y consultables; la diferencia
+> de efectivo y las propinas pasan a declararse una sola vez al día en la
+> [operación diaria](#operación-diaria-sprint-4r-t01), sin doble cierre ni
+> conciliación.
 
 Migración `20261104010649_cierres_caja_turno_conciliacion` (reversa manual en
 su `down.sql`, que Prisma no ejecuta).
@@ -298,7 +322,43 @@ Reglas clave (CHECK y triggers; aplican a cualquier vía de escritura):
   tablas hijas y `sales` si hay cierres cerrados. Solo
   `session_replication_role = replica` (superusuario) omite estas reglas.
 
+## Operación diaria (SPRINT-4R-T01)
+
+Migración del módulo `daily-operations` (los nombres físicos finales viven en
+`prisma/schema.prisma`, fuente de verdad). Reemplaza operativamente al cierre
+por turno con conciliación, a la captura de ventas y al registro de propinas
+por medio: **una sola operación por local y fecha de negocio**, declarada por
+el supervisor al final del día.
+
+| Entidad | Rol |
+| --- | --- |
+| `daily_operations` | Una fila por `(store_id, business_date)` (`UNIQUE`). Guarda `card_tip_amount` (propina tarjeta, entero `>= 0`), `cash_tip_amount` (propina efectivo, entero `>= 0`), `tip_fund_amount` (fondo calculado: tarjeta + efectivo, CHECK) y `cash_difference` (entero **con signo** en BIGINT: positivo = sobrante, negativo = faltante), con `difference_reason` obligatorio si la diferencia no es cero (CHECK). FK única opcional al voucher: exige voucher siempre que `card_tip_amount > 0` (CHECK sobre la misma fila). Referencia al local y al responsable (siempre desde el JWT). |
+| `daily_operation_vouchers` | Foto del voucher de propinas con tarjeta: solo metadatos (`file_name`, `file_path`, `mime_type`, `size_bytes`, `sha256_hash` `CHAR(64)`). Obligatorio si `card_tip_amount > 0`; JPEG/PNG/WebP, máximo 5 MiB (validado en la API). El archivo vive en el **volumen privado** del backend (mismo volumen que el gestor documental, subcarpeta `vouchers/`, nombre físico aleatorio) y solo se descarga mediante el endpoint autorizado `GET /daily-operations/:id/voucher`; no existe URL pública. Relación 1:1 con la operación. |
+
+Reglas clave:
+
+- **Unicidad e idempotencia**: una operación por local y día. El reintento
+  idéntico (mismos campos, incluido el mismo voucher por su hash SHA-256)
+  devuelve la operación existente (200) sin duplicar fila ni auditoría; un
+  contenido distinto para la misma clave responde 409 con `existingOperationId`
+  consultable.
+- **Fuente única de propinas**: la operación diaria es la fuente de ambos
+  montos de propina; no se crean registros `tip_entries` paralelos ni se
+  infieren propinas desde ventas o vouchers. Las propinas, las ventas
+  (`sales`) y los cierres (`cash_closings*`) del flujo anterior quedan en modo
+  lectura histórica.
+- **Ventas fuera de la operación**: ningún total se calcula desde ventas; el
+  supervisor ya no captura ventas ni realiza el cierre por turno/conciliación.
+- **Auditoría con lista blanca**: el alta se registra con local, fecha y
+  montos, sin datos personales ni contenido del archivo.
+- Contrato HTTP completo: [Operación diaria](../README.md#operación-diaria-sprint-4r-t01)
+  en el README del backend.
+
 ## Cómo ver el modelo de forma visual
+
+> Los diagramas Mermaid y DBML de abajo corresponden al modelo hasta
+> SPRINT-4-T32; las tablas de la operación diaria (SPRINT-4R-T01) aún no se
+> reflejan en ellos — ver `prisma/schema.prisma`.
 
 Hay cuatro opciones; las dos primeras están listas en este archivo:
 

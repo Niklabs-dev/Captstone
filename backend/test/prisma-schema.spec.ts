@@ -36,7 +36,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(output).toContain('is valid');
   });
 
-  it('las migraciones crean las 27 tablas del modelo', () => {
+  it('las migraciones crean las 29 tablas del modelo', () => {
     const sql = readMigrations();
     const tablasEsperadas = [
       'stores',
@@ -61,6 +61,8 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'cash_closing_lines',
       'cash_closing_vouchers',
       'cash_closing_tip_entries',
+      'daily_operations',
+      'daily_operation_vouchers',
       'products',
       'inventory_movements',
       'inventory_counts',
@@ -389,5 +391,55 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(sql).toContain('DROP INDEX "stores_name_normalized_key"');
     expect(sql).toContain('upper(translate(');
     expect(sql).not.toContain('unaccent');
+  });
+
+  it('modela la operación diaria por local y fecha con voucher privado (SPRINT-4R-T01)', () => {
+    const sql = readMigration('operacion_diaria');
+
+    // Una sola operación por local y día; el voucher es 1:1 (FK única en
+    // daily_operations, lo que permite exigirlo con CHECK cuando hay
+    // propina de tarjeta).
+    expect(sql).toContain('CREATE TABLE "daily_operations"');
+    expect(sql).toContain('CREATE TABLE "daily_operation_vouchers"');
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "daily_operations_store_id_business_date_key"',
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "daily_operations_voucher_id_key"',
+    );
+
+    // Montos CLP enteros en BIGINT con sus reglas: no negativos, fondo
+    // consistente, motivo exigido con diferencia y voucher con propina.
+    expect(sql).toContain('"card_tip_amount" BIGINT NOT NULL');
+    expect(sql).toContain('"cash_tip_amount" BIGINT NOT NULL');
+    expect(sql).toContain('"tip_fund_amount" BIGINT NOT NULL');
+    expect(sql).toContain('"cash_difference" BIGINT NOT NULL');
+    expect(sql).toContain('"daily_operations_card_tip_non_negative" CHECK');
+    expect(sql).toContain('"daily_operations_cash_tip_non_negative" CHECK');
+    expect(sql).toContain('"daily_operations_tip_fund_consistent" CHECK');
+    // El motivo se exige con IS NOT NULL: un CHECK satisfecho por NULL no
+    // rechaza la fila.
+    expect(sql).toContain(
+      '"daily_operations_difference_reason_required" CHECK ("cash_difference" = 0 OR ("difference_reason" IS NOT NULL AND btrim("difference_reason") <> \'\'))',
+    );
+    expect(sql).toContain('"daily_operations_voucher_required" CHECK');
+    expect(sql).toContain(
+      'ADD CONSTRAINT "daily_operations_voucher_id_fkey" FOREIGN KEY ("voucher_id") REFERENCES "daily_operation_vouchers"("id") ON DELETE RESTRICT ON UPDATE CASCADE',
+    );
+
+    // La migración no toca los históricos de cierres ni de propinas.
+    expect(sql).not.toContain('ALTER TABLE "cash_closings"');
+    expect(sql).not.toContain('ALTER TABLE "tip_entries"');
+
+    // La reversa vive junto a la migración y solo deshace el esquema nuevo.
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('operacion_diaria'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toContain('DROP TABLE "daily_operations"');
+    expect(down).toContain('DROP TABLE "daily_operation_vouchers"');
   });
 });

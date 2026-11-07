@@ -1,4 +1,15 @@
-# SPRINT-3-T11 — Registro diario de propinas
+# SPRINT-3-T11 — Registro diario de propinas (histórico)
+
+> **Este flujo fue reemplazado por la operación diaria (SPRINT-4R-T01)**, que
+> unifica en una sola declaración por local y fecha la propina tarjeta (con
+> voucher), la propina efectivo y la diferencia de efectivo con signo. Las
+> ventas dejaron de capturarse y el cierre por turno con conciliación quedó
+> histórico. Las lecturas del API de propinas (`GET /tips`) se conservan en
+> modo lectura para consultar el histórico; las escrituras (`POST`, `PATCH`,
+> `DELETE /tips`) ya no son flujo operativo. El contrato vigente está en el
+> [README del backend](../../backend/README.md#operación-diaria-sprint-4r-t01).
+> El contenido siguiente se conserva como referencia del comportamiento
+> histórico y de su evidencia de pruebas.
 
 El supervisor abre **Registrar propinas** desde Inicio o **Propinas diarias**
 desde el menú. La ruta es `/propinas/diarias`, dentro del layout autenticado.

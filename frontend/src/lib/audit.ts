@@ -197,6 +197,8 @@ export function auditActionLabel(action: string): string {
     USER_LOGIN_FAILED: 'Inicio de sesión rechazado',
     USER_CREATED: 'Usuario creado',
     USER_DEACTIVATED: 'Usuario desactivado',
+    DAILY_OPERATION_CREATED: 'Operación diaria registrada',
+    DAILY_OPERATION_VOUCHER_DOWNLOADED: 'Voucher de operación descargado',
   };
   return Object.hasOwn(labels, action) ? labels[action] : action;
 }
@@ -207,6 +209,7 @@ export function auditModuleLabel(entityType: string): string {
     auth: 'Acceso',
     documents: 'Documentos',
     tip_pools: 'Propinas',
+    daily_operations: 'Operación diaria',
     sales: 'Ventas',
     cash_closings: 'Caja',
     inventory_movements: 'Inventario',
