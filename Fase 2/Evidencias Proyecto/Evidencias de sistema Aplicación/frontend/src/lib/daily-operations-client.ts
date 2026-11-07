@@ -4,7 +4,9 @@ import {
   dailyOperationErrorMessage,
   parseDailyOperation,
   parseDailyOperations,
+  parseEligibleWorkers,
   type DailyOperation,
+  type DailyOperationParticipant,
 } from './daily-operations';
 
 export class DailyOperationRequestError extends Error {
@@ -27,6 +29,45 @@ export interface DailyOperationInput {
   cashTipAmount: number;
   cashDifference: number;
   differenceReason: string;
+  participantIds: string[];
+}
+// SPRINT-4R-T03: corrección parcial de la operación; solo se envían los campos
+// definidos. `participantIds` reemplaza la selección completa cuando se envía;
+// como el multipart no distingue lista vacía de campo ausente, un arreglo
+// vacío equivale a no corregir la selección (el servidor conserva la actual).
+export interface DailyOperationPatchInput {
+  cardTipAmount?: number;
+  cashTipAmount?: number;
+  cashDifference?: number;
+  differenceReason?: string;
+  participantIds?: string[];
+}
+function appendParticipantIds(
+  payload: FormData,
+  participantIds: string[],
+): void {
+  // Contrato: un campo multipart "participantIds" repetido por cada ID.
+  for (const participantId of participantIds)
+    payload.append('participantIds', participantId);
+}
+export async function loadEligibleWorkers(
+  storeId: string,
+  signal: AbortSignal,
+): Promise<DailyOperationParticipant[]> {
+  let response: Response;
+  try {
+    response = await fetch(
+      '/api/daily-operations/eligible-workers?' +
+        new URLSearchParams({ storeId }),
+      { cache: 'no-store', signal },
+    );
+  } catch {
+    throw new DailyOperationRequestError(503);
+  }
+  if (!response.ok) throw new DailyOperationRequestError(response.status);
+  const workers = parseEligibleWorkers(await response.json().catch(() => null));
+  if (!workers) throw new DailyOperationRequestError(502);
+  return workers;
 }
 function parseErrorPayload(value: unknown): {
   code?: unknown;
@@ -98,6 +139,7 @@ export async function createDailyOperation(
   payload.set('cashDifference', String(input.cashDifference));
   if (input.differenceReason.trim())
     payload.set('differenceReason', input.differenceReason.trim());
+  appendParticipantIds(payload, input.participantIds);
   if (voucher) payload.set('voucher', voucher);
   let response: Response;
   try {
@@ -125,4 +167,45 @@ export async function createDailyOperation(
   if (!operation || ![200, 201].includes(response.status))
     throw new DailyOperationRequestError(502);
   return { operation, created: response.status === 201 };
+}
+export async function patchDailyOperation(
+  id: string,
+  input: DailyOperationPatchInput,
+  voucher: File | null,
+): Promise<DailyOperation> {
+  const payload = new FormData();
+  if (input.cardTipAmount !== undefined)
+    payload.set('cardTipAmount', String(input.cardTipAmount));
+  if (input.cashTipAmount !== undefined)
+    payload.set('cashTipAmount', String(input.cashTipAmount));
+  if (input.cashDifference !== undefined)
+    payload.set('cashDifference', String(input.cashDifference));
+  if (input.differenceReason !== undefined && input.differenceReason.trim())
+    payload.set('differenceReason', input.differenceReason.trim());
+  if (input.participantIds !== undefined)
+    appendParticipantIds(payload, input.participantIds);
+  if (voucher) payload.set('voucher', voucher);
+  let response: Response;
+  try {
+    response = await fetch('/api/daily-operations/' + id, {
+      method: 'PATCH',
+      body: payload,
+    });
+  } catch {
+    throw new DailyOperationRequestError(503);
+  }
+  if (!response.ok) {
+    const error = parseErrorPayload(await response.json().catch(() => null));
+    throw new DailyOperationRequestError(
+      response.status,
+      error.existingOperationId,
+      error.code,
+    );
+  }
+  const operation = parseDailyOperation(
+    await response.json().catch(() => null),
+  );
+  if (!operation || response.status !== 200)
+    throw new DailyOperationRequestError(502);
+  return operation;
 }

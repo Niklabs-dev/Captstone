@@ -2,8 +2,9 @@ import { isRecord } from './auth';
 import { isUuid } from './users';
 import { formatClp, isTipDate } from './tips';
 
-// Contrato SPRINT-4R-T01: una operación diaria por local y fecha con propina
-// tarjeta, voucher privado, propina efectivo y diferencia de efectivo declarada.
+// Contrato SPRINT-4R-T01/T03: una operación diaria por local y fecha con
+// propina tarjeta, voucher privado, propina efectivo, diferencia de efectivo
+// declarada y trabajadores participantes del reparto (solo id y nombre).
 export const MAX_DAILY_AMOUNT = 9_999_999_999;
 export const MAX_DIFFERENCE_REASON_LENGTH = 500;
 export const MAX_VOUCHER_BYTES = 5 * 1024 * 1024;
@@ -16,6 +17,10 @@ export type VoucherMimeType = (typeof VOUCHER_MIME_TYPES)[number];
 export const DAILY_STORE_INACTIVE_MESSAGE =
   'Tu local está inactivo. Consulta con el administrador para volver a registrar la operación diaria. Puedes seguir consultando el historial.';
 
+export interface DailyOperationParticipant {
+  id: string;
+  name: string;
+}
 export interface DailyOperationVoucher {
   id: string;
   fileName: string;
@@ -34,6 +39,7 @@ export interface DailyOperation {
   cashDifference: number;
   differenceReason: string | null;
   voucher: DailyOperationVoucher | null;
+  participants: DailyOperationParticipant[];
   responsible: { id: string; name: string };
   createdAt: string;
   updatedAt: string;
@@ -45,7 +51,8 @@ export interface DailyOperationFormFields {
   cashDifference: string;
   differenceReason: string;
 }
-export type DailyOperationField = keyof DailyOperationFormFields | 'voucher';
+export type DailyOperationField =
+  keyof DailyOperationFormFields | 'voucher' | 'participants';
 export type DailyOperationFieldErrors = Partial<
   Record<DailyOperationField, string>
 >;
@@ -134,6 +141,20 @@ export function dailyOperationFieldErrors(
       'La foto del voucher solo se acepta cuando hay propina con tarjeta. Quítala o ingresa ese monto.';
   return errors;
 }
+// SPRINT-4R-T03: con fondo de propinas (tarjeta + efectivo) mayor que 0 se
+// exige al menos un trabajador participante; con fondo 0 la selección es
+// opcional. Montos nulos (aún inválidos) no agregan error aquí: lo reporta el
+// campo correspondiente.
+export function dailyParticipantSelectionError(
+  cardTipAmount: number | null,
+  cashTipAmount: number | null,
+  participantCount: number,
+): string | null {
+  if (cardTipAmount === null || cashTipAmount === null) return null;
+  if (cardTipAmount + cashTipAmount > 0 && participantCount < 1)
+    return 'Selecciona al menos un trabajador participante: hay propinas por repartir.';
+  return null;
+}
 function timestamp(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -149,6 +170,31 @@ function identity(value: unknown): value is { id: string; name: string } {
     value.name.trim().length > 0 &&
     value.name.length <= 201
   );
+}
+// Catálogo de trabajadores elegibles del local (SPRINT-4R-T03): solo id y
+// nombre, sin datos personales; el servicio los ordena por nombre y el
+// cliente conserva ese orden. Se exige unicidad de IDs.
+export function parseEligibleWorkers(
+  value: unknown,
+): DailyOperationParticipant[] | null {
+  if (!Array.isArray(value)) return null;
+  const workers: DailyOperationParticipant[] = [];
+  for (const item of value) {
+    if (!identity(item)) return null;
+    if (workers.some((other) => other.id === item.id)) return null;
+    workers.push({ id: item.id, name: item.name });
+  }
+  return workers;
+}
+function parseParticipants(value: unknown): DailyOperationParticipant[] | null {
+  if (!Array.isArray(value)) return null;
+  const participants: DailyOperationParticipant[] = [];
+  for (const item of value) {
+    if (!identity(item)) return null;
+    if (participants.some((other) => other.id === item.id)) return null;
+    participants.push({ id: item.id, name: item.name });
+  }
+  return participants;
 }
 function parseVoucher(value: unknown): DailyOperationVoucher | null {
   if (value === null) return null;
@@ -210,6 +256,8 @@ export function parseDailyOperation(
     return null;
   const voucher = parseVoucher(value.voucher);
   if (value.voucher !== null && voucher === null) return null;
+  const participants = parseParticipants(value.participants);
+  if (participants === null) return null;
   return {
     id: value.id,
     store: { id: value.store.id, name: value.store.name },
@@ -223,6 +271,7 @@ export function parseDailyOperation(
         ? value.differenceReason
         : null,
     voucher,
+    participants,
     responsible: { id: value.responsible.id, name: value.responsible.name },
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,

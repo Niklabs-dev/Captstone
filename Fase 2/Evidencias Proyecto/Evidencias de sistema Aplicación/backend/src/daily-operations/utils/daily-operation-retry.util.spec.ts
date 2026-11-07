@@ -21,6 +21,7 @@ function dto(
     cashTipAmount: 4500,
     cashDifference: -1000,
     differenceReason: 'Vuelto no registrado',
+    participantIds: ['worker-1', 'worker-2'],
     ...overrides,
   };
 }
@@ -46,6 +47,10 @@ function operation(
       createdAt: new Date('2026-03-10T20:15:00.000Z'),
     },
     responsible: { id: 'user-1', name: 'Supervisor Uno' },
+    participants: [
+      { id: 'worker-1', name: 'Ana Participa' },
+      { id: 'worker-2', name: 'Beto Participa' },
+    ],
     createdAt: new Date('2026-03-10T20:14:30.000Z'),
     updatedAt: new Date('2026-03-10T20:14:30.000Z'),
     ...overrides,
@@ -133,5 +138,59 @@ describe('Reintento idéntico de la operación diaria (SPRINT-4R-T01)', () => {
         USER,
       ),
     ).toBe(true);
+  });
+
+  it('acepta la misma selección en otro orden (comparación como conjunto)', () => {
+    expect(
+      isIdenticalDailyOperationRetry(
+        operation(),
+        dto({ participantIds: ['worker-2', 'worker-1'] }),
+        'a'.repeat(64),
+        USER,
+      ),
+    ).toBe(true);
+  });
+
+  it('acepta selección vacía en ambos lados cuando no hay fondo', () => {
+    const noFund = operation({
+      cardTipAmount: 0,
+      cashTipAmount: 0,
+      tipFundAmount: 0,
+      voucher: null,
+      participants: [],
+    });
+    expect(
+      isIdenticalDailyOperationRetry(
+        noFund,
+        dto({ cardTipAmount: 0, cashTipAmount: 0, participantIds: [] }),
+        null,
+        USER,
+      ),
+    ).toBe(true);
+  });
+
+  it.each<[string, CreateDailyOperationDto]>([
+    ['otra selección', dto({ participantIds: ['worker-1', 'worker-3'] })],
+    [
+      'selección con un participante menos',
+      dto({ participantIds: ['worker-1'] }),
+    ],
+    [
+      'selección con un participante más',
+      dto({ participantIds: ['worker-1', 'worker-2', 'worker-3'] }),
+    ],
+    [
+      'selección omitida cuando la operación sí tiene participantes',
+      dto({ participantIds: undefined }),
+    ],
+  ])('rechaza %s', (_label, candidate) => {
+    expect(
+      isIdenticalDailyOperationRetry(
+        operation(),
+        candidate,
+        'a'.repeat(64),
+        USER,
+      ),
+    ).toBe(false);
   });
 });

@@ -268,14 +268,15 @@ eliminarla mientras no venza la conservación de su documento, `TRUNCATE` sobre
 que en la auditoría, solo se omiten con `session_replication_role = replica`
 (superusuario).
 
-## Operación diaria (SPRINT-4R-T01)
+## Operación diaria (SPRINT-4R-T01, participantes desde SPRINT-4R-T03)
 
 Una sola operación por local y fecha de negocio reemplaza al flujo anterior de
 cierre de caja por turno con conciliación, a la captura de ventas (manual o
 MrComanda) y al registro de propinas por medio. El supervisor declara una vez al
-día la propina recibida con tarjeta (con su voucher), la propina en efectivo y
-la diferencia de efectivo observada; **las ventas dejan de capturarse** y
-ningún total se calcula ni se infiere desde ellas.
+día la propina recibida con tarjeta (con su voucher), la propina en efectivo, la
+diferencia de efectivo observada y los trabajadores que participan del reparto;
+**las ventas dejan de capturarse** y ningún total se calcula ni se infiere
+desde ellas.
 
 Solo existe una operación por `(storeId, businessDate)`. El alta es
 **multipart** (`multipart/form-data`):
@@ -289,6 +290,11 @@ Solo existe una operación por `(storeId, businessDate)`. El alta es
 | `cashDifference` | Entero CLP **con signo**: diferencia de efectivo declarada por el supervisor. Positivo = sobrante, negativo = faltante. |
 | `differenceReason` | Obligatorio si `cashDifference != 0`; ausente o en blanco con diferencia distinta de cero responde 400. |
 | `voucher` | Foto del voucher de propinas con tarjeta. Obligatorio si `cardTipAmount > 0`; JPEG/PNG/WebP, máximo 5 MiB. Se guarda en el volumen **privado** del backend con su SHA-256 y jamás se sirve como archivo público. |
+| `participantIds` | Repetido: un campo por cada trabajador que participa del reparto (`FormData.append` por ID). Cada valor debe ser el UUID de un `TRABAJADOR` activo del local (catálogo `GET /daily-operations/eligible-workers`). Con fondo del día (`cardTipAmount + cashTipAmount`) mayor que 0 se exige al menos uno; con fondo 0 la selección debe venir vacía. Se rechazan con 400 y mensaje claro: lista vacía cuando corresponde, IDs repetidos, UUID inválidos y trabajadores no elegibles (otro local, inactivo u otro rol). |
+
+Propinas y selección se guardan **en la misma transacción**: no existe una
+operación con la mitad de la selección. La selección es una sola lista
+compartida por la propina de tarjeta y la de efectivo del mismo local/día.
 
 `tipFundAmount` no se recibe del cliente: se calcula como `cardTipAmount +
 cashTipAmount` y es el fondo de propinas del día. La operación diaria es la
@@ -297,7 +303,9 @@ paralelos ni se infieren propinas desde ventas o vouchers.
 
 | Endpoint | Roles | Descripción |
 | --- | --- | --- |
-| `POST /daily-operations` | `SUPERVISOR` (solo su local) | Crea la operación del local y día. **201** al crear; un **reintento idéntico** (mismos campos, incluido el mismo archivo de voucher por su hash) responde **200** con la operación existente y no duplica fila ni auditoría; otro contenido para la misma clave responde **409** con `existingOperationId` consultable. |
+| `POST /daily-operations` | `SUPERVISOR` (solo su local) | Crea la operación del local y día con su selección de participantes. **201** al crear; un **reintento idéntico** (mismos campos, mismo archivo de voucher por su hash y misma selección comparada como conjunto, sin exigir orden) responde **200** con la operación existente y no duplica fila, selección ni auditoría; otro contenido para la misma clave responde **409** con `existingOperationId` consultable. |
+| `GET /daily-operations/eligible-workers?storeId=<uuid>` | `SUPERVISOR` (su local), `ADMINISTRADOR` | Catálogo acotado de trabajadores elegibles: `TRABAJADOR` activos del local ordenados alfabéticamente, solo `{id, name}` (jamás RUT, correo, teléfono ni credenciales). |
+| `PATCH /daily-operations/:id` | `SUPERVISOR` (su local), `ADMINISTRADOR` | Corrección **multipart**: corrige solo lo enviado (montos, diferencia, motivo, `participantIds` repetido y/o voucher de reemplazo); local, fecha y responsable original no cambian. El voucher se conserva si la tarjeta sigue mayor que 0 y no hay reemplazo, y se retiran archivo y metadatos si la tarjeta queda en 0; con caja cuadrada el motivo queda vacío. La corrección bloquea la fila (`FOR UPDATE`) y recalcula sus reglas sobre el estado vigente: dos correcciones simultáneas se serializan y ninguna decide con datos obsoletos. Los triggers de la base impiden corregir montos o selección de una operación que alimentó un reparto `CONFIRMED`/`PAID`: responden **409** con el mensaje de la base. |
 | `GET /daily-operations?storeId=<uuid>&businessDate=<fecha>` | `SUPERVISOR` (su local), `ADMINISTRADOR`, `CONTADOR` | Arreglo de 0 o 1 operaciones para el local y día. |
 | `GET /daily-operations/:id` | `SUPERVISOR` (su local), `ADMINISTRADOR`, `CONTADOR` | Detalle de la operación. |
 | `GET /daily-operations/:id/voucher` | `SUPERVISOR` (su local), `ADMINISTRADOR`, `CONTADOR` | Descarga privada y autorizada del voucher; no existe una URL pública del archivo. |
@@ -307,14 +315,17 @@ Respuesta (`DailyOperationResponse`): `id`, `store` (`id`, `name`),
 `cashDifference`, `differenceReason`, `voucher` (`null` u objeto con `id`,
 `fileName`, `mimeType`, `sizeBytes`, `sha256Hash`, `createdAt`),
 `responsible` (`id`, `name`; siempre desde el JWT — el body no acepta
-`responsibleId`), `createdAt` y `updatedAt`. Los montos son enteros en CLP: se
-rechazan negativos en las propinas, decimales y campos obligatorios vacíos con
-400 identificando el campo. El alta se audita como `DAILY_OPERATION_CREATED`
-con detalle limitado a local, fecha y montos (lista blanca: sin correos,
-nombres, RUT ni contenido del archivo). El contrato completo está en Swagger
+`responsibleId`), `participants` (arreglo de `{id, name}` ordenado por nombre;
+la selección compartida por tarjeta y efectivo) y `createdAt`/`updatedAt`. Los
+montos son enteros en CLP: se rechazan negativos en las propinas, decimales y
+campos obligatorios vacíos con 400 identificando el campo. El alta se audita
+como `DAILY_OPERATION_CREATED` y la corrección como `DAILY_OPERATION_UPDATED`,
+ambas con detalle limitado a local, fecha, montos, hash del voucher y la
+selección enviada (lista blanca: sin correos, RUT ni contenido del archivo); el
+actor de cada corrección queda registrado. El contrato completo está en Swagger
 (`/api/docs`).
 
-### Participantes del reparto y regla equitativa (SPRINT-4R-T02, solo modelo)
+### Participantes del reparto y regla equitativa (SPRINT-4R-T02; API en SPRINT-4R-T03)
 
 Desde SPRINT-4R-T02 la operación diaria conserva, a nivel de base de datos, la
 selección de trabajadores que participan de su reparto
@@ -336,10 +347,11 @@ inmutables: la base rechaza corregir participantes o los montos, fecha y local
 de una operación que ya alimentó un reparto cerrado (con el reparto en
 `DRAFT` sí se permite ajustarla).
 
-Esta tarea **no agrega endpoints ni cálculo**: la API para consultar y corregir
-la selección de participantes es SPRINT-4R-T03 y el cálculo diario equitativo
-(es decir, crear el reparto desde la operación) es SPRINT-4R-T04. Detalle del
-modelo en
+El modelo **se expone con SPRINT-4R-T03**: la API para consultar y corregir la
+selección de participantes ya está descrita en
+[Operación diaria](#operación-diaria-sprint-4r-t01-participantes-desde-sprint-4r-t03);
+el cálculo diario equitativo (crear el reparto desde la operación) es
+SPRINT-4R-T04. Detalle del modelo en
 [`docs/modelo-datos.md`](docs/modelo-datos.md#participantes-diarios-y-regla-equitativa-sprint-4r-t02).
 
 ## Registro diario de propinas (flujo anterior — histórico, modo lectura)

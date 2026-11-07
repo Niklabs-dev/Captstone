@@ -24,10 +24,12 @@ import {
   DailyOperationRequestError,
   loadDailyOperationById,
   loadDailyOperations,
+  loadEligibleWorkers,
 } from '@/lib/daily-operations-client';
 import {
   dailyOperationFieldErrors,
   dailyOperationErrorMessage,
+  dailyParticipantSelectionError,
   formatSignedClp,
   parseCashDifference,
   parseDailyAmount,
@@ -43,6 +45,12 @@ type QueryState =
   | { status: 'loading' | 'idle'; key: string }
   | { status: 'error'; key: string; message: string }
   | { status: 'ready'; key: string; operation: DailyOperation | null };
+// Catálogo de trabajadores elegibles del local (SPRINT-4R-T03), consultado una
+// vez por local: solo depende de la asignación, no de la fecha consultada.
+type WorkersState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; workers: { id: string; name: string }[] };
 
 export function DailyOperationPanel({
   store,
@@ -57,6 +65,9 @@ export function DailyOperationPanel({
   const [difference, setDifference] = useState('0');
   const [reason, setReason] = useState('');
   const [voucher, setVoucher] = useState<File | null>(null);
+  const [participantIds, setParticipantIds] = useState<string[]>([]);
+  const [workersRevision, setWorkersRevision] = useState(0);
+  const [workers, setWorkers] = useState<WorkersState>({ status: 'loading' });
   const [revision, setRevision] = useState(0);
   const [query, setQuery] = useState<QueryState>({
     status: 'loading',
@@ -102,6 +113,33 @@ export function DailyOperationPanel({
     );
     return () => controller.abort();
   }, [date, key, store.id]);
+  useEffect(() => {
+    const controller = new AbortController();
+    loadEligibleWorkers(store.id, controller.signal).then(
+      (list) => {
+        if (!controller.signal.aborted)
+          setWorkers({ status: 'ready', workers: list });
+      },
+      (cause: unknown) => {
+        if (!controller.signal.aborted)
+          setWorkers({
+            status: 'error',
+            message:
+              cause instanceof DailyOperationRequestError
+                ? cause.message
+                : dailyOperationErrorMessage(503),
+          });
+      },
+    );
+    return () => controller.abort();
+  }, [store.id, workersRevision]);
+  function toggleParticipant(id: string, selected: boolean): void {
+    setParticipantIds((value) =>
+      selected ? [...value, id] : value.filter((item) => item !== id),
+    );
+    setErrors((value) => ({ ...value, participants: undefined }));
+    clearFeedback();
+  }
   function clearFeedback(): void {
     setFailure('');
     setNotice('');
@@ -117,7 +155,12 @@ export function DailyOperationPanel({
   }
   async function submit(event: FormEvent<HTMLFormElement>): Promise<undefined> {
     event.preventDefault();
-    if (inFlight.current || !store.isActive || current.status !== 'ready')
+    if (
+      inFlight.current ||
+      !store.isActive ||
+      current.status !== 'ready' ||
+      workers.status !== 'ready'
+    )
       return;
     const fields: DailyOperationFormFields = {
       businessDate: date,
@@ -126,11 +169,20 @@ export function DailyOperationPanel({
       cashDifference: difference,
       differenceReason: reason,
     };
+    const cardTipAmount = parseDailyAmount(cardTip);
+    const cashTipAmount = parseDailyAmount(cashTip);
+    const cashDifference = parseCashDifference(difference);
     const validation = dailyOperationFieldErrors(fields, voucher !== null);
     if (voucher && !validation.voucher) {
       const fileError = voucherFileError(voucher);
       if (fileError) validation.voucher = fileError;
     }
+    const participantsError = dailyParticipantSelectionError(
+      cardTipAmount,
+      cashTipAmount,
+      participantIds.length,
+    );
+    if (participantsError) validation.participants = participantsError;
     setErrors(validation);
     clearFeedback();
     const invalid = Object.keys(validation)[0];
@@ -142,9 +194,6 @@ export function DailyOperationPanel({
       if (field instanceof HTMLElement) field.focus();
       return;
     }
-    const cardTipAmount = parseDailyAmount(cardTip);
-    const cashTipAmount = parseDailyAmount(cashTip);
-    const cashDifference = parseCashDifference(difference);
     if (
       cardTipAmount === null ||
       cashTipAmount === null ||
@@ -162,6 +211,7 @@ export function DailyOperationPanel({
           cashTipAmount,
           cashDifference,
           differenceReason: reason,
+          participantIds,
         },
         voucher,
       );
@@ -175,6 +225,7 @@ export function DailyOperationPanel({
       setDifference('0');
       setReason('');
       setVoucher(null);
+      setParticipantIds([]);
       if (voucherInput.current) voucherInput.current.value = '';
       setRevision((value) => value + 1);
     } catch (cause) {
@@ -224,8 +275,9 @@ export function DailyOperationPanel({
         </p>
         <p className="mt-2 text-xs leading-5 text-ink2">
           La cuenta conectada queda como responsable. Se guarda una operación
-          por fecha: propinas con tarjeta y su voucher, propinas en efectivo y
-          la diferencia de efectivo declarada.
+          por fecha: propinas con tarjeta y su voucher, propinas en efectivo, la
+          diferencia de efectivo declarada y los trabajadores participantes del
+          reparto.
         </p>
         {!store.isActive && (
           <p
@@ -385,6 +437,83 @@ export function DailyOperationPanel({
                 />
               </label>
             </div>
+            <fieldset
+              name="participants"
+              className="min-w-0 rounded-lg border border-line bg-tint p-4"
+              aria-describedby="daily-participants-help daily-participants-error"
+            >
+              <legend className="sr-only">
+                Trabajadores participantes del reparto
+              </legend>
+              <p className={labelClass}>
+                Trabajadores participantes{' '}
+                <span className="font-normal">
+                  (obligatorio si hay propinas por repartir)
+                </span>
+              </p>
+              {workers.status === 'loading' && (
+                <p role="status" className="mt-3 text-sm text-ink2">
+                  Consultando trabajadores de tu local…
+                </p>
+              )}
+              {workers.status === 'error' && (
+                <div role="alert" className="mt-3 space-y-3 text-sm text-crit">
+                  <p>{workers.message}</p>
+                  <button
+                    type="button"
+                    onClick={() => setWorkersRevision((value) => value + 1)}
+                    className={buttonClass}
+                  >
+                    Reintentar trabajadores
+                  </button>
+                </div>
+              )}
+              {workers.status === 'ready' && workers.workers.length === 0 && (
+                <p role="status" className="mt-3 text-sm text-ink2">
+                  No hay trabajadores activos asignados a tu local. Pide al
+                  administrador que asigne trabajadores para repartir las
+                  propinas.
+                </p>
+              )}
+              {workers.status === 'ready' && workers.workers.length > 0 && (
+                <ul className="mt-3 space-y-2">
+                  {workers.workers.map((worker) => (
+                    <li key={worker.id} className="min-w-0">
+                      <label className="flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-lg border border-line2 bg-bg px-3 py-2">
+                        <input
+                          type="checkbox"
+                          name={'participant-' + worker.id}
+                          checked={participantIds.includes(worker.id)}
+                          onChange={(event) =>
+                            toggleParticipant(worker.id, event.target.checked)
+                          }
+                          className="h-5 w-5 shrink-0 accent-salmon-ink"
+                          aria-invalid={Boolean(errors.participants)}
+                        />
+                        <span className="min-w-0 break-words text-sm font-semibold text-ink">
+                          {worker.name}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </fieldset>
+            <p
+              id="daily-participants-help"
+              className="text-xs leading-5 text-ink2"
+            >
+              Selecciona quiénes participan del reparto del fondo de propinas
+              (tarjeta más efectivo). Con fondo mayor que 0 se exige al menos un
+              trabajador.
+            </p>
+            <p
+              id="daily-participants-error"
+              hidden={!errors.participants}
+              className="text-sm text-crit"
+            >
+              {errors.participants}
+            </p>
             <p id="daily-date-help" className="text-xs leading-5 text-ink2">
               Al cambiar la fecha se consulta su operación registrada. Las
               fechas corresponden al día de negocio en Chile.
@@ -485,7 +614,12 @@ export function DailyOperationPanel({
           )}
           <button
             type="submit"
-            disabled={saving || !store.isActive || current.status !== 'ready'}
+            disabled={
+              saving ||
+              !store.isActive ||
+              current.status !== 'ready' ||
+              workers.status !== 'ready'
+            }
             className={primaryButtonClass}
           >
             {saving ? 'Guardando…' : 'Guardar operación'}
@@ -612,6 +746,22 @@ export function DailyOperationPanel({
                 <dt className="text-xs text-ink2">Responsable</dt>
                 <dd className="mt-2 break-words text-sm font-semibold">
                   {registered.responsible.name}
+                </dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-xs text-ink2">Participantes del reparto</dt>
+                <dd className="mt-2 text-sm font-semibold">
+                  {registered.participants.length > 0 ? (
+                    <ul className="space-y-1">
+                      {registered.participants.map((participant) => (
+                        <li key={participant.id} className="break-words">
+                          {participant.name}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="text-ink2">Sin reparto</span>
+                  )}
                 </dd>
               </div>
               <div className="min-w-0">
