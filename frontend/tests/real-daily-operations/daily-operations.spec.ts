@@ -16,6 +16,7 @@ let storeId = '';
 let otherStoreId = '';
 const accounts: { id: string; email: string; role: string }[] = [];
 let supervisor: { id: string; email: string };
+const workerName = 'Bruno Prueba de operación';
 // PNG 1x1 real para el voucher.
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -26,6 +27,34 @@ function id(value: unknown): string {
   if (!isRecord(value) || typeof value.id !== 'string')
     throw Error('La respuesta no incluye un ID.');
   return value.id;
+}
+// Multipart con soporte de campos repetidos (participantIds del contrato).
+function multipartBody(
+  fields: Record<string, string | string[]>,
+  file?: { name: string; filename: string; type: string; data: Buffer },
+): { body: Buffer; contentType: string } {
+  const boundary = '----OperacionDiariaE2E';
+  const parts: Buffer[] = [];
+  for (const [name, value] of Object.entries(fields))
+    for (const item of Array.isArray(value) ? value : [value])
+      parts.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${item}\r\n`,
+        ),
+      );
+  if (file)
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${file.name}"; filename="${file.filename}"\r\nContent-Type: ${file.type}\r\n\r\n`,
+      ),
+      file.data,
+      Buffer.from('\r\n'),
+    );
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+  return {
+    body: Buffer.concat(parts),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
 }
 async function login(
   context: BrowserContext,
@@ -109,11 +138,12 @@ test.beforeAll(async ({ request }, info) => {
     if (!storeId) storeId = id(await response.json());
     else otherStoreId = id(await response.json());
   }
-  for (const [key, role, assignedStore] of [
-    ['supervisor', 'SUPERVISOR', storeId],
-    ['other', 'SUPERVISOR', otherStoreId],
-    ['worker', 'TRABAJADOR', storeId],
-    ['accountant', 'CONTADOR', null],
+  for (const [key, role, assignedStore, firstName] of [
+    ['supervisor', 'SUPERVISOR', storeId, 'Camila'],
+    ['other', 'SUPERVISOR', otherStoreId, 'Oscar'],
+    ['worker', 'TRABAJADOR', storeId, 'Bruno'],
+    ['worker2', 'TRABAJADOR', storeId, 'Dana'],
+    ['accountant', 'CONTADOR', null, 'Ana'],
   ] as const) {
     const email = key + '-' + suffix + '@example.test';
     const response = await request.post(backend + '/users', {
@@ -121,7 +151,7 @@ test.beforeAll(async ({ request }, info) => {
       data: {
         email,
         password,
-        firstName: 'Camila',
+        firstName,
         lastName: 'Prueba de operación',
         roleCode: role,
         ...(assignedStore ? { storeId: assignedStore } : {}),
@@ -217,6 +247,7 @@ test('Supervisor: validación, voucher, registro, reintento idéntico, conflicto
     await expect(card).toHaveAttribute('aria-invalid', 'true');
   }
   await fillOperation(page, { card: '12500' });
+  await page.getByRole('checkbox', { name: workerName }).check();
   // Doble envío: un único POST gracias al bloqueo en cliente.
   let posts = 0;
   await page.route('**/api/daily-operations', async (route) => {
@@ -246,9 +277,29 @@ test('Supervisor: validación, voucher, registro, reintento idéntico, conflicto
   await expect(registered).toContainText('-$1.500');
   await expect(registered).toContainText('Vale de caja firmado');
   await expect(registered).toContainText('Camila Prueba de operación');
+  await expect(registered.getByText('Participantes del reparto')).toBeVisible();
+  await expect(registered).toContainText(workerName);
   await expect(
     registered.getByText('Registrada', { exact: true }),
   ).toBeVisible();
+  // El catálogo acotado solo expone trabajadores activos del propio local,
+  // sin datos personales (SPRINT-4R-T03).
+  const eligible = await context.request.get(
+    '/api/daily-operations/eligible-workers?storeId=' + storeId,
+  );
+  expect(eligible.status()).toBe(200);
+  const eligibleBody: unknown = await eligible.json();
+  if (!Array.isArray(eligibleBody)) throw Error('Elegibles no es un arreglo.');
+  const eligibleIds = eligibleBody.map((worker) =>
+    isRecord(worker) && typeof worker.id === 'string' ? worker.id : '',
+  );
+  expect(eligibleIds).toContain(accounts[2].id);
+  expect(eligibleIds).toContain(accounts[3].id);
+  expect(eligibleIds).not.toContain(accounts[0].id);
+  expect(eligibleIds).not.toContain(accounts[1].id);
+  const eligibleText = JSON.stringify(eligibleBody);
+  expect(eligibleText).not.toContain('@');
+  expect(eligibleText).not.toContain(password);
   const persisted = await context.request.get(
     '/api/daily-operations?storeId=' + storeId + '&businessDate=' + date,
   );
@@ -276,35 +327,74 @@ test('Supervisor: validación, voucher, registro, reintento idéntico, conflicto
       ).json(),
     ),
   ).toContain(supervisor.id);
-  // Reintento idéntico: 200 sin duplicar ni requerir voucher nuevo en el BFF.
-  const replay = await context.request.post('/api/daily-operations', {
-    headers: { Origin: baseURL! },
-    multipart: {
+  // Reintento idéntico: mismos montos, voucher e misma selección -> 200.
+  const replayParts = multipartBody(
+    {
       storeId,
       businessDate: date,
       cardTipAmount: '12500',
       cashTipAmount: '8000',
       cashDifference: '-1500',
       differenceReason: 'Vale de caja firmado',
-      voucher: { name: 'voucher.png', mimeType: 'image/png', buffer: png },
+      participantIds: [accounts[2].id],
     },
+    { name: 'voucher', filename: 'voucher.png', type: 'image/png', data: png },
+  );
+  const replay = await context.request.post('/api/daily-operations', {
+    headers: {
+      Origin: baseURL!,
+      'Content-Type': replayParts.contentType,
+    },
+    data: replayParts.body,
   });
   expect(replay.status()).toBe(200);
   expect(await replay.text()).not.toContain('accessToken');
   const replayed: unknown = await replay.json();
   expect(isRecord(replayed) && replayed.id).toBe(operationId);
+  expect(JSON.stringify(replayed)).toContain(accounts[2].id);
+  // Reintento con selección distinta: 409 sin sobrescribir silenciosamente.
+  const replayDifferent = multipartBody(
+    {
+      storeId,
+      businessDate: date,
+      cardTipAmount: '12500',
+      cashTipAmount: '8000',
+      cashDifference: '-1500',
+      differenceReason: 'Vale de caja firmado',
+      participantIds: [accounts[3].id],
+    },
+    { name: 'voucher', filename: 'voucher.png', type: 'image/png', data: png },
+  );
+  const different = await context.request.post('/api/daily-operations', {
+    headers: {
+      Origin: baseURL!,
+      'Content-Type': replayDifferent.contentType,
+    },
+    data: replayDifferent.body,
+  });
+  expect(different.status()).toBe(409);
+  const differentBody: unknown = await different.json();
+  if (!isRecord(differentBody)) throw Error('Conflicto sin cuerpo.');
+  expect(differentBody.existingOperationId).toBe(operationId);
   // Conflicto con otro contenido: 409 con ID consultable en el BFF.
-  const conflict = await context.request.post('/api/daily-operations', {
-    headers: { Origin: baseURL! },
-    multipart: {
+  const conflictParts = multipartBody(
+    {
       storeId,
       businessDate: date,
       cardTipAmount: '13000',
       cashTipAmount: '8000',
       cashDifference: '-1500',
       differenceReason: 'Vale de caja firmado',
-      voucher: { name: 'voucher.png', mimeType: 'image/png', buffer: png },
+      participantIds: [accounts[2].id],
     },
+    { name: 'voucher', filename: 'voucher.png', type: 'image/png', data: png },
+  );
+  const conflict = await context.request.post('/api/daily-operations', {
+    headers: {
+      Origin: baseURL!,
+      'Content-Type': conflictParts.contentType,
+    },
+    data: conflictParts.body,
   });
   expect(conflict.status()).toBe(409);
   const conflictBody: unknown = await conflict.json();
@@ -323,6 +413,7 @@ test('Supervisor: validación, voucher, registro, reintento idéntico, conflicto
     mimeType: 'image/png',
     buffer: png,
   });
+  await page.getByRole('checkbox', { name: workerName }).check();
   await save.click();
   await expect(page.getByRole('main').getByRole('alert')).toContainText(
     'Ya existe una operación registrada para esta fecha',
@@ -380,6 +471,33 @@ test('Supervisor: validación, voucher, registro, reintento idéntico, conflicto
       .every((cookie) => cookie.httpOnly),
   ).toBe(true);
   expect(await page.evaluate(() => document.cookie)).not.toContain('mf_access');
+  // Corrección vía BFF (SPRINT-4R-T03): cambia el efectivo y la selección,
+  // conserva el voucher y queda visible en la consulta.
+  const correction = multipartBody({
+    cashTipAmount: '8100',
+    participantIds: [accounts[3].id],
+  });
+  const corrected = await context.request.patch(
+    '/api/daily-operations/' + operationId,
+    {
+      headers: {
+        Origin: baseURL!,
+        'Content-Type': correction.contentType,
+      },
+      data: correction.body,
+    },
+  );
+  expect(corrected.status()).toBe(200);
+  const correctedBody: unknown = await corrected.json();
+  if (!isRecord(correctedBody)) throw Error('Corrección sin cuerpo.');
+  expect(correctedBody.cashTipAmount).toBe(8100);
+  expect(correctedBody.tipFundAmount).toBe(20600);
+  expect(isRecord(correctedBody.voucher)).toBe(true);
+  expect(JSON.stringify(correctedBody.participants)).toContain(accounts[3].id);
+  await page.getByRole('button', { name: 'Actualizar consulta' }).click();
+  await expect(registered).toContainText('$8.100');
+  await expect(registered).toContainText('$20.600');
+  await expect(registered).toContainText('Dana Prueba de operación');
 });
 
 test('BFF y páginas: sesión, roles, origen, multipart e identidad/local no editables', async ({
@@ -394,6 +512,13 @@ test('BFF y páginas: sesión, roles, origen, multipart e identidad/local no edi
       )
     ).status(),
   ).toBe(401);
+  expect(
+    (
+      await context.request.get(
+        '/api/daily-operations/eligible-workers?storeId=' + storeId,
+      )
+    ).status(),
+  ).toBe(401);
   await login(context, baseURL!);
   const headers = { Origin: baseURL! };
   const file = { name: 'voucher.png', mimeType: 'image/png', buffer: png };
@@ -404,7 +529,23 @@ test('BFF y páginas: sesión, roles, origen, multipart e identidad/local no edi
     cashTipAmount: '8000',
     cashDifference: '-1500',
     differenceReason: 'Vale de caja firmado',
+    participantIds: accounts[2].id,
   };
+  // El catálogo de elegibles exige sesión de supervisor y el propio local.
+  expect(
+    (
+      await context.request.get(
+        '/api/daily-operations/eligible-workers?storeId=' + storeId,
+      )
+    ).status(),
+  ).toBe(200);
+  expect(
+    (
+      await context.request.get(
+        '/api/daily-operations/eligible-workers?storeId=' + otherStoreId,
+      )
+    ).status(),
+  ).toBe(400);
   for (const body of [
     { ...valid, storeId: otherStoreId },
     { ...valid, responsibleId: accounts[1].id },
@@ -475,7 +616,15 @@ test('BFF y páginas: sesión, roles, origen, multipart e identidad/local no edi
         multipart: { ...valid, voucher: file },
       })
     ).status(),
-  ).toBe(405);
+  ).toBe(404);
+  expect(
+    (
+      await context.request.patch('/api/daily-operations/' + accounts[1].id, {
+        headers,
+        multipart: { ...valid, storeId: otherStoreId, voucher: file },
+      })
+    ).status(),
+  ).toBe(400);
   for (const account of accounts.filter((item) => item.role !== 'SUPERVISOR')) {
     await login(context, baseURL!, account.email);
     await page.goto('/propinas/diarias');
@@ -488,6 +637,13 @@ test('BFF y páginas: sesión, roles, origen, multipart e identidad/local no edi
       (
         await context.request.get(
           '/api/daily-operations?storeId=' + storeId + '&businessDate=' + date,
+        )
+      ).status(),
+    ).toBe(403);
+    expect(
+      (
+        await context.request.get(
+          '/api/daily-operations/eligible-workers?storeId=' + storeId,
         )
       ).status(),
     ).toBe(403);
@@ -512,6 +668,13 @@ test('BFF y páginas: sesión, roles, origen, multipart e identidad/local no edi
     (
       await context.request.get(
         '/api/daily-operations?storeId=' + storeId + '&businessDate=' + date,
+      )
+    ).status(),
+  ).toBe(403);
+  expect(
+    (
+      await context.request.get(
+        '/api/daily-operations/eligible-workers?storeId=' + storeId,
       )
     ).status(),
   ).toBe(403);
@@ -577,6 +740,7 @@ test('Carga, error, reintento y conservación de campos sobre la API real', asyn
   await page
     .getByLabel(/Foto del voucher/)
     .setInputFiles({ name: 'voucher.png', mimeType: 'image/png', buffer: png });
+  await page.getByRole('checkbox', { name: workerName }).check();
   failure = true;
   await save.click();
   await expect(page.getByRole('main').getByRole('alert')).toContainText(
@@ -612,6 +776,7 @@ test('Local desactivado después de abrir la vista: causa clara, monto conservad
   await page
     .getByLabel(/Foto del voucher/)
     .setInputFiles({ name: 'voucher.png', mimeType: 'image/png', buffer: png });
+  await page.getByRole('checkbox', { name: workerName }).check();
   // La API bloquea la baja si hay usuarios activos. Solo en esta base exclusiva
   // se prepara el estado inactivo con la vista abierta para probar la regresión.
   const changed = execFileSync(

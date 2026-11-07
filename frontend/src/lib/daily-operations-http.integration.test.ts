@@ -4,19 +4,26 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { setTimeout } from 'node:timers/promises';
 import { test } from 'node:test';
+import { isRecord } from './auth';
 import {
   DAILY_STORE_INACTIVE_MESSAGE,
   dailyOperationErrorMessage,
 } from './daily-operations';
 
 test(
-  'HTTP operación diaria: permisos, origen, multipart, reintentos, conflicto consultable, voucher y errores privados',
+  'HTTP operación diaria: permisos, origen, multipart, participantes, elegibles, corrección, reintentos, conflicto consultable, voucher y errores privados',
   { timeout: 120000 },
   async () => {
     const storeId = '61000000-0000-4000-8000-000000000311';
     const otherStoreId = '61000000-0000-4000-8000-000000000312';
     const responsibleId = '63000000-0000-4000-8000-000000000311';
     const operationId = '62000000-0000-4000-8000-000000000311';
+    const participantId = '65000000-0000-4000-8000-000000000311';
+    const secondParticipantId = '65000000-0000-4000-8000-000000000312';
+    const participants = [
+      { id: participantId, name: 'Benito Trabajador' },
+      { id: secondParticipantId, name: 'Ana Trabajadora' },
+    ];
     const operation = {
       id: operationId,
       store: { id: storeId, name: 'Centro' },
@@ -34,6 +41,7 @@ test(
         sha256Hash: 'a'.repeat(64),
         createdAt: '2026-10-26T12:05:00Z',
       },
+      participants,
       responsible: { id: responsibleId, name: 'Camila Supervisora' },
       createdAt: '2026-10-26T12:00:00Z',
       updatedAt: '2026-10-26T12:00:00Z',
@@ -73,7 +81,7 @@ test(
       }
       let raw = '';
       for await (const chunk of request) raw += String(chunk);
-      if (request.method === 'POST')
+      if (request.method === 'POST' || request.method === 'PATCH')
         calls.push({ path: request.url ?? '', method: request.method, raw });
       if (mode === 'inactive' || mode === 'bad-request') {
         response.writeHead(400, { 'Content-Type': 'application/json' });
@@ -125,19 +133,68 @@ test(
         response.end('not JSON');
         return;
       }
-      if (request.method === 'POST') {
+      // Catálogo acotado de trabajadores elegibles (SPRINT-4R-T03).
+      if (request.url?.startsWith('/daily-operations/eligible-workers')) {
+        if (mode === 'private-workers') {
+          response.writeHead(200, { 'Content-Type': 'application/json' });
+          response.end(
+            JSON.stringify([
+              {
+                ...participants[0],
+                email: 'privado@example.test',
+                phone: '+569',
+                passwordHash: 'secret',
+              },
+            ]),
+          );
+          return;
+        }
+        if (mode === 'duplicate-workers') {
+          response.writeHead(200, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify([participants[0], participants[0]]));
+          return;
+        }
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify(participants));
+        return;
+      }
+      function readParts(body: string): {
+        submitted: Record<string, string>;
+        participantIds: string[];
+      } {
         const contentType = String(request.headers['content-type'] ?? '');
         const boundary = /boundary=([^;]+)/
           .exec(contentType)?.[1]
           ?.replace(/^"|"$/g, '');
         const submitted: Record<string, string> = {};
+        const participantIds: string[] = [];
         if (boundary)
-          for (const part of raw.split('--' + boundary)) {
+          for (const part of body.split('--' + boundary)) {
             const match = /name="([^"]+)"[\s\S]*?\r\n\r\n([\s\S]*?)\r\n$/.exec(
               part,
             );
-            if (match) submitted[match[1]] = match[2];
+            if (match) {
+              // La selección llega como participantIds repetidos (conjunto).
+              if (match[1] === 'participantIds') participantIds.push(match[2]);
+              else submitted[match[1]] = match[2];
+            }
           }
+        return { submitted, participantIds };
+      }
+      const participantNames = new Map(
+        participants.map((participant) => [participant.id, participant.name]),
+      );
+      function toParticipants(ids: string[]): {
+        id: string;
+        name: string;
+      }[] {
+        return ids.map((participantId) => ({
+          id: participantId,
+          name: participantNames.get(participantId) ?? 'Trabajador',
+        }));
+      }
+      if (request.method === 'POST') {
+        const { submitted, participantIds } = readParts(raw);
         const cardTip =
           submitted.cardTipAmount !== undefined
             ? Number(submitted.cardTipAmount)
@@ -161,6 +218,7 @@ test(
             'differenceReason' in submitted
               ? submitted.differenceReason || null
               : null,
+          participants: toParticipants(participantIds),
           store: {
             ...operation.store,
             id: mode === 'foreign' ? operation.id : storeId,
@@ -178,6 +236,76 @@ test(
           'Content-Type': 'application/json',
         });
         response.end(JSON.stringify(record));
+        return;
+      }
+      // Corrección parcial de la operación y/o de la selección (SPRINT-4R-T03).
+      if (request.method === 'PATCH') {
+        if (mode === 'patch-missing') {
+          response.writeHead(404, { 'Content-Type': 'application/json' });
+          response.end('{}');
+          return;
+        }
+        if (mode === 'patch-conflict') {
+          response.writeHead(409, { 'Content-Type': 'application/json' });
+          response.end(
+            JSON.stringify({
+              message: 'SQL passwordHash /private/secret',
+              existingOperationId: operationId,
+            }),
+          );
+          return;
+        }
+        if (mode === 'patch-foreign') {
+          response.writeHead(200, { 'Content-Type': 'application/json' });
+          response.end(
+            JSON.stringify({
+              ...operation,
+              store: { id: operation.id, name: 'Ajeno' },
+            }),
+          );
+          return;
+        }
+        if (mode === 'patch-lying') {
+          response.writeHead(200, { 'Content-Type': 'application/json' });
+          response.end(
+            JSON.stringify({
+              ...operation,
+              cashTipAmount: 1,
+              tipFundAmount: 12501,
+            }),
+          );
+          return;
+        }
+        const { submitted, participantIds } = readParts(raw);
+        const patchedCardTip =
+          submitted.cardTipAmount !== undefined
+            ? Number(submitted.cardTipAmount)
+            : operation.cardTipAmount;
+        const patchedCashTip =
+          submitted.cashTipAmount !== undefined
+            ? Number(submitted.cashTipAmount)
+            : operation.cashTipAmount;
+        const updated = {
+          ...operation,
+          cardTipAmount: patchedCardTip,
+          cashTipAmount: patchedCashTip,
+          tipFundAmount: patchedCardTip + patchedCashTip,
+          cashDifference:
+            submitted.cashDifference !== undefined
+              ? Number(submitted.cashDifference)
+              : operation.cashDifference,
+          differenceReason:
+            'differenceReason' in submitted
+              ? submitted.differenceReason || null
+              : operation.differenceReason,
+          participants:
+            participantIds.length > 0
+              ? toParticipants(participantIds)
+              : operation.participants,
+          updatedAt: '2026-10-26T12:35:00Z',
+        };
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify(updated));
         return;
       }
       if (mode === 'duplicate') {
@@ -237,13 +365,14 @@ test(
       logs += chunk.toString();
     });
     function multipart(
-      fields: Record<string, string>,
+      fields: Record<string, string | string[]>,
       file?: { name: string; filename: string; type: string; data: string },
     ): { body: string; contentType: string } {
       const boundary = '----OperacionDiariaTest';
       let body = '';
       for (const [name, value] of Object.entries(fields))
-        body += `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`;
+        for (const item of Array.isArray(value) ? value : [value])
+          body += `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${item}\r\n`;
       if (file)
         body += `--${boundary}\r\nContent-Disposition: form-data; name="${file.name}"; filename="${file.filename}"\r\nContent-Type: ${file.type}\r\n\r\n${file.data}\r\n`;
       body += `--${boundary}--\r\n`;
@@ -259,6 +388,7 @@ test(
       cashTipAmount: '8000',
       cashDifference: '-1500',
       differenceReason: 'Vale de caja firmado',
+      participantIds: [participantId, secondParticipantId],
     };
     const voucherFile = {
       name: 'voucher',
@@ -272,7 +402,7 @@ test(
         token?: string;
         method?: string;
         query?: string;
-        fields?: Record<string, string>;
+        fields?: Record<string, string | string[]>;
         file?: typeof voucherFile | null;
         origin?: string;
         raw?: string;
@@ -281,7 +411,7 @@ test(
     ): Promise<Response> {
       const method = options.method ?? 'GET';
       const part =
-        method === 'POST'
+        method === 'POST' || method === 'PATCH'
           ? options.raw !== undefined
             ? { body: options.raw }
             : multipart(
@@ -301,7 +431,7 @@ test(
             ...(options.token === ''
               ? {}
               : { Cookie: 'mf_access=' + (options.token ?? 'supervisor') }),
-            ...(method === 'POST'
+            ...(method === 'POST' || method === 'PATCH'
               ? {
                   Origin: options.origin ?? origin,
                   'Content-Type':
@@ -398,6 +528,62 @@ test(
         ).status,
         404,
       );
+      // Catálogo acotado de trabajadores elegibles del propio local
+      // (SPRINT-4R-T03): sesión de supervisor, local de la sesión y solo
+      // id/nombre en la respuesta.
+      const workersTarget = '/api/daily-operations/eligible-workers';
+      for (const token of ['', 'invalid'])
+        assert.equal(
+          (await send({ token, target: workersTarget + '?storeId=' + storeId }))
+            .status,
+          401,
+        );
+      for (const token of ['admin', 'worker', 'accountant', 'nostore'])
+        assert.equal(
+          (await send({ token, target: workersTarget + '?storeId=' + storeId }))
+            .status,
+          403,
+        );
+      assert.equal(
+        (
+          await send({
+            token: 'down',
+            target: workersTarget + '?storeId=' + storeId,
+          })
+        ).status,
+        503,
+      );
+      for (const query of [
+        '',
+        '?storeId=' + otherStoreId,
+        '?storeId=' + storeId + '&extra=1',
+        '?storeId=' + storeId + '&storeId=' + storeId,
+        '?storeId=not-a-uuid',
+        '?businessDate=2026-10-26&storeId=' + storeId,
+      ])
+        assert.equal(
+          (await send({ query, target: workersTarget })).status,
+          400,
+        );
+      result = await send({ target: workersTarget + '?storeId=' + storeId });
+      assert.equal(result.status, 200);
+      assert.deepEqual(await result.json(), participants);
+      mode = 'private-workers';
+      result = await send({ target: workersTarget + '?storeId=' + storeId });
+      const cleanedWorkers: unknown = await result.json();
+      assert.deepEqual(cleanedWorkers, [participants[0]]);
+      assert.equal(JSON.stringify(cleanedWorkers).includes('privado'), false);
+      mode = 'duplicate-workers';
+      assert.equal(
+        (await send({ target: workersTarget + '?storeId=' + storeId })).status,
+        502,
+      );
+      mode = 'bad-json';
+      assert.equal(
+        (await send({ target: workersTarget + '?storeId=' + storeId })).status,
+        502,
+      );
+      mode = '';
       // Origen, contenido y campos del multipart.
       assert.equal(
         (
@@ -438,6 +624,63 @@ test(
         );
       }
       assert.equal(calls.length, 0);
+      // La selección de participantes exige UUID válidos, sin duplicados, y al
+      // menos uno cuando el fondo (tarjeta + efectivo) es mayor que 0.
+      const withoutParticipants: Record<string, string | string[]> = {
+        ...validFields,
+      };
+      delete withoutParticipants.participantIds;
+      assert.equal(
+        (await send({ method: 'POST', fields: withoutParticipants })).status,
+        400,
+      );
+      assert.equal(
+        (
+          await send({
+            method: 'POST',
+            fields: { ...validFields, participantIds: ['no-uuid'] },
+          })
+        ).status,
+        400,
+      );
+      assert.equal(
+        (
+          await send({
+            method: 'POST',
+            fields: {
+              ...validFields,
+              participantIds: [participantId, participantId],
+            },
+          })
+        ).status,
+        400,
+      );
+      assert.equal(
+        (
+          await send({
+            method: 'POST',
+            fields: { ...validFields, participantIds: [] },
+          })
+        ).status,
+        400,
+      );
+      assert.equal(calls.length, 0);
+      // Con fondo 0 la selección es opcional y la operación queda sin reparto.
+      result = await send({
+        method: 'POST',
+        fields: {
+          ...validFields,
+          cardTipAmount: '0',
+          cashTipAmount: '0',
+          cashDifference: '0',
+          differenceReason: '',
+          participantIds: [],
+        },
+        file: null,
+      });
+      assert.equal(result.status, 201);
+      assert.deepEqual((await result.json()).participants, []);
+      calls.length = 0;
       // El voucher solo se acepta cuando hay propina con tarjeta.
       assert.equal(
         (
@@ -489,7 +732,8 @@ test(
       assert.equal(calls.length, 0);
       result = await send({ method: 'POST' });
       assert.equal(result.status, 201);
-      assert.deepEqual(await result.json(), operation);
+      const echoed: unknown = await result.json();
+      assert.deepEqual(echoed, operation);
       const upstream = calls.at(-1);
       assert.equal(upstream?.path, '/daily-operations');
       assert.match(
@@ -502,6 +746,20 @@ test(
         /name="differenceReason"[\s\S]*?Vale de caja firmado/,
       );
       assert.match(upstream?.raw ?? '', /filename="voucher.jpg"/);
+      // La selección se reenvía como participantIds repetidos y la respuesta
+      // pública conserva solo id y nombre.
+      assert.match(
+        upstream?.raw ?? '',
+        /name="participantIds"[\s\S]*?65000000-0000-4000-8000-000000000311/,
+      );
+      assert.match(
+        upstream?.raw ?? '',
+        /name="participantIds"[\s\S]*?65000000-0000-4000-8000-000000000312/,
+      );
+      assert.deepEqual(
+        isRecord(echoed) ? echoed.participants : undefined,
+        participants,
+      );
       // El local de la sesión reemplaza cualquier valor del formulario.
       result = await send({
         method: 'POST',
@@ -568,7 +826,153 @@ test(
         mode = value;
         assert.equal((await send({ method: 'POST' })).status, 502, value);
       }
-      assert.equal((await send({ method: 'PATCH' })).status, 405);
+      mode = '';
+      // Corrección (SPRINT-4R-T03): origen, esquema estricto, validación y
+      // reenvío de solo los campos enviados.
+      assert.equal((await send({ method: 'PATCH' })).status, 404);
+      assert.equal(
+        (
+          await send({
+            method: 'PATCH',
+            target: '/api/daily-operations/not-a-uuid',
+          })
+        ).status,
+        404,
+      );
+      assert.equal(
+        (
+          await send({
+            method: 'PATCH',
+            origin: 'https://other.example.test',
+          })
+        ).status,
+        403,
+      );
+      assert.equal(
+        (
+          await send({
+            method: 'PATCH',
+            target: '/api/daily-operations/' + operationId,
+            fields: {},
+            file: null,
+          })
+        ).status,
+        400,
+      );
+      calls.length = 0;
+      for (const fields of [
+        { ...validFields },
+        { ...validFields, cardTipAmount: '-1' },
+        { ...validFields, cashTipAmount: '1.5' },
+        { ...validFields, cashDifference: 'texto' },
+        { ...validFields, participantIds: ['no-uuid'] },
+        { ...validFields, participantIds: [''] },
+        {
+          ...validFields,
+          participantIds: [participantId, participantId],
+        },
+        { ...validFields, cardTipAmount: '0' },
+        { ...validFields, differenceReason: 'x'.repeat(501) },
+      ]) {
+        assert.equal(
+          (
+            await send({
+              method: 'PATCH',
+              target: '/api/daily-operations/' + operationId,
+              fields,
+            })
+          ).status,
+          400,
+          JSON.stringify(fields).slice(0, 90),
+        );
+      }
+      assert.equal(calls.length, 0);
+      // Corrección válida: monto y selección, sin voucher (se conserva).
+      result = await send({
+        method: 'PATCH',
+        target: '/api/daily-operations/' + operationId,
+        fields: {
+          cardTipAmount: '13000',
+          participantIds: [secondParticipantId],
+        },
+        file: null,
+      });
+      assert.equal(result.status, 200);
+      const patched: unknown = await result.json();
+      assert.ok(isRecord(patched));
+      assert.equal(patched.cardTipAmount, 13000);
+      assert.equal(patched.tipFundAmount, 21000);
+      assert.deepEqual(patched.participants, [participants[1]]);
+      assert.ok(isRecord(patched.voucher));
+      const patchCall = calls.at(-1);
+      assert.equal(patchCall?.method, 'PATCH');
+      assert.equal(patchCall?.path, '/daily-operations/' + operationId);
+      assert.match(
+        patchCall?.raw ?? '',
+        /name="participantIds"[\s\S]*?65000000-0000-4000-8000-000000000312/,
+      );
+      assert.equal(patchCall?.raw.includes('name="storeId"'), false);
+      assert.equal(patchCall?.raw.includes('filename='), false);
+      // Corrección de solo la selección: se reemplaza completa.
+      result = await send({
+        method: 'PATCH',
+        target: '/api/daily-operations/' + operationId,
+        fields: { participantIds: [participantId, secondParticipantId] },
+        file: null,
+      });
+      assert.equal(result.status, 200);
+      assert.deepEqual((await result.json()).participants, participants);
+      // El servicio miente si no refleja lo enviado o devuelve otro local.
+      mode = 'patch-lying';
+      assert.equal(
+        (
+          await send({
+            method: 'PATCH',
+            target: '/api/daily-operations/' + operationId,
+            fields: { cashTipAmount: '9000' },
+            file: null,
+          })
+        ).status,
+        502,
+      );
+      mode = 'patch-foreign';
+      assert.equal(
+        (
+          await send({
+            method: 'PATCH',
+            target: '/api/daily-operations/' + operationId,
+            fields: { cashTipAmount: '9000' },
+            file: null,
+          })
+        ).status,
+        502,
+      );
+      // El conflicto y la ausencia del servicio se mapean sin filtrar datos.
+      mode = 'patch-conflict';
+      result = await send({
+        method: 'PATCH',
+        target: '/api/daily-operations/' + operationId,
+        fields: { cashTipAmount: '9000' },
+        file: null,
+      });
+      assert.equal(result.status, 409);
+      assert.deepEqual(await result.json(), {
+        message: dailyOperationErrorMessage(409),
+        existingOperationId: operationId,
+      });
+      mode = 'patch-missing';
+      assert.equal(
+        (
+          await send({
+            method: 'PATCH',
+            target: '/api/daily-operations/' + operationId,
+            fields: { cashTipAmount: '9000' },
+            file: null,
+          })
+        ).status,
+        404,
+      );
+      mode = '';
     } finally {
       frontend.kill();
       backend.closeAllConnections();

@@ -14,10 +14,13 @@ import {
   isVoucherMimeType,
   parseDailyOperation,
   parseDailyOperations,
+  parseEligibleWorkers,
 } from '@/lib/daily-operations';
 
-// SPRINT-4R-T01: BFF de la operación diaria del supervisor. Reenvía al módulo
-// /daily-operations del backend con JWT y valida el contrato multipart.
+// SPRINT-4R-T01/T03: BFF de la operación diaria del supervisor. Reenvía al
+// módulo /daily-operations del backend con JWT y valida el contrato
+// multipart, incluida la selección de trabajadores participantes
+// (participantIds repetido, sin datos personales en las respuestas).
 type Context = { params: Promise<{ path?: string[] }> };
 
 function respond(data: unknown, status = 200): NextResponse {
@@ -45,6 +48,37 @@ function isSignedDifferenceText(value: unknown): value is string {
   if (typeof value !== 'string' || !/^[+-]?\d+$/.test(value.trim()))
     return false;
   return isCashDifference(Number(value.trim()));
+}
+// SPRINT-4R-T03: la selección llega como campos "participantIds" repetidos;
+// se exigen UUID válidos sin duplicados (el orden no tiene significado).
+function readParticipantIds(form: FormData): string[] | null {
+  const values = form.getAll('participantIds');
+  const ids: string[] = [];
+  for (const value of values) {
+    if (typeof value !== 'string' || !isProxyUuid(value)) return null;
+    if (ids.includes(value)) return null;
+    ids.push(value);
+  }
+  return ids;
+}
+// Para la corrección PATCH el campo ausente significa "no tocar la selección"
+// (undefined); presente con UUID inválidos o duplicados se rechaza (null).
+function readOptionalParticipantIds(
+  form: FormData,
+): string[] | null | undefined {
+  if (!form.has('participantIds')) return undefined;
+  return readParticipantIds(form);
+}
+function sameParticipantIds(
+  sent: readonly string[],
+  responded: readonly { id: string }[],
+): boolean {
+  if (sent.length !== responded.length) return false;
+  const respondedIds = responded.map((participant) => participant.id);
+  return sent.every((id) => respondedIds.includes(id));
+}
+function invalidVoucherFile(voucher: FormDataEntryValue | null): boolean {
+  return voucher !== null && (!(voucher instanceof File) || voucher.size === 0);
 }
 export async function GET(
   request: Request,
@@ -86,6 +120,36 @@ export async function GET(
       date,
     );
     return operations ? respond(operations) : failure(502);
+  }
+  // Catálogo acotado de trabajadores elegibles del propio local
+  // (SPRINT-4R-T03): solo se acepta el local de la sesión.
+  if (path.length === 1 && path[0] === 'eligible-workers') {
+    const storeId = query.get('storeId');
+    if (
+      query.size !== 1 ||
+      query.getAll('storeId').length !== 1 ||
+      !storeId ||
+      !isProxyUuid(storeId) ||
+      storeId !== session.user.storeId
+    )
+      return failure(400);
+    const upstream = await callBackend(
+      '/daily-operations/eligible-workers?' +
+        new URLSearchParams({ storeId: session.user.storeId }),
+      {
+        headers: { Authorization: 'Bearer ' + session.token },
+        redirect: 'error',
+      },
+    );
+    if (!upstream) return failure(503);
+    if (upstream.status !== 200) {
+      await upstream.body?.cancel();
+      return failure(upstream.ok ? 502 : upstream.status);
+    }
+    const workers = parseEligibleWorkers(
+      await upstream.json().catch(() => null),
+    );
+    return workers ? respond(workers) : failure(502);
   }
   if ([...query.keys()].length) return failure(400);
   if (path.length === 1 && isProxyUuid(path[0])) {
@@ -156,6 +220,7 @@ export async function POST(
     'cashDifference',
     'differenceReason',
     'voucher',
+    'participantIds',
   ];
   for (const key of form.keys())
     if (!allowedFields.includes(key)) return failure(400);
@@ -166,6 +231,13 @@ export async function POST(
   const cashDifference = form.get('cashDifference');
   const reason = form.get('differenceReason');
   const voucher = form.get('voucher');
+  const participantIds = readParticipantIds(form);
+  // El tipo y tamaño del voucher se validan antes que el resto del esquema,
+  // como en el contrato T01 (415/413 independientes de otros campos).
+  if (voucher instanceof File && !isVoucherMimeType(voucher.type))
+    return failure(415);
+  if (voucher instanceof File && voucher.size > MAX_VOUCHER_BYTES)
+    return failure(413);
   if (
     typeof storeId !== 'string' ||
     !isProxyUuid(storeId) ||
@@ -179,16 +251,15 @@ export async function POST(
         reason.length > MAX_DIFFERENCE_REASON_LENGTH)) ||
     (Number(cashDifference.trim()) !== 0 &&
       (reason === null || !reason.trim())) ||
-    (voucher !== null && !(voucher instanceof File)) ||
+    invalidVoucherFile(voucher) ||
     (Number(cardTipAmount.trim()) > 0 && voucher === null) ||
-    (Number(cardTipAmount.trim()) === 0 && voucher !== null)
+    (Number(cardTipAmount.trim()) === 0 && voucher !== null) ||
+    participantIds === null ||
+    // Con fondo de propinas se exige al menos un participante (SPRINT-4R-T03).
+    (Number(cardTipAmount.trim()) + Number(cashTipAmount.trim()) > 0 &&
+      participantIds.length === 0)
   )
     return failure(400);
-  if (voucher instanceof File && voucher.size === 0) return failure(400);
-  if (voucher instanceof File && !isVoucherMimeType(voucher.type))
-    return failure(415);
-  if (voucher instanceof File && voucher.size > MAX_VOUCHER_BYTES)
-    return failure(413);
   // Se reconstruye el multipart con únicamente los campos del contrato; el
   // local siempre es el de la sesión y nunca uno arbitrario del formulario.
   const payload = new FormData();
@@ -199,6 +270,8 @@ export async function POST(
   payload.set('cashDifference', cashDifference.trim());
   if (reason !== null && reason.trim())
     payload.set('differenceReason', reason.trim());
+  for (const participantId of participantIds)
+    payload.append('participantIds', participantId);
   if (voucher instanceof File) payload.set('voucher', voucher);
   const upstream = await callBackend('/daily-operations', {
     method: 'POST',
@@ -243,7 +316,8 @@ export async function POST(
     businessDate,
   );
   const reasonText = reason !== null && reason.trim() ? reason.trim() : null;
-  // El servicio miente si la operación devuelta no refleja lo enviado.
+  // El servicio miente si la operación devuelta no refleja lo enviado,
+  // incluida la selección de participantes como conjunto (sin orden).
   if (
     !operation ||
     operation.businessDate !== businessDate ||
@@ -251,7 +325,137 @@ export async function POST(
     operation.cashTipAmount !== Number(cashTipAmount.trim()) ||
     operation.cashDifference !== Number(cashDifference.trim()) ||
     (operation.differenceReason ?? null) !== reasonText ||
-    operation.responsible.id !== session.user.id
+    operation.responsible.id !== session.user.id ||
+    !sameParticipantIds(participantIds, operation.participants)
+  )
+    return failure(502);
+  return respond(operation, upstream.status);
+}
+// SPRINT-4R-T03: corrección parcial de la operación y/o de la selección de
+// participantes. Solo campos del contrato; los ausentes no se modifican y el
+// voucher se conserva salvo reemplazo explícito.
+export async function PATCH(
+  request: Request,
+  context: Context,
+): Promise<Response> {
+  if (!hasTrustedOrigin(request))
+    return respond({ message: 'Origen no permitido.' }, 403);
+  const session = await getSupervisorSession();
+  if (!session.ok) return failure(session.status);
+  const { path = [] } = await context.params;
+  if (!(path.length === 1 && isProxyUuid(path[0]))) return failure(404);
+  if (new URL(request.url).search) return failure(400);
+  const form = await readProxyForm(request, MAX_VOUCHER_BYTES);
+  if (!form) return failure(400);
+  const allowedFields = [
+    'cardTipAmount',
+    'cashTipAmount',
+    'cashDifference',
+    'differenceReason',
+    'voucher',
+    'participantIds',
+  ];
+  for (const key of form.keys())
+    if (!allowedFields.includes(key)) return failure(400);
+  const cardTipAmount = form.get('cardTipAmount');
+  const cashTipAmount = form.get('cashTipAmount');
+  const cashDifference = form.get('cashDifference');
+  const reason = form.get('differenceReason');
+  const voucher = form.get('voucher');
+  const participantIds = readOptionalParticipantIds(form);
+  const hasChanges =
+    cardTipAmount !== null ||
+    cashTipAmount !== null ||
+    cashDifference !== null ||
+    reason !== null ||
+    voucher !== null ||
+    participantIds !== undefined;
+  if (voucher instanceof File && !isVoucherMimeType(voucher.type))
+    return failure(415);
+  if (voucher instanceof File && voucher.size > MAX_VOUCHER_BYTES)
+    return failure(413);
+  if (
+    !hasChanges ||
+    (cardTipAmount !== null && !isUnsignedAmountText(cardTipAmount)) ||
+    (cashTipAmount !== null && !isUnsignedAmountText(cashTipAmount)) ||
+    (cashDifference !== null && !isSignedDifferenceText(cashDifference)) ||
+    (reason !== null &&
+      (typeof reason !== 'string' ||
+        reason.length > MAX_DIFFERENCE_REASON_LENGTH)) ||
+    // Con diferencia distinta de cero el motivo lo exige el servicio: conoce
+    // el motivo ya registrado, mientras que este BFF solo ve lo enviado.
+    invalidVoucherFile(voucher) ||
+    // El voucher de reemplazo solo se admite con propina con tarjeta resultante.
+    (voucher !== null &&
+      cardTipAmount !== null &&
+      Number(cardTipAmount.trim()) === 0) ||
+    participantIds === null
+  )
+    return failure(400);
+  if (
+    cardTipAmount !== null &&
+    cashTipAmount !== null &&
+    Number(cardTipAmount.trim()) + Number(cashTipAmount.trim()) > 0 &&
+    participantIds !== undefined &&
+    participantIds.length === 0
+  )
+    return failure(400);
+  const payload = new FormData();
+  if (cardTipAmount !== null)
+    payload.set('cardTipAmount', cardTipAmount.trim());
+  if (cashTipAmount !== null)
+    payload.set('cashTipAmount', cashTipAmount.trim());
+  if (cashDifference !== null)
+    payload.set('cashDifference', cashDifference.trim());
+  if (reason !== null && reason.trim())
+    payload.set('differenceReason', reason.trim());
+  if (participantIds !== undefined)
+    for (const participantId of participantIds)
+      payload.append('participantIds', participantId);
+  if (voucher instanceof File) payload.set('voucher', voucher);
+  const upstream = await callBackend('/daily-operations/' + path[0], {
+    method: 'PATCH',
+    redirect: 'error',
+    headers: { Authorization: 'Bearer ' + session.token },
+    body: payload,
+  });
+  if (!upstream) return failure(503);
+  if (upstream.status === 409) {
+    const error: unknown = await upstream.json().catch(() => null);
+    const existing = isRecord(error) ? error.existingOperationId : undefined;
+    return respond(
+      {
+        message: dailyOperationErrorMessage(409),
+        ...(typeof existing === 'string' && isProxyUuid(existing)
+          ? { existingOperationId: existing }
+          : {}),
+      },
+      409,
+    );
+  }
+  if (upstream.status !== 200) {
+    await upstream.body?.cancel();
+    return failure(upstream.ok ? 502 : upstream.status);
+  }
+  const operation = parseDailyOperation(
+    await upstream.json().catch(() => null),
+    session.user.storeId,
+  );
+  // Los campos enviados deben quedar reflejados en la respuesta; los no
+  // enviados se conservan y no se verifican contra el estado previo.
+  if (
+    !operation ||
+    (cardTipAmount !== null &&
+      operation.cardTipAmount !== Number(cardTipAmount.trim())) ||
+    (cashTipAmount !== null &&
+      operation.cashTipAmount !== Number(cashTipAmount.trim())) ||
+    (cashDifference !== null &&
+      operation.cashDifference !== Number(cashDifference.trim())) ||
+    (reason !== null &&
+      (operation.differenceReason ?? null) !==
+        (reason.trim() ? reason.trim() : null)) ||
+    (participantIds !== undefined &&
+      !sameParticipantIds(participantIds, operation.participants))
   )
     return failure(502);
   return respond(operation, upstream.status);
