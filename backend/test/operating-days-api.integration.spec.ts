@@ -27,6 +27,7 @@ import type {
   StoreClosureResponse,
 } from '../src/operating-days/types/operating-days.types.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
+import { paymentMethodIdOf } from './helpers/payment-methods.js';
 import {
   createSwitchablePrisma,
   type SwitchablePrisma,
@@ -58,6 +59,7 @@ interface Fixture {
   otherStoreId: string;
   externalCode: string;
   cashMethodId: string;
+  cashLabel: string;
   admin: AuthUser;
   supervisor: AuthUser;
   accountant: AuthUser;
@@ -179,29 +181,19 @@ describe.skipIf(!databaseUrl)(
       await tx.storeExternalCode.create({
         data: { system: 'MRCOMANDA', externalCode, storeId: store.id },
       });
-      const cash = await tx.paymentMethod.upsert({
-        where: { code: 'CASH' },
-        update: {},
-        create: {
-          code: 'CASH',
-          name: 'Efectivo',
-          sortOrder: 10,
-          behavior: 'CASH',
-        },
-      });
-      await tx.paymentMethodAlias.upsert({
-        where: {
-          system_normalizedLabel: {
-            system: 'MRCOMANDA',
-            normalizedLabel: 'EFECTIVO',
-          },
-        },
-        update: { paymentMethodId: cash.id },
-        create: {
+      // Solo lectura del medio CASH (sembrado por la migración) y un alias
+      // propio con etiqueta única: no se escribe la fila compartida
+      // MRCOMANDA/EFECTIVO, porque la transacción de rollback retendría su
+      // bloqueo y provocaría deadlocks con los tests de importaciones que
+      // corren en paralelo. El trigger de líneas exige el alias.
+      const cashMethodId = await paymentMethodIdOf(tx, 'CASH');
+      const cashLabel = `EFECTIVO T12 ${randomUUID().toUpperCase()}`;
+      await tx.paymentMethodAlias.create({
+        data: {
           system: 'MRCOMANDA',
-          label: 'EFECTIVO',
-          normalizedLabel: 'EFECTIVO',
-          paymentMethodId: cash.id,
+          label: cashLabel,
+          normalizedLabel: cashLabel,
+          paymentMethodId: cashMethodId,
         },
       });
       return {
@@ -209,7 +201,8 @@ describe.skipIf(!databaseUrl)(
         storeId: store.id,
         otherStoreId: otherStore.id,
         externalCode,
-        cashMethodId: cash.id,
+        cashMethodId,
+        cashLabel,
         admin: await createUser(tx, ROLE.ADMINISTRADOR, null),
         supervisor: await createUser(tx, ROLE.SUPERVISOR, store.id),
         accountant: await createUser(tx, ROLE.CONTADOR, null),
@@ -252,8 +245,8 @@ describe.skipIf(!databaseUrl)(
         data: {
           importId: header.id,
           lineNumber: 1,
-          originalLabel: 'EFECTIVO',
-          normalizedLabel: 'EFECTIVO',
+          originalLabel: f.cashLabel,
+          normalizedLabel: f.cashLabel,
           amount: BigInt(1000),
           paymentMethodId: f.cashMethodId,
         },
