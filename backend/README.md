@@ -199,6 +199,29 @@ auditoría, pero las escrituras ya no forman parte del flujo operativo vigente
 
 El detalle se arma solo con campos declarados (listas blancas): nunca incluye contraseñas ni el contenido de los archivos.
 
+### Accesos denegados (SPRINT-4R-T15)
+
+Todo rechazo **403** de un usuario autenticado queda registrado como
+`ACCESS_DENIED`, venga de un guard (rol o local) o de un servicio (recurso de
+otro local). Lo registra el filtro global `AccessDeniedAuditFilter`, porque los
+guards corren antes que el `AuditInterceptor`. El cliente recibe el mismo 403.
+
+- `entityType`: primer segmento de la ruta (ej. `sales-dashboard`); `entityId`:
+  el `:id` de la ruta solo si es un UUID.
+- `detail`: `method`, `route` (plantilla, ej. `/daily-operations/:id`), `role`,
+  `reason` (`ROLE`, `STORE` o `RESOURCE`) y `requestedStoreId` cuando la ruta o
+  la consulta piden un local con UUID válido.
+- El local del registro es el del usuario. Nunca se guardan el cuerpo, la
+  consulta completa, el mensaje del error, correos, RUT ni montos.
+- Los 401 (sin sesión) y 400 (validación) no se registran como acceso denegado.
+
+Las rutas exclusivas del administrador se declaran en
+`src/auth/constants/admin-only-routes.constants.ts`: hoy el panel consolidado
+(`sales-dashboard`). La importación de ventas (SPRINT-4R-T10), el calendario de
+operación (SPRINT-4R-T12) y los reportes (SPRINT-4R-T13) agregan ahí la ruta de
+su controlador, y `test/admin-only-routes.spec.ts` falla si algún endpoint de
+esas rutas admite otro rol o es público.
+
 ### Inmutabilidad del registro
 
 Una operación registrada no se puede modificar ni eliminar (criterio 2 de E1-H2):
