@@ -226,7 +226,7 @@ solo se descargan por su endpoint autorizado, que verifica el hash.
 | `POST /documents` (documento laboral) | ADMINISTRADOR | PDF, PNG, JPEG | `DOCUMENTS_MAX_SIZE_MB` (25 por defecto) |
 | `POST /payroll` (liquidación) | CONTADOR | PDF | `DOCUMENTS_MAX_SIZE_MB` |
 | `POST/PATCH /daily-operations` (voucher) | SUPERVISOR (corrección: también ADMINISTRADOR) | JPEG, PNG, WebP | 5 MiB |
-| `POST /sales-imports/preview` (Excel) | ADMINISTRADOR | .xlsx | 5 MB |
+| `POST /sales-imports/preview` (Excel) | ADMINISTRADOR | .xlsx | 5 MB (y 25 MB descomprimido, máximo 100 archivos internos) |
 
 Respuestas ante un archivo inválido, sin guardar nada en disco:
 
@@ -239,10 +239,19 @@ Respuestas ante un archivo inválido, sin guardar nada en disco:
 
 El chequeo de archivos cortados (`src/storage/utils/file-structure.util.ts`)
 revisa, además de los primeros bytes, la marca de cierre de cada formato: PDF
-con `%%EOF` en los últimos 1.024 bytes, JPEG con su marcador de fin `FF D9`
-(se toleran datos extra después, como en las fotos «en movimiento» de
-algunos celulares), PNG con el bloque `IEND` y WebP del tamaño que declara su
-encabezado. El Excel se valida con el lector de SPRINT-4R-T09. Es un chequeo
+con `%%EOF` en los últimos 1.024 bytes, JPEG recorriendo sus segmentos por
+su largo hasta el inicio de la imagen principal (SOS, `FF DA`) y exigiendo
+después su marcador de fin `FF D9` (así la miniatura EXIF, que trae su propio
+`FF D9`, no hace pasar una foto cortada; se toleran datos extra después del
+fin, como en las fotos «en movimiento» de algunos celulares), PNG con el
+bloque `IEND` y WebP del tamaño que declara su encabezado. El Excel se valida
+con el lector de SPRINT-4R-T09, precedido por
+`src/sales-imports/parser/xlsx-zip-guard.ts`: descomprime cada entrada del
+ZIP con un tope real de 25 MB en total (una «bomba zip» de 302 KB que se
+expandía a 300 MB usaba ~400 MB de memoria y ~1 minuto; ahora se rechaza con
+413 en milisegundos), admite hasta 100 archivos internos y exige que las
+entradas del directorio central cubran el archivo de corrido, sin entradas
+escondidas. Es un chequeo
 liviano: un archivo dañado por dentro con su cierre intacto pasa, y su
 integridad posterior la protege el SHA-256. Ninguna respuesta de éxito o de
 error expone la ruta física ni la carpeta del volumen.
@@ -504,7 +513,7 @@ forma normalizada (`normalizeExternalLabel`, misma regla que la función SQL
 `normalize_external_label`). Admite cualquier cantidad de medios.
 
 **Rechazos** (`MrComandaReportError` con `code`, fila y mensaje en español que
-dice qué revisar): archivo vacío, mayor a 5 MB, `.xls` antiguo, contenido que
+dice qué revisar): archivo vacío, mayor a 5 MB o a 25 MB descomprimido, `.xls` antiguo, contenido que
 no es .xlsx o dañado; sin informe o con varios informes; período ausente,
 ilegible, de varios días o que contradice el título; horario ausente o
 inválido; local ausente, combinado o ambiguo; total o montos que no son pesos
@@ -557,7 +566,7 @@ ventas).
 | `UNRESOLVED` | 200 | El Excel es válido, pero el local o algún medio no tiene equivalencia (`issues`); no se guarda nada. Se configura la equivalencia y se vuelve a subir. |
 
 Los problemas del archivo responden con `code`, `row` y un mensaje accionable,
-sin guardar nada: 400 (sin archivo o vacío), 413 (más de 5 MB), 415 (`.xls` o
+sin guardar nada: 400 (sin archivo o vacío), 413 (más de 5 MB, o más de 25 MB descomprimido), 415 (`.xls` o
 algo que no es .xlsx) y 422 (dañado o estructura inválida: período de varios
 días, local combinado, total que no cuadra, etc.).
 
