@@ -41,7 +41,7 @@ const DOMAIN = '@dt-alerts-test.moi-food.cl';
 const STORE_NAME = 'Subway DT Alerts Test';
 
 function uniquePdf(): Buffer {
-  return Buffer.from(`%PDF-1.7\n% prueba ${randomUUID()}\n`);
+  return Buffer.from(`%PDF-1.7\n% prueba ${randomUUID()}\n%%EOF\n`);
 }
 
 describe.skipIf(!databaseUrl)(

@@ -30,6 +30,7 @@ import {
   ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
+  ApiUnprocessableEntityResponse,
   ApiUnsupportedMediaTypeResponse,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -63,6 +64,13 @@ import {
 } from './dto/update-daily-operation.dto.js';
 import { MAX_VOUCHER_BYTES } from './types/daily-operations.types.js';
 import type { DailyOperationResponse } from './types/daily-operations.types.js';
+
+// Un solo voucher por solicitud y hasta 5 MiB (SPRINT-4R-T18): Multer corta
+// la subida al superar cualquiera de los dos límites (413 o 400) antes de
+// cargar más datos en memoria.
+const VOUCHER_UPLOAD_OPTIONS = {
+  limits: { fileSize: MAX_VOUCHER_BYTES, files: 1 },
+};
 
 const READER_ROLES = [
   ROLE.ADMINISTRADOR,
@@ -100,9 +108,7 @@ export class DailyOperationsController {
   // multipart aún no está parseado cuando corren los guards (Multer es un
   // interceptor). La autorización por local la aplica el servicio al inicio
   // del create (403 si el supervisor no pertenece al local del formulario).
-  @UseInterceptors(
-    FileInterceptor('voucher', { limits: { fileSize: MAX_VOUCHER_BYTES } }),
-  )
+  @UseInterceptors(FileInterceptor('voucher', VOUCHER_UPLOAD_OPTIONS))
   @Audited({
     action: AUDIT_ACTION.DAILY_OPERATION_CREATED,
     entityType: 'daily_operations',
@@ -164,6 +170,10 @@ export class DailyOperationsController {
     description:
       'El voucher no es JPEG, PNG ni WebP, o su tipo declarado no coincide.',
   })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'La foto del voucher es del tipo correcto pero está dañada o incompleta (por ejemplo, cortada antes de su cierre).',
+  })
   async create(
     // El cuerpo se valida contra el DTO sin el campo voucher (solo campos de
     // texto): el archivo va por req.file. El FormDto con el binario se usa
@@ -190,9 +200,7 @@ export class DailyOperationsController {
   // Mismo criterio que el POST: sin @StoreScoped (el cuerpo multipart aún no
   // está parseado cuando corren los guards); el alcance por local lo aplica
   // el servicio contra la operación existente.
-  @UseInterceptors(
-    FileInterceptor('voucher', { limits: { fileSize: MAX_VOUCHER_BYTES } }),
-  )
+  @UseInterceptors(FileInterceptor('voucher', VOUCHER_UPLOAD_OPTIONS))
   @Audited({
     action: AUDIT_ACTION.DAILY_OPERATION_UPDATED,
     entityType: 'daily_operations',
@@ -252,6 +260,10 @@ export class DailyOperationsController {
   @ApiUnsupportedMediaTypeResponse({
     description:
       'El voucher no es JPEG, PNG ni WebP, o su tipo declarado no coincide.',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'La foto del voucher es del tipo correcto pero está dañada o incompleta (por ejemplo, cortada antes de su cierre).',
   })
   update(
     @Param('id', new ParseUUIDPipe()) id: string,
