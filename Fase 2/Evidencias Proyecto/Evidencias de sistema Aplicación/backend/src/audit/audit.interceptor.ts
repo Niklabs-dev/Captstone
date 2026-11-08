@@ -95,6 +95,10 @@ export class AuditInterceptor implements NestInterceptor<unknown, unknown> {
       return null;
     }
     const statuses = options.failureStatuses ?? [401];
-    return statuses.includes(error.getStatus()) ? options.failureAction : null;
+    const status = error.getStatus();
+    // Los 403 los audita siempre AccessDeniedAuditFilter (SPRINT-4R-T15);
+    // auditarlos también aquí duplicaría el evento.
+    if (status === 403) return null;
+    return statuses.includes(status) ? options.failureAction : null;
   }
 }
