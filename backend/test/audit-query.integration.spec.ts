@@ -257,6 +257,11 @@ describe.skipIf(!databaseUrl)('Consulta de auditoría (SPRINT-1-T14)', () => {
       const token = await tokenFor(worker.id, role, storeId);
       await listAuditLogs('', token).expect(403);
     }
+    // Cada rechazo queda como ACCESS_DENIED (SPRINT-4R-T15). Se purgan para
+    // que las consultas siguientes vean solo los registros sembrados.
+    const denied = { action: AUDIT_ACTION.ACCESS_DENIED, userId: worker.id };
+    expect(await prisma.auditLog.count({ where: denied })).toBe(3);
+    await purgeTestAuditLogs(prisma, denied);
   });
 
   it('muestra cada operación con usuario responsable, fecha/hora, local y tipo', async () => {

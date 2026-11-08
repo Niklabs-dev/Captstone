@@ -60,6 +60,10 @@ export const AUDIT_ACTION = {
   DAILY_OPERATION_CREATED: 'DAILY_OPERATION_CREATED',
   DAILY_OPERATION_UPDATED: 'DAILY_OPERATION_UPDATED',
   DAILY_OPERATION_VOUCHER_DOWNLOADED: 'DAILY_OPERATION_VOUCHER_DOWNLOADED',
+  // Intento autenticado rechazado con 403 por rol, local o recurso
+  // (SPRINT-4R-T15). Lo registra el filtro global AccessDeniedAuditFilter en
+  // cualquier ruta, sin cuerpo, consulta ni datos personales.
+  ACCESS_DENIED: 'ACCESS_DENIED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

@@ -6,6 +6,7 @@ import {
   type ExecutionContext,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { STORE_FORBIDDEN_MESSAGE } from '../constants/forbidden-messages.constants.js';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 import {
   STORE_SCOPE_KEY,
@@ -46,7 +47,7 @@ export class StoreAccessGuard implements CanActivate {
       );
     }
     if (!request.user || !canAccessStore(request.user, storeId)) {
-      throw new ForbiddenException('No tienes acceso a este local');
+      throw new ForbiddenException(STORE_FORBIDDEN_MESSAGE);
     }
     return true;
   }
