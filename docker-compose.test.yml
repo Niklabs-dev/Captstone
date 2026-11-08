@@ -1,10 +1,19 @@
 # Solo para una ejecución efímera de pruebas con datos sintéticos.
 # Mantiene los servicios y builds del compose principal. El bind mount permite
 # verificar MISSING retirando y restaurando el archivo de prueba desde Playwright.
+#
+# Permisos (SPRINT-4R-T19): el backend corre con el MISMO usuario y grupo de
+# quien ejecuta las pruebas (CI_UID/CI_GID = `id -u`/`id -g`). Así los archivos
+# que guarda quedan a su nombre con los permisos privados del servicio de
+# almacenamiento (carpetas 0700, archivos 0600) y Playwright puede alterarlos o
+# retirarlos sin abrir permisos a otros usuarios (nunca chmod 0777) ni correr
+# como root. No hay valor por defecto: un UID que no coincida con el del host
+# produce EACCES, así que Compose se detiene con un mensaje claro si faltan.
+# La carpeta del host se crea antes, a nombre de ese usuario, con
+# `node frontend/scripts/prepare-real-storage.mjs` (si la creara Docker,
+# quedaría a nombre de root y el backend no podría escribir en ella).
 services:
   backend:
-    # El proceso y Playwright comparten dueño de los archivos sintéticos; se
-    # conservan los permisos privados 0700/0600 del servicio de almacenamiento.
-    user: "${CI_UID:-1001}:${CI_GID:-1001}"
+    user: "${CI_UID:?Define CI_UID con el UID del usuario que ejecuta las pruebas (id -u)}:${CI_GID:?Define CI_GID con el GID del usuario que ejecuta las pruebas (id -g)}"
     volumes:
       - ./frontend/output/real-api/storage:/app/storage/documents
