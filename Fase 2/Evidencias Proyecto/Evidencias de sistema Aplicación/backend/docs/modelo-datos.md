@@ -15,16 +15,20 @@
 | Propinas | `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources`, `tip_pool_receipts`, `tip_pool_daily_operation_sources` | Pacto de reparto (proporcional histórico y equitativo), horas trabajadas, reparto con snapshots (art. 64 CT) y constancias de pago; `tip_entries` conserva la captura histórica por medio (modo lectura desde SPRINT-4R-T01) y `tip_pool_daily_operation_sources` vincula el reparto con la operación diaria (SPRINT-4R-T02) |
 | Ventas y Caja | `payment_methods`, `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries` | **Histórico, modo lectura:** catálogo administrable de medios de pago (se conserva para historial y futura importación Excel), ventas por local (manuales y totales netos MrComanda) y cierre de caja por local, día y turno con conciliación y vouchers. Reemplazado operativamente por la operación diaria |
 | Operación diaria | `daily_operations`, `daily_operation_vouchers`, `daily_operation_participants` | Una operación por local y fecha de negocio (SPRINT-4R-T01): propina tarjeta con voucher fotográfico, propina efectivo, fondo de propinas calculado y diferencia de efectivo con signo y motivo. Fuente operativa de ambos montos de propina y, desde SPRINT-4R-T02, de la selección de participantes del reparto (compartida por tarjeta y efectivo) |
+| Importación de ventas | `store_external_codes`, `payment_method_aliases`, `sales_imports`, `sales_import_lines` | Ventas diarias importadas desde el Excel de MrComanda (SPRINT-4R-T08): equivalencias explícitas de locales y alias de medios de pago, archivo importado con hash SHA-256 y versiones (una vigente por local y fecha) y totales por medio de pago. No guarda propinas ni diferencias de efectivo (vienen de la operación diaria) ni escribe en `sales` |
 | Inventario | `products`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Stock por libro mayor de movimientos y conteos físicos que detectan mermas |
 | Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
 
-**31 tablas y 14 enums**: el modelo base (27 tablas, hasta SPRINT-4-T32) más la
+**35 tablas y 16 enums**: el modelo base (27 tablas, hasta SPRINT-4-T32) más la
 operación diaria de SPRINT-4R-T01 (`daily_operations` y
-`daily_operation_vouchers`) y los participantes y fuentes diarias de
+`daily_operation_vouchers`), los participantes y fuentes diarias de
 SPRINT-4R-T02 (`daily_operation_participants` y
-`tip_pool_daily_operation_sources`; fuente de verdad física:
-`prisma/schema.prisma`). SPRINT-4R-T02 no agrega enums: añade el valor
-`EQUAL_SHARES` a `TipAgreementRule`. El Portal del Trabajador no agrega
+`tip_pool_daily_operation_sources`) y la importación de ventas MrComanda de
+SPRINT-4R-T08 (`store_external_codes`, `payment_method_aliases`,
+`sales_imports` y `sales_import_lines`, con los enums `ExternalSystem` y
+`SalesImportStatus`; fuente de verdad física: `prisma/schema.prisma`).
+SPRINT-4R-T02 no agrega enums: añade el valor `EQUAL_SHARES` a
+`TipAgreementRule`. El Portal del Trabajador no agrega
 tablas: es una vista
 de solo lectura sobre `users`, `documents`, `tip_pool_lines` y `sales`, con
 aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
@@ -465,10 +469,81 @@ horas: todo cálculo nuevo crea el reparto con `agreement_id NULL`,
 `hours_worked NULL` (regla y residuo en el README del backend); este modelo es
 el contrato que ambos consumen.
 
+## Importación diaria de ventas MrComanda (SPRINT-4R-T08)
+
+Las ventas del día dejan de ingresarse a mano: salen del reporte Excel diario
+de MrComanda. Esta tarea solo agrega el **modelo**; la lectura del archivo es
+SPRINT-4R-T09 y la API de previsualización y confirmación es SPRINT-4R-T10.
+Migración `20261108010000_importaciones_ventas_mrcomanda` (con reversa en
+`down.sql`, que Prisma no ejecuta). No toca ninguna tabla existente.
+
+| Tabla | Propósito |
+| --- | --- |
+| `store_external_codes` | Identificador explícito de un local en un sistema externo (`ExternalSystem`, hoy solo `MRCOMANDA`), con el nombre externo opcional. Un local tiene a lo más uno por sistema y un identificador nunca apunta a dos locales. |
+| `payment_method_aliases` | Alias externo de un medio del catálogo (`T. DEBITO` → `DEBIT_CARD`). Guarda la etiqueta configurada y su forma normalizada; una etiqueta normalizada resuelve un único medio por sistema. El código del medio no cambia. |
+| `sales_imports` | Cabecera por archivo importado: local, fecha de negocio, período y horario del reporte, fecha de emisión (`issued_at`, informativa, desde SPRINT-4R-T10), identificador y nombre externos del local, versión, estado, total del reporte, nombre original, ruta privada, tipo, tamaño, SHA-256, quién lo subió (`uploaded_by_id`, `created_at`) y quién lo confirmó. |
+| `sales_import_lines` | Total por medio de pago dentro de una importación: número de línea, etiqueta original, etiqueta normalizada, medio resuelto, monto CLP entero con signo y porcentaje opcional. |
+
+Reglas que garantiza la base (CHECK, índices únicos y triggers):
+
+- **Sin asignaciones por suposición.** Una cabecera solo se inserta si su
+  `external_store_code` está configurado en `store_external_codes` para ese
+  mismo local; una línea solo se inserta si su etiqueta normalizada tiene un
+  alias hacia ese mismo medio. Un texto como «208 - 72597» no resuelve ningún
+  local hasta que el administrador lo configure, y el seed no siembra
+  identificadores de locales.
+- **Normalización única.** La función SQL inmutable
+  `normalize_external_label` (sin tildes, mayúsculas y espacios colapsados,
+  conservando la puntuación) es la misma regla de
+  `src/sales-imports/normalization/normalize-external-label.ts`; los CHECK
+  exigen que identificadores y etiquetas se guarden ya normalizados, y una
+  prueba de integración compara ambas implementaciones.
+- **Versiones e idempotencia.** `(store_id, business_date, sha256_hash)` es
+  único: reimportar el mismo archivo no crea otra fila. Un archivo distinto
+  para la misma clave crea la siguiente `version` (única por local y fecha).
+- **Una sola versión vigente.** `is_current` es `TRUE` solo en `ACTIVE` y
+  `NULL` en los demás estados; el índice único
+  `(store_id, business_date, is_current)` no hace colisionar los `NULL`
+  (mismo patrón que los períodos de `sales`, sin índices parciales que Prisma
+  no representa). Reemplazar es atómico en una transacción:
+  `ACTIVE → SUPERSEDED` de la anterior y luego `PENDING → ACTIVE` de la nueva.
+- **Ciclo de vida.** Se crea `PENDING` (previsualizada); solo una `PENDING`
+  se descarta (`DELETE`, con sus líneas en cascada). `PENDING → ACTIVE` exige
+  al menos una línea y que las líneas sumen exactamente `total_amount`.
+  `ACTIVE → SUPERSEDED` es la única salida de una vigente y `SUPERSEDED` es
+  terminal. Los datos del archivo son inmutables desde el `INSERT` y las
+  líneas solo cambian mientras la cabecera está `PENDING` (la cabecera se lee
+  con `FOR SHARE`, así una confirmación concurrente espera a la escritura de
+  líneas). `TRUNCATE` se rechaza en ambas tablas.
+- **Período de un día.** `period_end > period_start`, hasta 24 horas (admite
+  horarios que cruzan la medianoche), y `business_date` es la fecha de inicio
+  del período en hora de Chile: la fecha sale del contenido del reporte, no
+  del nombre del archivo.
+- **Historial estable.** Cada línea conserva la etiqueta original y el medio
+  resuelto al importar: cambiar o borrar un alias después no reinterpreta
+  importaciones pasadas, y los medios no se borran (FK `Restrict`).
+- **Conceptos separados.** El modelo no tiene columnas de propina ni de
+  diferencia de efectivo, y no escribe en `sales`: las ventas manuales y los
+  totales MrComanda de SPRINT-4-T32 quedan como historial.
+
+El seed sincroniza solo los alias conocidos del reporte real cuyo medio no es
+ambiguo: `EFECTIVO` → `CASH`, `T. DEBITO` → `DEBIT_CARD` y `T. CREDITO` →
+`CREDIT_CARD`. «N.de Créd.» aparece en el reporte, pero el catálogo no tiene
+un medio equivalente; queda sin alias hasta que se defina (mientras tanto, un
+reporte con esa línea no se puede confirmar).
+
+SPRINT-4R-T10 agrega `issued_at` (migración
+`20261108020000_importaciones_fecha_emision`, con reversa): la fecha de
+emisión del reporte, solo informativa, nullable e inmutable como el resto de
+los datos del archivo (se suma a la comparación del trigger
+`sales_imports_enforce`). La API que usa este modelo está documentada en el
+README del backend.
+
 ## Cómo ver el modelo de forma visual
 
 > Los diagramas Mermaid y DBML de abajo incluyen el módulo de operación
-> diaria (SPRINT-4R-T01 y SPRINT-4R-T02); la fuente de verdad física siempre
+> diaria (SPRINT-4R-T01 y SPRINT-4R-T02) y la importación de ventas MrComanda
+> (SPRINT-4R-T08); la fuente de verdad física siempre
 > es `prisma/schema.prisma` y las migraciones.
 
 Hay cuatro opciones; las dos primeras están listas en este archivo:
@@ -548,6 +623,14 @@ erDiagram
   USERS ||--o{ CASH_CLOSINGS : "es responsable"
   USERS |o--o{ CASH_CLOSINGS : "cierra"
 
+  STORES ||--o{ STORE_EXTERNAL_CODES : "identificado en MrComanda"
+  PAYMENT_METHODS ||--o{ PAYMENT_METHOD_ALIASES : "alias externo"
+  STORES ||--o{ SALES_IMPORTS : "importa ventas"
+  USERS ||--o{ SALES_IMPORTS : "sube"
+  USERS |o--o{ SALES_IMPORTS : "confirma"
+  SALES_IMPORTS ||--o{ SALES_IMPORT_LINES : "totales por medio"
+  PAYMENT_METHODS ||--o{ SALES_IMPORT_LINES : "resuelve"
+
   STORES ||--o{ PRODUCTS : "almacena (vía movimientos)"
   PRODUCTS ||--o{ INVENTORY_MOVEMENTS : "mueve"
   STORES ||--o{ INVENTORY_MOVEMENTS : "en"
@@ -615,6 +698,16 @@ enum CashClosingStatus {
 enum CashClosingVoucherSource {
   MRCOMANDA [note: 'Venta neta del punto de venta']
   MERCADO_PAGO [note: 'Cobro bruto; incluye la propina pagada con tarjeta']
+}
+
+enum ExternalSystem {
+  MRCOMANDA [note: 'Punto de venta; origen del Excel diario (SPRINT-4R-T08)']
+}
+
+enum SalesImportStatus {
+  PENDING [note: 'Previsualizada; se puede descartar']
+  ACTIVE [note: 'Confirmada y vigente; una por local y fecha']
+  SUPERSEDED [note: 'Reemplazada por una versión posterior; terminal']
 }
 
 enum UnitOfMeasure {
@@ -1105,6 +1198,97 @@ Table tip_pool_daily_operation_sources {
   Note: 'SPRINT-4R-T02: fuente del reparto alimentada por la operación diaria, separada de tip_pool_sources'
 }
 
+Table store_external_codes {
+  id uuid [pk, default: `gen_random_uuid()`]
+  system ExternalSystem [not null]
+  external_code varchar(100) [not null, note: 'Normalizado (CHECK con normalize_external_label)']
+  external_name varchar(150)
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+  store_id uuid [not null, ref: > stores.id]
+
+  indexes {
+    (system, external_code) [unique, note: 'Un identificador no apunta a dos locales']
+    (system, store_id) [unique, note: 'Un identificador por local y sistema']
+    store_id
+  }
+
+  Note: 'SPRINT-4R-T08: equivalencia explícita; el seed no la siembra'
+}
+
+Table payment_method_aliases {
+  id uuid [pk, default: `gen_random_uuid()`]
+  system ExternalSystem [not null]
+  label varchar(100) [not null]
+  normalized_label varchar(100) [not null, note: '= normalize_external_label(label) (CHECK)']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+  payment_method_id uuid [not null, ref: > payment_methods.id]
+
+  indexes {
+    (system, normalized_label) [unique]
+    payment_method_id
+  }
+
+  Note: 'SPRINT-4R-T08: alias externos sin cambiar el código estable del medio'
+}
+
+Table sales_imports {
+  id uuid [pk, default: `gen_random_uuid()`]
+  system ExternalSystem [not null, default: 'MRCOMANDA']
+  business_date date [not null, note: 'Fecha de inicio del período en hora de Chile (CHECK)']
+  period_start timestamptz [not null]
+  period_end timestamptz [not null, note: '> period_start y hasta 24 h (CHECK)']
+  issued_at timestamptz [note: 'Emisión del reporte (SPRINT-4R-T10); informativa e inmutable']
+  external_store_code varchar(100) [not null, note: 'Debe estar configurado para store_id (trigger)']
+  external_store_name varchar(150)
+  version integer [not null, note: '>= 1']
+  status SalesImportStatus [not null, default: 'PENDING']
+  is_current boolean [note: 'TRUE solo en ACTIVE; NULL en los demás estados']
+  total_amount bigint [not null, note: 'Total del reporte; las líneas deben sumarlo para confirmar']
+  file_name varchar(255) [not null, note: 'Nombre original del archivo']
+  file_path varchar(500) [not null, note: 'Ruta en el volumen privado']
+  mime_type varchar(100) [not null]
+  size_bytes bigint [not null]
+  sha256_hash char(64) [not null]
+  created_at timestamptz [not null, default: `now()`, note: 'Fecha de carga']
+  confirmed_at timestamptz
+  superseded_at timestamptz
+  updated_at timestamptz [not null]
+  store_id uuid [not null, ref: > stores.id]
+  uploaded_by_id uuid [not null, ref: > users.id]
+  confirmed_by_id uuid [ref: > users.id]
+
+  indexes {
+    (store_id, business_date, version) [unique]
+    (store_id, business_date, sha256_hash) [unique, note: 'Reimportar el mismo archivo es idempotente']
+    (store_id, business_date, is_current) [unique, note: 'Una sola versión vigente por local y fecha']
+    business_date
+  }
+
+  Note: 'SPRINT-4R-T08: datos del archivo inmutables; PENDING -> ACTIVE -> SUPERSEDED (trigger)'
+}
+
+Table sales_import_lines {
+  id uuid [pk, default: `gen_random_uuid()`]
+  line_number integer [not null]
+  original_label varchar(100) [not null, note: 'Etiqueta tal como viene en el reporte']
+  normalized_label varchar(100) [not null]
+  amount bigint [not null, note: 'CLP entero con signo']
+  percentage decimal(5,2) [note: '0 a 100, opcional']
+  created_at timestamptz [not null, default: `now()`]
+  import_id uuid [not null, ref: > sales_imports.id, note: 'Cascade solo al descartar una PENDING']
+  payment_method_id uuid [not null, ref: > payment_methods.id, note: 'Resuelto por alias (trigger)']
+
+  indexes {
+    (import_id, line_number) [unique]
+    (import_id, normalized_label) [unique]
+    payment_method_id
+  }
+
+  Note: 'SPRINT-4R-T08: solo cambian mientras la importación está PENDING'
+}
+
 Table products {
   id uuid [pk, default: `gen_random_uuid()`]
   sku varchar(40) [not null, unique]
@@ -1210,4 +1394,5 @@ TEST_DATABASE_URL="postgresql://postgres:cambiar-en-produccion@localhost:5433/su
 - `src/prisma/prisma.module.ts` / `src/prisma/prisma.service.ts` — integración NestJS (módulo global)
 - `src/generated/prisma/` — cliente generado (no se commitea; `npm install` lo regenera)
 - `test/prisma-schema.spec.ts` — validación del schema y la migración
+- `test/sales-imports-model.integration.spec.ts` / `test/sales-imports-migration.integration.spec.ts` — reglas de la importación MrComanda y migración con datos existentes y reversa (SPRINT-4R-T08)
 - `test/database.integration.spec.ts` — pruebas de restricciones contra PostgreSQL real

@@ -1,7 +1,9 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcryptjs';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
+import { normalizeExternalLabel } from '../src/sales-imports/normalization/normalize-external-label.js';
 import {
+  BASE_PAYMENT_METHOD_ALIASES,
   BASE_PAYMENT_METHODS,
   BASE_ROLES,
   BASE_STORES,
@@ -546,6 +548,71 @@ describe.skipIf(!databaseUrl)(
           where: { code: 'JUNAEB' },
         });
         expect(juneb.availableForTips).toBe(false);
+      });
+    });
+
+    it('siembra los alias MrComanda conocidos sin asignar locales por suposición (SPRINT-4R-T08)', async () => {
+      await withinRollback(async (tx) => {
+        const resultado = await seedDatabase(tx, opciones);
+
+        for (const esperado of BASE_PAYMENT_METHOD_ALIASES) {
+          // El valor sembrado ya viene normalizado con la misma regla de la
+          // función SQL (el CHECK de la base lo rechazaría si no).
+          expect(esperado.normalizedLabel).toBe(
+            normalizeExternalLabel(esperado.label),
+          );
+          const alias = await tx.paymentMethodAlias.findUniqueOrThrow({
+            where: {
+              system_normalizedLabel: {
+                system: 'MRCOMANDA',
+                normalizedLabel: esperado.normalizedLabel,
+              },
+            },
+          });
+          expect(alias.id).toBe(esperado.id);
+          expect(alias.paymentMethodId).toBe(
+            resultado.paymentMethodIds[esperado.paymentMethodCode],
+          );
+        }
+        // «N.de Créd.» no tiene medio equivalente definido: no se siembra.
+        const notaCredito = await tx.paymentMethodAlias.findUnique({
+          where: {
+            system_normalizedLabel: {
+              system: 'MRCOMANDA',
+              normalizedLabel: normalizeExternalLabel('N.de Créd.'),
+            },
+          },
+        });
+        expect(notaCredito).toBeNull();
+        // Ningún local recibe un identificador MrComanda desde el seed.
+        const codigos = await tx.storeExternalCode.count({
+          where: { storeId: { in: resultado.storeIds } },
+        });
+        expect(codigos).toBe(0);
+      });
+    });
+
+    it('los alias MrComanda son idempotentes y respetan cambios administrados (SPRINT-4R-T08)', async () => {
+      await withinRollback(async (tx) => {
+        const primero = await seedDatabase(tx, opciones);
+        // Cambio administrado: «T. CREDITO» pasa a apuntar a otro medio.
+        await tx.paymentMethodAlias.update({
+          where: { id: BASE_PAYMENT_METHOD_ALIASES[2].id },
+          data: { paymentMethodId: primero.paymentMethodIds['TRANSFER'] },
+        });
+
+        await seedDatabase(tx, opciones);
+
+        const alias = await tx.paymentMethodAlias.findMany({
+          where: { id: { in: BASE_PAYMENT_METHOD_ALIASES.map((a) => a.id) } },
+        });
+        expect(alias).toHaveLength(BASE_PAYMENT_METHOD_ALIASES.length);
+        const credito = await tx.paymentMethodAlias.findUniqueOrThrow({
+          where: { id: BASE_PAYMENT_METHOD_ALIASES[2].id },
+        });
+        expect(credito.paymentMethodId).toBe(
+          primero.paymentMethodIds['TRANSFER'],
+        );
       });
     });
   },

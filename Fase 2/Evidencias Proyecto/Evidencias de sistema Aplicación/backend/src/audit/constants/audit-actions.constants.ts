@@ -64,6 +64,15 @@ export const AUDIT_ACTION = {
   // (SPRINT-4R-T15). Lo registra el filtro global AccessDeniedAuditFilter en
   // cualquier ruta, sin cuerpo, consulta ni datos personales.
   ACCESS_DENIED: 'ACCESS_DENIED',
+  // Importación diaria de ventas MrComanda (SPRINT-4R-T10): carga de un
+  // archivo nuevo (vista previa guardada como PENDING), confirmación (con la
+  // versión que reemplaza), descarte y descarga del archivo. El detalle usa
+  // listas blancas (local, fecha, hash, versión y total) y jamás incluye el
+  // contenido del archivo; los reintentos idempotentes no se auditan de nuevo.
+  SALES_IMPORT_PREVIEWED: 'SALES_IMPORT_PREVIEWED',
+  SALES_IMPORT_CONFIRMED: 'SALES_IMPORT_CONFIRMED',
+  SALES_IMPORT_DISCARDED: 'SALES_IMPORT_DISCARDED',
+  SALES_IMPORT_FILE_DOWNLOADED: 'SALES_IMPORT_FILE_DOWNLOADED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];
