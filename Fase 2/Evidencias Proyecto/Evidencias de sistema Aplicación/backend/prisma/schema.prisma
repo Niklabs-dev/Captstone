@@ -969,6 +969,9 @@ model SalesImport {
   businessDate      DateTime          @map("business_date") @db.Date
   periodStart       DateTime          @map("period_start") @db.Timestamptz(6)
   periodEnd         DateTime          @map("period_end") @db.Timestamptz(6)
+  /// Fecha de emisión del reporte (SPRINT-4R-T10); solo informativa e
+  /// inmutable. NULL si el reporte no la trae.
+  issuedAt          DateTime?         @map("issued_at") @db.Timestamptz(6)
   externalStoreCode String            @map("external_store_code") @db.VarChar(100)
   externalStoreName String?           @map("external_store_name") @db.VarChar(150)
   version           Int

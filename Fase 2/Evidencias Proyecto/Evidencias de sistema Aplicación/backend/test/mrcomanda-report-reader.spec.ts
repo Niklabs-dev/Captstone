@@ -117,6 +117,8 @@ describe.skipIf(!samplePath)(
       expect(report.periodStart.toISOString()).toBe('2026-11-05T03:00:00.000Z');
       expect(report.periodEnd.toISOString()).toBe('2026-11-06T02:59:59.000Z');
       expect(report.externalStoreCode).toBe('208 - 72597');
+      // Emitido el 06/11/2026 a las 11:14:55 (hora de Chile, UTC-3).
+      expect(report.issuedAt?.toISOString()).toBe('2026-11-06T14:14:55.000Z');
       expect(report.totalAmount).toBe(873_260);
       expect(report.lines.map((line) => line.originalLabel)).toEqual([
         'T. DEBITO',
