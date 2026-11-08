@@ -20,6 +20,10 @@ import {
   buildReportXlsx,
   type FixtureLine,
 } from './helpers/mrcomanda-report-fixture.js';
+import {
+  minimalJpeg,
+  truncatedJpeg as truncatedJpegOf,
+} from './helpers/jpeg.js';
 import { paymentMethodIdOf } from './helpers/payment-methods.js';
 import {
   createSwitchablePrisma,
@@ -59,17 +63,10 @@ function truncatedPdf(): Buffer {
   return Buffer.from(`%PDF-1.7\n% cortado ${randomUUID()}\n1 0 obj\n<<`);
 }
 function jpeg(): Buffer {
-  return Buffer.concat([
-    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
-    Buffer.from(randomUUID()),
-    Buffer.from([0xff, 0xd9]),
-  ]);
+  return minimalJpeg(randomUUID());
 }
 function truncatedJpeg(): Buffer {
-  return Buffer.concat([
-    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
-    Buffer.from(randomUUID()),
-  ]);
+  return truncatedJpegOf(randomUUID());
 }
 const PNG = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x49,

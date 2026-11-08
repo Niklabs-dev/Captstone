@@ -17,6 +17,7 @@ import {
 } from '../src/daily-operations/types/daily-operations.types.js';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
+import { minimalJpeg } from './helpers/jpeg.js';
 import {
   createSwitchablePrisma,
   type SwitchablePrisma,
@@ -40,12 +41,8 @@ const MISSING_ID = '00000000-0000-4000-8000-000000000000';
 
 // Imágenes mínimas completas: firma + marca de cierre de cada formato
 // (el chequeo estructural de SPRINT-4R-T18 rechaza las truncadas).
-const JPEG = Buffer.from([
-  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9,
-]);
-const JPEG_OTHER = Buffer.from([
-  0xff, 0xd8, 0xff, 0xe1, 0x02, 0x2a, 0x45, 0x78, 0x69, 0x66, 0xff, 0xd9,
-]);
+const JPEG = minimalJpeg('voucher-a');
+const JPEG_OTHER = minimalJpeg('voucher-b');
 const PNG = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x49,
   0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
