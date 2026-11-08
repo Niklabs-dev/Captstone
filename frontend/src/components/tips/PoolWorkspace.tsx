@@ -7,11 +7,13 @@ import {
   useState,
   type FormEvent,
 } from 'react';
+import { formatSignedClp } from '@/lib/daily-operations';
 import {
   POOL_STATUS,
   poolError,
   poolReconciliation,
   poolRuleLabel,
+  poolStaleSources,
   type TipPool,
   type PaymentAlert,
   type PoolReceipt,
@@ -94,10 +96,13 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
 export function PoolWorkspace({
   stores,
   readOnly,
+  storeScoped = false,
   today,
 }: {
   stores: Store[];
   readOnly: boolean;
+  // Supervisor: solo su local, sin alertas ni constancias de otras personas.
+  storeScoped?: boolean;
   today: string;
 }) {
   const router = useRouter();
@@ -149,11 +154,12 @@ export function PoolWorkspace({
     }
   }, [message]);
   useEffect(() => {
+    if (storeScoped) return;
     const timer = window.setTimeout(() => {
       void refreshAlerts();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [refreshAlerts]);
+  }, [refreshAlerts, storeScoped]);
   useEffect(() => {
     let active = true;
     async function read(): Promise<undefined> {
@@ -161,7 +167,7 @@ export function PoolWorkspace({
       if (!active) return;
       setReceipts([]);
       setReceiptError('');
-      if (pool?.status !== 'PAID') {
+      if (pool?.status !== 'PAID' || storeScoped) {
         setReceiptLoading(false);
         return;
       }
@@ -181,7 +187,7 @@ export function PoolWorkspace({
     return () => {
       active = false;
     };
-  }, [pool, message]);
+  }, [pool, message, storeScoped]);
   function clear() {
     setPool(null);
     setQueried(false);
@@ -303,12 +309,16 @@ export function PoolWorkspace({
   }
   const totals = pool ? poolReconciliation(pool) : null;
   const showHours = pool?.rule === 'PROPORTIONAL_TO_HOURS';
+  const staleSources = pool ? poolStaleSources(pool) : [];
+  const stale = staleSources.length > 0;
   return (
     <>
       <p className={introClass}>
-        {readOnly
-          ? 'Consulta los repartos, las alertas y las constancias. Tu acceso es de solo lectura.'
-          : 'Revisa el cálculo del período, registra observaciones y confirma la entrega de propinas.'}{' '}
+        {storeScoped
+          ? 'Consulta los repartos de tu local. Tu acceso es de solo lectura.'
+          : readOnly
+            ? 'Consulta los repartos, las alertas y las constancias. Tu acceso es de solo lectura.'
+            : 'Revisa el cálculo del período, registra observaciones y confirma la entrega de propinas.'}{' '}
         Los montos se expresan en pesos chilenos.
       </p>
       <section className={filterPanelClass} aria-labelledby="pool-search">
@@ -561,7 +571,7 @@ export function PoolWorkspace({
                       <td className={tableCellClass}>{l.hoursWorked}</td>
                     )}
                     <td
-                      className={`${tableCellClass} font-bold tabular-nums text-ink`}
+                      className={`${tableCellClass} font-medium tabular-nums text-ink`}
                     >
                       {clp(l.amount)}
                     </td>
@@ -572,18 +582,41 @@ export function PoolWorkspace({
           </div>
           <div className="space-y-4 p-5 text-sm">
             <p
-              className={pool.reconciled ? 'text-ok' : 'text-crit'}
+              className={pool.reconciled && !stale ? 'text-ok' : 'text-crit'}
               role="status"
             >
-              {pool.reconciled
-                ? 'Conciliación correcta'
-                : 'Reparto sin conciliar'}
+              {stale
+                ? 'Borrador desactualizado'
+                : pool.reconciled
+                  ? 'Conciliación correcta'
+                  : 'Reparto sin conciliar'}
               : suma individual {clp(totals?.individualTotal ?? 0)} · fondo{' '}
               {clp(pool.totalAmount)} · fuentes {clp(totals?.sourcesTotal ?? 0)}{' '}
-              · diferencia {clp(Math.abs(totals?.difference ?? 0))}.
+              · diferencia con líneas{' '}
+              {formatSignedClp(totals?.linesDifference ?? 0)} · diferencia con
+              fuentes {formatSignedClp(totals?.sourcesDifference ?? 0)}.
             </p>
-            {!pool.reconciled && (
-              <p role="alert" className="text-crit">
+            {stale && (
+              <div role="alert" className={alertClass}>
+                <p>
+                  Borrador desactualizado: hay operaciones diarias corregidas
+                  después del cálculo. No uses estos montos;{' '}
+                  {readOnly
+                    ? 'el contador debe recalcular el borrador.'
+                    : 'recalcula el borrador antes de validarlo.'}
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {staleSources.map((s) => (
+                    <li key={s.businessDate}>
+                      {date(s.businessDate)}: calculado{' '}
+                      {clp(s.calculatedAmount)} · actual {clp(s.currentAmount)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!pool.reconciled && !stale && (
+              <p role="alert" className={alertClass}>
                 No uses estos montos para pagar: las cifras no coinciden.
                 Recalcula el borrador o revisa sus operaciones diarias.
               </p>
@@ -605,6 +638,7 @@ export function PoolWorkspace({
                         busy ||
                         conflict ||
                         !pool.reconciled ||
+                        stale ||
                         (pool.rule !== 'EQUAL_SHARES' && !pool.agreement)
                       }
                       onClick={() => setAction('confirm')}
@@ -615,7 +649,7 @@ export function PoolWorkspace({
                 ) : (
                   <button
                     className={primaryButtonClass}
-                    disabled={busy || conflict}
+                    disabled={busy || conflict || !pool.reconciled}
                     onClick={() => setAction('pay')}
                   >
                     Registrar entrega de propinas
@@ -626,7 +660,7 @@ export function PoolWorkspace({
           </div>
         </section>
       )}
-      {pool?.status === 'PAID' && (
+      {pool?.status === 'PAID' && !storeScoped && (
         <section
           className={tablePanelClass}
           aria-labelledby="pool-receipts"
@@ -686,89 +720,91 @@ export function PoolWorkspace({
           </ul>
         </section>
       )}
-      <section
-        className={tablePanelClass}
-        aria-labelledby="pool-alerts"
-        aria-busy={alertLoading}
-      >
-        <header className={tableHeaderClass}>
-          <div>
-            <h2 id="pool-alerts" className={panelTitleClass}>
-              Propinas con tarjeta pendientes de entrega
-            </h2>
-            <p className="mt-1 text-xs text-muted">
-              Plazo de siete días hábiles calculado con el calendario de
-              feriados configurado.
-              {alertDate
-                ? ' Consulta del ' +
-                  formatChileDate(alertDate) +
-                  ', hora de Chile.'
-                : ''}
+      {!storeScoped && (
+        <section
+          className={tablePanelClass}
+          aria-labelledby="pool-alerts"
+          aria-busy={alertLoading}
+        >
+          <header className={tableHeaderClass}>
+            <div>
+              <h2 id="pool-alerts" className={panelTitleClass}>
+                Propinas con tarjeta pendientes de entrega
+              </h2>
+              <p className="mt-1 text-xs text-muted">
+                Plazo de siete días hábiles calculado con el calendario de
+                feriados configurado.
+                {alertDate
+                  ? ' Consulta del ' +
+                    formatChileDate(alertDate) +
+                    ', hora de Chile.'
+                  : ''}
+              </p>
+            </div>
+            <button
+              className={buttonClass}
+              disabled={alertLoading || busy}
+              onClick={() => void refreshAlerts()}
+            >
+              Actualizar alertas
+            </button>
+          </header>
+          {alertLoading ? (
+            <p className="p-5" role="status">
+              Cargando alertas…
             </p>
-          </div>
-          <button
-            className={buttonClass}
-            disabled={alertLoading || busy}
-            onClick={() => void refreshAlerts()}
-          >
-            Actualizar alertas
-          </button>
-        </header>
-        {alertLoading ? (
-          <p className="p-5" role="status">
-            Cargando alertas…
-          </p>
-        ) : alertError ? (
-          <p className={alertClass + ' m-5'} role="alert">
-            {alertError}
-          </p>
-        ) : alerts.length === 0 ? (
-          <p className="p-5" role="status">
-            No hay propinas con tarjeta pendientes de entrega.
-          </p>
-        ) : (
-          <ul className="divide-y divide-line">
-            {alerts.map((a) => (
-              <li
-                key={a.id}
-                className="flex flex-wrap items-center justify-between gap-3 p-5 text-sm"
-              >
-                <div>
-                  <p
-                    className={
-                      'font-semibold ' +
-                      (a.status === 'OVERDUE' ? 'text-crit' : 'text-warn')
-                    }
-                  >
-                    {a.status === 'OVERDUE' ? 'Vencida' : 'Próxima'} ·{' '}
-                    {a.store.name} · {clp(a.amount)}
-                  </p>
-                  <p className="mt-1 text-xs text-ink2">
-                    Registro {date(a.businessDate)} · Fecha límite{' '}
-                    {date(a.deadline)} ·{' '}
-                    {a.daysRemaining < 0
-                      ? Math.abs(a.daysRemaining) + ' días hábiles de atraso'
-                      : a.daysRemaining === 0
-                        ? 'Vence hoy'
-                        : a.daysRemaining + ' días hábiles restantes'}
-                  </p>
-                </div>
-                {a.pool ? (
-                  <button
-                    className={buttonClass}
-                    disabled={busy}
-                    onClick={() => void load(undefined, a.pool!.id)}
-                  >
-                    Consultar reparto de la alerta
-                  </button>
-                ) : (
-                  <p className="text-xs text-muted">Sin reparto calculado</p>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+          ) : alertError ? (
+            <p className={alertClass + ' m-5'} role="alert">
+              {alertError}
+            </p>
+          ) : alerts.length === 0 ? (
+            <p className="p-5" role="status">
+              No hay propinas con tarjeta pendientes de entrega.
+            </p>
+          ) : (
+            <ul className="divide-y divide-line">
+              {alerts.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex flex-wrap items-center justify-between gap-3 p-5 text-sm"
+                >
+                  <div>
+                    <p
+                      className={
+                        'font-semibold ' +
+                        (a.status === 'OVERDUE' ? 'text-crit' : 'text-warn')
+                      }
+                    >
+                      {a.status === 'OVERDUE' ? 'Vencida' : 'Próxima'} ·{' '}
+                      {a.store.name} · {clp(a.amount)}
+                    </p>
+                    <p className="mt-1 text-xs text-ink2">
+                      Registro {date(a.businessDate)} · Fecha límite{' '}
+                      {date(a.deadline)} ·{' '}
+                      {a.daysRemaining < 0
+                        ? Math.abs(a.daysRemaining) + ' días hábiles de atraso'
+                        : a.daysRemaining === 0
+                          ? 'Vence hoy'
+                          : a.daysRemaining + ' días hábiles restantes'}
+                    </p>
+                  </div>
+                  {a.pool ? (
+                    <button
+                      className={buttonClass}
+                      disabled={busy}
+                      onClick={() => void load(undefined, a.pool!.id)}
+                    >
+                      Consultar reparto de la alerta
+                    </button>
+                  ) : (
+                    <p className="text-xs text-muted">Sin reparto calculado</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
       {action && (
         <PoolDialog
           key={action}

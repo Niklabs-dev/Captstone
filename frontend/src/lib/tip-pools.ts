@@ -116,17 +116,39 @@ export function poolReconciliation(
   beneficiaries: number;
   individualTotal: number;
   sourcesTotal: number;
-  difference: number;
+  linesDifference: number;
+  sourcesDifference: number;
 } {
   const individualTotal = pool.lines.reduce((a, l) => a + l.amount, 0);
+  const sourcesTotal =
+    pool.sources.reduce((a, s) => a + s.amount, 0) +
+    pool.dailySources.reduce((a, s) => a + s.amount, 0);
   return {
     beneficiaries: pool.lines.length,
     individualTotal,
-    sourcesTotal:
-      pool.sources.reduce((a, s) => a + s.amount, 0) +
-      pool.dailySources.reduce((a, s) => a + s.amount, 0),
-    difference: pool.totalAmount - individualTotal,
+    sourcesTotal,
+    linesDifference: pool.totalAmount - individualTotal,
+    sourcesDifference: pool.totalAmount - sourcesTotal,
   };
+}
+// Operaciones corregidas después del cálculo (SPRINT-4R-T06): amount quedó
+// congelado al calcular y tarjeta + efectivo son los valores actuales. Un
+// borrador así se muestra para recalcularlo; no es una respuesta inválida.
+export function poolStaleSources(
+  pool: Pick<TipPool, 'dailySources'>,
+): { businessDate: string; calculatedAmount: number; currentAmount: number }[] {
+  return pool.dailySources.flatMap((s) => {
+    const currentAmount = s.cardTipAmount + s.cashTipAmount;
+    return currentAmount === s.amount
+      ? []
+      : [
+          {
+            businessDate: s.businessDate,
+            calculatedAmount: s.amount,
+            currentAmount,
+          },
+        ];
+  });
 }
 export function parsePeriod(v: unknown): PoolPeriod | null {
   if (
@@ -214,8 +236,7 @@ export function parsePool(v: unknown): TipPool | null {
       !isTipDate(s.businessDate) ||
       !money(s.cardTipAmount) ||
       !money(s.cashTipAmount) ||
-      !money(s.amount) ||
-      s.amount !== s.cardTipAmount + s.cashTipAmount
+      !money(s.amount)
     )
       return null;
     dailySources.push({

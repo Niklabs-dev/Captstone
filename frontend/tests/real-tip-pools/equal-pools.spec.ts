@@ -18,6 +18,11 @@ let adminToken = '';
 let storeId = '';
 let accountantEmail = '';
 let workerEmail = '';
+let supervisorEmail = '';
+let supervisorToken = '';
+let otherStoreId = '';
+let firstWorkerId = '';
+let secondWorkerId = '';
 const accountIds: string[] = [];
 
 function idOf(value: unknown): string {
@@ -98,6 +103,16 @@ test.beforeAll(async ({ request }, info) => {
   });
   expect(store.status()).toBe(201);
   storeId = idOf(await store.json());
+  const otherStore = await request.post(backend + '/stores', {
+    headers,
+    data: {
+      name: 'Reparto T06 otro ' + suffix,
+      city: 'Melipilla',
+      address: 'Av. Pruebas 607',
+    },
+  });
+  expect(otherStore.status()).toBe(201);
+  otherStoreId = idOf(await otherStore.json());
   const created: Record<string, string> = {};
   for (const [key, role, assigned, first] of [
     ['supervisor', 'SUPERVISOR', storeId, 'Sofia'],
@@ -123,13 +138,16 @@ test.beforeAll(async ({ request }, info) => {
     created[key] = id;
     if (key === 'accountant') accountantEmail = email;
     if (key === 'first') workerEmail = email;
-    if (key === 'supervisor') created.supervisorEmail = email;
+    if (key === 'supervisor') supervisorEmail = email;
   }
   const supervisorLogin = await request.post(backend + '/auth/login', {
-    data: { email: created.supervisorEmail, password },
+    data: { email: supervisorEmail, password },
   });
   expect(supervisorLogin.status()).toBe(200);
   const supervisor = (await supervisorLogin.json()) as { accessToken: string };
+  supervisorToken = supervisor.accessToken;
+  firstWorkerId = created.first;
+  secondWorkerId = created.second;
   // Dos días: el primero reparte $10.001 entre dos; el segundo, $500 a una.
   for (const [businessDate, cash, participants] of [
     ['2026-02-02', '10001', [created.first, created.second]],
@@ -157,10 +175,11 @@ test.afterAll(async ({ request }) => {
   const headers = { Authorization: 'Bearer ' + adminToken };
   for (const id of accountIds)
     await request.patch(backend + '/users/' + id + '/deactivate', { headers });
-  if (storeId)
-    await request.patch(backend + '/stores/' + storeId + '/deactivate', {
-      headers,
-    });
+  for (const id of [storeId, otherStoreId])
+    if (id)
+      await request.patch(backend + '/stores/' + id + '/deactivate', {
+        headers,
+      });
 });
 
 test('Monto a pagar: reparto equitativo sin horas, conciliado en borrador, confirmado, enterado y constancia', async ({
@@ -202,7 +221,7 @@ test('Monto a pagar: reparto equitativo sin horas, conciliado en borrador, confi
     expect(amounts.every((amount) => amount >= 5_000)).toBe(true);
     await expect(
       page.getByText(
-        'Conciliación correcta: suma individual $10.501 · fondo $10.501 · fuentes $10.501 · diferencia $0.',
+        'Conciliación correcta: suma individual $10.501 · fondo $10.501 · fuentes $10.501 · diferencia con líneas $0 · diferencia con fuentes $0.',
       ),
     ).toBeVisible();
     await expect(
@@ -236,6 +255,10 @@ test('Monto a pagar: reparto equitativo sin horas, conciliado en borrador, confi
     page.getByRole('heading', { name: 'Constancias de entrega' }),
   ).toBeVisible();
   await expectDetail();
+  const firstRow = distribution.getByRole('row').filter({ hasText: firstName });
+  const firstAmount = (
+    await firstRow.getByRole('cell').last().innerText()
+  ).trim();
   const folder = 'output/playwright/tip-pools/' + info.project.name;
   await mkdir(folder, { recursive: true });
   await page.screenshot({
@@ -251,5 +274,141 @@ test('Monto a pagar: reparto equitativo sin horas, conciliado en borrador, confi
   await expect(
     page.getByText('No aplica (reparto equitativo)').first(),
   ).toBeVisible();
+  // El monto de la constancia es el de su línea del reparto.
+  await expect(page.getByRole('main')).toContainText(firstAmount);
   await noOverflow(page);
+});
+
+test('Supervisor: solo lectura de su local, sin acciones, alertas, constancias ni otros locales', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  await login(context, baseURL!, supervisorEmail);
+  await page.goto('/propinas/repartos');
+  const local = page.getByLabel('Local', { exact: true });
+  // Solo su local, además de la opción vacía del selector.
+  await expect(local.locator('option')).toHaveCount(2);
+  await expect(local).toHaveValue(storeId);
+  await page.getByLabel('Desde', { exact: true }).fill(period.periodStart);
+  await page.getByLabel('Hasta', { exact: true }).fill(period.periodEnd);
+  await page
+    .getByRole('button', { name: 'Consultar reparto', exact: true })
+    .click();
+  const distribution = page.getByRole('region', {
+    name: 'Distribución por trabajador',
+  });
+  await expect(
+    distribution.getByRole('columnheader', { name: 'Monto a pagar' }),
+  ).toBeVisible();
+  await expect(distribution).toContainText(firstName);
+  for (const name of [
+    'Calcular reparto',
+    'Recalcular borrador',
+    'Validar reparto',
+    'Registrar entrega de propinas',
+  ])
+    await expect(page.getByRole('button', { name })).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: 'Constancias de entrega' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: /pendientes de entrega/ }),
+  ).toHaveCount(0);
+  await noOverflow(page);
+
+  const query = (id: string) =>
+    '/api/tip-pools?' +
+    new URLSearchParams({ storeId: id, ...period }).toString();
+  const own = await context.request.get(query(storeId));
+  expect(own.status()).toBe(200);
+  const pools = (await own.json()) as { id: string }[];
+  expect((await context.request.get(query(otherStoreId))).status()).toBe(403);
+  expect((await context.request.get('/api/tip-pools/alerts')).status()).toBe(
+    403,
+  );
+  expect(
+    (
+      await context.request.get('/api/tip-pools/' + pools[0].id + '/receipts')
+    ).status(),
+  ).toBe(403);
+  expect(
+    (
+      await context.request.post('/api/tip-pools/preview', {
+        headers: { Origin: baseURL! },
+        data: { storeId, ...period },
+      })
+    ).status(),
+  ).toBe(403);
+});
+
+test('Operación corregida después del cálculo: borrador desactualizado visible y recalculable', async ({
+  page,
+  context,
+  baseURL,
+  request,
+}) => {
+  const stalePeriod = { periodStart: '2026-03-02', periodEnd: '2026-03-08' };
+  const auth = { Authorization: 'Bearer ' + supervisorToken };
+  const form = multipartBody({
+    storeId,
+    businessDate: stalePeriod.periodStart,
+    cardTipAmount: '0',
+    cashTipAmount: '1000',
+    cashDifference: '0',
+    participantIds: [firstWorkerId, secondWorkerId],
+  });
+  const created = await request.post(backend + '/daily-operations', {
+    headers: { ...auth, 'Content-Type': form.contentType },
+    data: form.body,
+  });
+  expect(created.status()).toBe(201);
+  const operationId = idOf(await created.json());
+
+  await login(context, baseURL!, accountantEmail);
+  await page.goto('/propinas/repartos');
+  await page.getByLabel('Local', { exact: true }).selectOption(storeId);
+  await page.getByLabel('Desde', { exact: true }).fill(stalePeriod.periodStart);
+  await page.getByLabel('Hasta', { exact: true }).fill(stalePeriod.periodEnd);
+  await page
+    .getByRole('button', { name: 'Calcular reparto', exact: true })
+    .click();
+  await confirm(page, 'Calcular reparto');
+  await expect(
+    page.getByText('Conciliación correcta', { exact: false }),
+  ).toBeVisible();
+
+  const correction = multipartBody({ cashTipAmount: '1200' });
+  expect(
+    (
+      await request.patch(backend + '/daily-operations/' + operationId, {
+        headers: { ...auth, 'Content-Type': correction.contentType },
+        data: correction.body,
+      })
+    ).status(),
+  ).toBe(200);
+
+  await page
+    .getByRole('button', { name: 'Consultar reparto', exact: true })
+    .click();
+  const warning = page.getByRole('alert').filter({
+    hasText: 'Borrador desactualizado',
+  });
+  await expect(warning).toContainText('calculado $1.000');
+  await expect(warning).toContainText('actual $1.200');
+  await expect(
+    page.getByRole('button', { name: 'Validar reparto', exact: true }),
+  ).toBeDisabled();
+  await noOverflow(page);
+
+  await page.getByRole('button', { name: 'Recalcular borrador' }).click();
+  await confirm(page, 'Recalcular borrador');
+  await expect(
+    page.getByText('Conciliación correcta', { exact: false }),
+  ).toBeVisible();
+  await expect(page.getByText('fondo $1.200', { exact: false })).toBeVisible();
+  await expect(warning).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Validar reparto', exact: true }),
+  ).toBeEnabled();
 });
