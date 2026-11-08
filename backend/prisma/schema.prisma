@@ -54,6 +54,8 @@ model Store {
   inventoryMovements InventoryMovement[]
   inventoryCounts    InventoryCount[]
   dailyOperations    DailyOperation[]
+  externalCodes      StoreExternalCode[]
+  salesImports       SalesImport[]
 
   @@map("stores")
 }
@@ -122,6 +124,8 @@ model User {
   closedCashClosings         CashClosing[]        @relation("ClosedCashClosings")
   responsibleDailyOperations DailyOperation[]    @relation("ResponsibleDailyOperations")
   dailyOperationParticipations DailyOperationParticipant[]
+  uploadedSalesImports       SalesImport[]        @relation("UploadedSalesImports")
+  confirmedSalesImports      SalesImport[]        @relation("ConfirmedSalesImports")
   inventoryMovements         InventoryMovement[]  @relation("CreatedInventoryMovements")
   inventoryCounts            InventoryCount[]     @relation("CreatedInventoryCounts")
   ownDataRightsRequests      DataRightsRequest[]  @relation("OwnDataRightsRequests")
@@ -577,6 +581,8 @@ model PaymentMethod {
   tipEntries          TipEntry[]
   cashClosingLines    CashClosingLine[]
   cashClosingVouchers CashClosingVoucher[]
+  externalAliases     PaymentMethodAlias[]
+  salesImportLines    SalesImportLine[]
 
   @@map("payment_methods")
 }
@@ -879,6 +885,145 @@ model TipPoolDailyOperationSource {
 
   @@index([poolId])
   @@map("tip_pool_daily_operation_sources")
+}
+
+// -------------------------------------------------------------
+// IMPORTACIÓN DIARIA DE VENTAS MRCOMANDA (SPRINT-4R-T08)
+// Las ventas del día salen del reporte Excel de MrComanda: cabecera por
+// archivo importado y líneas por medio de pago. No escribe en sales (las
+// ventas anteriores quedan como historial) ni guarda propinas o diferencias
+// de efectivo (vienen solo de daily_operations). Las reglas de integridad
+// viven en la migración 20261108010000_importaciones_ventas_mrcomanda
+// (CHECK y triggers); la normalización de etiquetas usa la función SQL
+// normalize_external_label (mayúsculas, sin tildes y espacios colapsados).
+// -------------------------------------------------------------
+
+/// Sistema externo que origina datos importados. Hoy solo MrComanda.
+enum ExternalSystem {
+  MRCOMANDA
+}
+
+/// Ciclo de vida de una importación: PENDING (previsualizada, se puede
+/// descartar), ACTIVE (confirmada y vigente; una sola por local y fecha) y
+/// SUPERSEDED (reemplazada por una versión posterior; terminal).
+enum SalesImportStatus {
+  PENDING
+  ACTIVE
+  SUPERSEDED
+}
+
+/// Identificador explícito de un local en un sistema externo. Un local tiene
+/// a lo más un identificador por sistema y un identificador nunca apunta a dos
+/// locales. Una importación solo se acepta si su identificador externo está
+/// configurado aquí para ese local: nunca se asigna un local por suposición.
+/// external_code se guarda normalizado (CHECK).
+model StoreExternalCode {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  system       ExternalSystem
+  externalCode String         @map("external_code") @db.VarChar(100)
+  externalName String?        @map("external_name") @db.VarChar(150)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId String @map("store_id") @db.Uuid
+
+  @@unique([system, externalCode])
+  @@unique([system, storeId])
+  @@index([storeId])
+  @@map("store_external_codes")
+}
+
+/// Alias externo de un medio de pago del catálogo («T. DEBITO», «EFECTIVO»,
+/// etc.). El código del medio no cambia; cada sistema puede tener varios
+/// alias por medio, pero una etiqueta normalizada resuelve un único medio.
+/// normalized_label = normalize_external_label(label) (CHECK).
+model PaymentMethodAlias {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  system          ExternalSystem
+  label           String         @db.VarChar(100)
+  normalizedLabel String         @map("normalized_label") @db.VarChar(100)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId String        @map("payment_method_id") @db.Uuid
+
+  @@unique([system, normalizedLabel])
+  @@index([paymentMethodId])
+  @@map("payment_method_aliases")
+}
+
+/// Archivo de ventas importado para un local y una fecha de negocio. Guarda
+/// el período y horario del reporte, el identificador y nombre externos del
+/// local, el nombre original, la ruta privada, el SHA-256, quién lo subió y
+/// cuándo. El mismo archivo (hash) no se importa dos veces para el mismo local
+/// y fecha; un archivo distinto crea una nueva versión. is_current es TRUE
+/// solo en ACTIVE (NULL en los demás estados), lo que deja una sola versión
+/// vigente por local y fecha con la restricción única. Los datos del archivo
+/// son inmutables y PENDING → ACTIVE exige que las líneas sumen total_amount
+/// (trigger).
+model SalesImport {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  system            ExternalSystem    @default(MRCOMANDA)
+  businessDate      DateTime          @map("business_date") @db.Date
+  periodStart       DateTime          @map("period_start") @db.Timestamptz(6)
+  periodEnd         DateTime          @map("period_end") @db.Timestamptz(6)
+  externalStoreCode String            @map("external_store_code") @db.VarChar(100)
+  externalStoreName String?           @map("external_store_name") @db.VarChar(150)
+  version           Int
+  status            SalesImportStatus @default(PENDING)
+  isCurrent         Boolean?          @map("is_current")
+  totalAmount       BigInt            @map("total_amount")
+  fileName          String            @map("file_name") @db.VarChar(255)
+  filePath          String            @map("file_path") @db.VarChar(500)
+  mimeType          String            @map("mime_type") @db.VarChar(100)
+  sizeBytes         BigInt            @map("size_bytes")
+  sha256Hash        String            @map("sha256_hash") @db.Char(64)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  confirmedAt       DateTime?         @map("confirmed_at") @db.Timestamptz(6)
+  supersededAt      DateTime?         @map("superseded_at") @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store         Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId       String  @map("store_id") @db.Uuid
+  uploadedBy    User    @relation("UploadedSalesImports", fields: [uploadedById], references: [id], onDelete: Restrict)
+  uploadedById  String  @map("uploaded_by_id") @db.Uuid
+  confirmedBy   User?   @relation("ConfirmedSalesImports", fields: [confirmedById], references: [id], onDelete: Restrict)
+  confirmedById String? @map("confirmed_by_id") @db.Uuid
+
+  lines SalesImportLine[]
+
+  @@unique([storeId, businessDate, version])
+  @@unique([storeId, businessDate, sha256Hash])
+  @@unique([storeId, businessDate, isCurrent])
+  @@index([businessDate])
+  @@map("sales_imports")
+}
+
+/// Total de un medio de pago dentro de una importación. Conserva la etiqueta
+/// original del reporte y el medio resuelto por alias (trigger), de modo que
+/// cambiar un alias después no reinterpreta importaciones pasadas. Monto CLP
+/// entero con signo (una nota de crédito puede restar) y porcentaje opcional.
+/// Solo cambia mientras la importación está PENDING (trigger).
+model SalesImportLine {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lineNumber      Int      @map("line_number")
+  originalLabel   String   @map("original_label") @db.VarChar(100)
+  normalizedLabel String   @map("normalized_label") @db.VarChar(100)
+  amount          BigInt
+  percentage      Decimal? @db.Decimal(5, 2)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  import          SalesImport   @relation(fields: [importId], references: [id], onDelete: Cascade)
+  importId        String        @map("import_id") @db.Uuid
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId String        @map("payment_method_id") @db.Uuid
+
+  @@unique([importId, lineNumber])
+  @@unique([importId, normalizedLabel])
+  @@index([paymentMethodId])
+  @@map("sales_import_lines")
 }
 
 // -------------------------------------------------------------
