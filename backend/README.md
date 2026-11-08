@@ -511,6 +511,43 @@ la versión reemplazada), `SALES_IMPORT_DISCARDED` y
 `SALES_IMPORT_FILE_DOWNLOADED`, con actor, local, fecha de negocio, hash,
 versión y total.
 
+## Días de operación y ventas sin importar (SPRINT-4R-T12)
+
+No todos los días exigen ventas: cada local tiene días semanales de operación
+y excepciones de cierre con motivo. Con eso la API calcula el estado de ventas
+de cada local y día de negocio (hora de Chile), **al consultar y sin guardar
+alertas**: cada local y fecha aparece una sola vez y una importación tardía lo
+resuelve sola. El aviso vive solo en el panel administrativo (sin correos,
+push ni recordatorios). Es independiente de los horarios de los trabajadores.
+Todos los endpoints exigen JWT de **ADMINISTRADOR**.
+
+| Método y ruta | Qué hace |
+| --- | --- |
+| `GET /stores/:storeId/operating-calendar` | Calendario del local (`configured`, `weekdays`, `trackingStartDate`) y sus cierres. |
+| `PUT /stores/:storeId/operating-calendar` | `{ "weekdays": [1,2,3,4,5,6], "trackingStartDate": "2026-11-01" }` (ISO: 1 = lunes … 7 = domingo; al menos uno). Crea o reemplaza el calendario de un local activo. |
+| `POST /stores/:storeId/closures` | `{ "date": "2026-12-25", "reason": "Feriado" }`: cierre por excepción, uno por local y fecha (409 con `existingClosureId` si ya existe). |
+| `DELETE /stores/:storeId/closures/:closureId` | Quita un cierre registrado por error; el día vuelve a evaluarse. |
+| `GET /sales-days` | Estado por local y día. Filtros `from`, `to` (YYYY-MM-DD), `storeId` y `status`. Por defecto los últimos 30 días hasta hoy; máximo 366 días; `to` nunca pasa de hoy. Incluye `summary` por estado. |
+
+**Cómo se calcula el estado**, en este orden:
+
+| Estado | Cuándo |
+| --- | --- |
+| `IMPORTADO` | Hay una importación vigente (`ACTIVE`) para ese local y día, aunque el día estuviera cerrado. |
+| `CERRADO` | El local no abre ese día de la semana o tiene un cierre por excepción. Nunca es alerta. |
+| `PENDIENTE` | Es hoy, el local abre y aún no hay Excel: informativo. |
+| `ATRASADO` | Día abierto ya pasado sin importación vigente: alerta. |
+
+No se informan los días futuros, los anteriores a `trackingStartDate`, los
+locales inactivos ni los locales **sin calendario** (salvo sus días ya
+importados): así un local recién creado no genera avisos hasta que el
+administrador lo configure. Una importación `PENDING` (sin confirmar) no
+resuelve el día; se informa como `pendingImportId`.
+
+**Auditoría:** `STORE_OPERATING_CALENDAR_UPDATED` (días y fecha de inicio
+nuevos y anteriores), `STORE_CLOSURE_CREATED` y `STORE_CLOSURE_DELETED` (fecha
+y motivo).
+
 ## Registro diario de propinas (flujo anterior — histórico, modo lectura)
 
 > **Reemplazado por la [Operación diaria](#operación-diaria-sprint-4r-t01)
