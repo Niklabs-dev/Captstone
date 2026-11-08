@@ -274,6 +274,41 @@ el nombre guardado aunque el medio se desactive. Pruebas: `npm run test:payment-
 
 Diseño móvil del Sprint 4: [dirección y verificación](docs/SPRINT-4-DISENO-MOVIL.md). Prueba de navegador: npm run test:mobile-design -- --headed.
 
+## Pruebas contra la API real y permisos del almacenamiento (SPRINT-4R-T19)
+
+Las suites `real-*` alteran y retiran archivos del almacenamiento para probar
+«archivo alterado» y «archivo ausente». `docker-compose.test.yml` monta
+`frontend/output/real-api/storage` en el backend, que corre con **el mismo
+usuario y grupo** de quien ejecuta las pruebas. Así los archivos quedan a su
+nombre con permisos privados (carpetas `0700`, archivos `0600`) y Playwright
+puede modificarlos sin `EACCES`, sin `chmod 0777` y sin correr como root.
+
+Linux y macOS, desde la carpeta de la aplicación:
+
+```bash
+export CI_UID="$(id -u)" CI_GID="$(id -g)"
+node frontend/scripts/prepare-real-storage.mjs   # crea la carpeta 0700 a tu nombre y valida CI_UID/CI_GID
+COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml:docker-compose.test.yml docker compose up --build -d
+cd frontend && node scripts/prepare-real-api.mjs
+TEST_REAL_DISPOSABLE=true npx playwright test --config playwright.my-documents.config.ts
+```
+
+En Windows con Docker Desktop los dueños de archivo no se aplican a los *bind
+mounts*: basta con definir `CI_UID` y `CI_GID` con cualquier valor (por
+ejemplo `1000`) y ejecutar el mismo script de preparación.
+
+- `docker-compose.test.yml` exige `CI_UID` y `CI_GID`: sin ellas Compose se
+  detiene con un mensaje claro en vez de fallar después con `EACCES`.
+- `prepare-real-storage.mjs` falla con instrucciones si la carpeta pertenece a
+  otro usuario (por ejemplo, porque la creó Docker como root) o si
+  `CI_UID`/`CI_GID` no coinciden con el usuario actual.
+- `frontend/output/` está en `.gitignore`: el almacenamiento, los reportes y
+  las capturas de las pruebas nunca se commitean.
+- El workflow `sprint-4r-t19-playwright-permisos.yml` ejecuta `real-api` y
+  `real-my-documents` en Ubuntu y verifica que todos los archivos creados sean
+  del runner, sin permisos de grupo u otros y sin `EACCES` en los logs.
+  Evidencia en `docs/SPRINT-4R-T19.md`.
+
 ## Operación diaria (SPRINT-4R-T01)
 
 Una sola pantalla de cierre por local y fecha reemplaza al registro diario de
