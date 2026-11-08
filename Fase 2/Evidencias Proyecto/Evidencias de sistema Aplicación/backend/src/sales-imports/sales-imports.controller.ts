@@ -81,7 +81,11 @@ export class SalesImportsController {
 
   @Post('preview')
   @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: MAX_REPORT_FILE_BYTES } }),
+    // Un solo archivo y hasta 5 MB (SPRINT-4R-T18): Multer corta la subida al
+    // superar cualquiera de los dos límites (413 o 400).
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_REPORT_FILE_BYTES, files: 1 },
+    }),
   )
   @Audited({
     action: AUDIT_ACTION.SALES_IMPORT_PREVIEWED,
