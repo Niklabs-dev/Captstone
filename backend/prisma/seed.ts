@@ -182,6 +182,36 @@ export const BASE_PAYMENT_METHODS = [
   },
 ] as const;
 
+// Alias MrComanda de los medios base (SPRINT-4R-T08): solo las etiquetas
+// conocidas del reporte diario real, cuyo medio no es ambiguo. «N.de Créd.»
+// aparece en el reporte pero no tiene un medio equivalente en el catálogo, así
+// que no se siembra: el administrador lo configura cuando se defina. Tampoco
+// se siembran identificadores externos de locales (store_external_codes): un
+// texto como «208 - 72597» nunca se asigna a un local por suposición. El
+// normalizedLabel coincide con normalize_external_label(label) (CHECK de la
+// base; el seed test lo verifica) y el upsert por (system, normalizedLabel)
+// con `update: {}` no revierte cambios administrados.
+export const BASE_PAYMENT_METHOD_ALIASES = [
+  {
+    id: 'ba000000-0000-4000-8000-000000000001',
+    label: 'EFECTIVO',
+    normalizedLabel: 'EFECTIVO',
+    paymentMethodCode: 'CASH',
+  },
+  {
+    id: 'ba000000-0000-4000-8000-000000000002',
+    label: 'T. DEBITO',
+    normalizedLabel: 'T. DEBITO',
+    paymentMethodCode: 'DEBIT_CARD',
+  },
+  {
+    id: 'ba000000-0000-4000-8000-000000000003',
+    label: 'T. CREDITO',
+    normalizedLabel: 'T. CREDITO',
+    paymentMethodCode: 'CREDIT_CARD',
+  },
+] as const;
+
 // -------------------------------------------------------------
 // Datos sintéticos del módulo de propinas (SPRINT-3-T09): pacto
 // vigente, entradas diarias, horas trabajadas y reparto de ejemplo
@@ -398,6 +428,26 @@ export async function seedDatabase(
     paymentMethodIds[guardado.code] = guardado.id;
   }
 
+  // Alias MrComanda de los medios base (SPRINT-4R-T08).
+  for (const alias of BASE_PAYMENT_METHOD_ALIASES) {
+    await db.paymentMethodAlias.upsert({
+      where: {
+        system_normalizedLabel: {
+          system: 'MRCOMANDA',
+          normalizedLabel: alias.normalizedLabel,
+        },
+      },
+      update: {},
+      create: {
+        id: alias.id,
+        system: 'MRCOMANDA',
+        label: alias.label,
+        normalizedLabel: alias.normalizedLabel,
+        paymentMethodId: paymentMethodIds[alias.paymentMethodCode],
+      },
+    });
+  }
+
   // Los datos demo son opt-in para no introducir usuarios, pactos ni
   // propinas artificiales en despliegues productivos.
   if (options.includeDemoData === true) {
@@ -600,6 +650,10 @@ async function main(): Promise<void> {
         `${BASE_PAYMENT_METHODS.length} medios (${BASE_PAYMENT_METHODS.map(
           (m) => m.code,
         ).join(', ')}).`,
+    );
+    console.log(
+      `Alias MrComanda sincronizados (SPRINT-4R-T08): ` +
+        `${BASE_PAYMENT_METHOD_ALIASES.map((a) => a.label).join(', ')}.`,
     );
     if (options.includeDemoData === true) {
       console.log(

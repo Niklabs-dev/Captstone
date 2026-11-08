@@ -12,6 +12,7 @@ import { PayrollModule } from './payroll/payroll.module.js';
 import { PaymentMethodsModule } from './payment-methods/payment-methods.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { SalesDashboardModule } from './sales-dashboard/sales-dashboard.module.js';
+import { SalesImportsModule } from './sales-imports/sales-imports.module.js';
 import { StoresModule } from './stores/stores.module.js';
 import { TipsModule } from './tips/tips.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -32,6 +33,7 @@ import { UsersModule } from './users/users.module.js';
     CashClosingsModule,
     DailyOperationsModule,
     SalesDashboardModule,
+    SalesImportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

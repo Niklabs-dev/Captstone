@@ -45,6 +45,7 @@ Nota: `frontend/AGENTS.md` es generado y mantenido por Next.js; leerlo antes de 
   - `npm run build` en el proyecto afectado
   - `npm run test` en backend si se tocó lógica
   - `docker compose up` cuando el cambio afecte infraestructura
+- **Sin workflows de GitHub Actions:** no se crean ni se modifican workflows en `.github/workflows/`; el único que se mantiene es `deploy-test-branch.yml` (publica la rama `deploy-test` para Coolify). La calidad se verifica localmente con los comandos de arriba.
 - **Archivos generados fuera de git:** `dist/`, `node_modules/`, `src/generated/` (cliente Prisma) y `*.tsbuildinfo` no se commitean; deben estar en `.gitignore`.
 - **Variables de entorno:** toda variable nueva se documenta en el `.env.example` correspondiente; los `.env` reales nunca se commitean.
 - **Commits atómicos:** un commit por cambio lógico, estilo Conventional Commits en español, referenciando la tarea del tablero, ej.: `feat: agrega login con JWT (SPRINT-1-T04)`.
