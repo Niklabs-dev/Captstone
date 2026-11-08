@@ -458,6 +458,59 @@ MRCOMANDA_SAMPLE_XLSX=/ruta/ventas-06-11-2026.xlsx npx vitest run test/mrcomanda
 # esperado: fecha 2026-11-05, local 208 - 72597, 4 líneas que suman $873.260
 ```
 
+## Importación diaria de ventas (SPRINT-4R-T10)
+
+El ADMINISTRADOR importa los totales diarios por medio de pago de cada local
+desde el Excel de MrComanda. Es la única vía de ingreso de ventas: no hay otro
+formulario manual y el archivo no aporta propinas ni descuadres (vienen de la
+operación diaria). Todos los endpoints exigen JWT de **ADMINISTRADOR**
+(lectura incluida; SPRINT-4R-T15 revisa después los permisos del bloque de
+ventas).
+
+| Método y ruta | Qué hace |
+| --- | --- |
+| `POST /sales-imports/preview` | Multipart con el campo `file` (.xlsx, máximo 5 MB; se valida por su contenido, no por el nombre ni el tipo declarado). Lee el reporte, resuelve local y medios y, si todo resuelve, guarda el archivo en el volumen privado (`DOCUMENTS_STORAGE_PATH/sales-imports/`, nombre aleatorio) y crea la importación `PENDING` con su siguiente versión. |
+| `POST /sales-imports/:id/confirm` | Cuerpo `{ "expectedActiveImportId": "<uuid>" \| null }`. En una transacción la versión vigente del mismo local y fecha pasa a `SUPERSEDED` y esta a `ACTIVE`. |
+| `DELETE /sales-imports/:id` | Descarta una `PENDING` y su archivo. Las confirmadas o reemplazadas nunca se eliminan. |
+| `GET /sales-imports` | Lista con filtros `storeId`, `from`, `to` (YYYY-MM-DD), `status` y `limit` (1–200). |
+| `GET /sales-imports/:id` | Detalle con líneas por medio de pago y todas las versiones del mismo local y fecha. |
+| `GET /sales-imports/:id/file` | Descarga autorizada del Excel original; `X-File-Integrity: VALID` o `ALTERED` según el SHA-256. |
+
+**Resultados de la vista previa** (`outcome`):
+
+| outcome | HTTP | Significado |
+| --- | --- | --- |
+| `CREATED` | 201 | Archivo nuevo guardado como `PENDING`; `canConfirm: true`. `activeImport` indica la versión vigente que se reemplazaría. |
+| `EXISTING` | 200 | El mismo archivo (hash) ya estaba importado para ese local y fecha: se devuelve esa importación sin duplicarla ni volver a auditar. |
+| `UNRESOLVED` | 200 | El Excel es válido, pero el local o algún medio no tiene equivalencia (`issues`); no se guarda nada. Se configura la equivalencia y se vuelve a subir. |
+
+Los problemas del archivo responden con `code`, `row` y un mensaje accionable,
+sin guardar nada: 400 (sin archivo o vacío), 413 (más de 5 MB), 415 (`.xls` o
+algo que no es .xlsx) y 422 (dañado o estructura inválida: período de varios
+días, local combinado, total que no cuadra, etc.).
+
+**Correcciones y versiones.** Un archivo distinto para el mismo local y fecha
+crea la versión siguiente como `PENDING`; la vigente no cambia hasta
+confirmar. Confirmar exige `expectedActiveImportId` (el `activeImport.id` de
+la vista previa, o `null` si no había vigente): si otra confirmación cambió la
+vigente entretanto responde **409** con la vigente actual, así una corrección
+siempre es explícita. Confirmar de nuevo una ya vigente devuelve 200 sin
+cambios, y una versión reemplazada no puede volver a quedar vigente (409). En
+cuanto se confirma, la importación queda vigente para su día: una carga
+tardía no requiere ningún paso manual adicional.
+
+**Garantías.** Las cargas de un local se serializan (bloqueo del local) y las
+restricciones únicas de SPRINT-4R-T08 resuelven cualquier carrera: dos cargas
+simultáneas del mismo archivo dejan una sola importación y un solo archivo;
+dos confirmaciones simultáneas nunca dejan dos vigentes. Cabecera y líneas se
+crean en la misma transacción y, si falla, el archivo guardado se elimina.
+
+**Auditoría** (listas blancas, nunca el contenido del archivo):
+`SALES_IMPORT_PREVIEWED` (solo cargas nuevas), `SALES_IMPORT_CONFIRMED` (con
+la versión reemplazada), `SALES_IMPORT_DISCARDED` y
+`SALES_IMPORT_FILE_DOWNLOADED`, con actor, local, fecha de negocio, hash,
+versión y total.
+
 ## Registro diario de propinas (flujo anterior — histórico, modo lectura)
 
 > **Reemplazado por la [Operación diaria](#operación-diaria-sprint-4r-t01)
