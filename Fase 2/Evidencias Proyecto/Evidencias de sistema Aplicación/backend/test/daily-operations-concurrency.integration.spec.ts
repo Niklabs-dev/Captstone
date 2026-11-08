@@ -14,6 +14,7 @@ import type { AuthUser, JwtPayload } from '../src/auth/types/auth.types.js';
 import type { DailyOperationResponse } from '../src/daily-operations/types/daily-operations.types.js';
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
+import { minimalJpeg } from './helpers/jpeg.js';
 
 type App = Parameters<typeof request>[0];
 
@@ -33,9 +34,7 @@ const STORE_PREFIX = 'Subway Operación Concurrencia';
 const DOMAIN = '@daily-concurrency-test.invalid';
 
 // JPEG mínimo con firma real (mismo contenido = mismo hash en ambas cargas).
-const JPEG = Buffer.from([
-  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46,
-]);
+const JPEG = minimalJpeg();
 
 describe.skipIf(!databaseUrl)(
   'Concurrencia de la operación diaria (SPRINT-4R-T01 y SPRINT-4R-T03)',

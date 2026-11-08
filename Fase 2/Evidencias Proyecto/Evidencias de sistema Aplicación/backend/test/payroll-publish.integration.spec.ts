@@ -37,7 +37,7 @@ const DOMAIN = '@payroll-publish-test.moi-food.cl';
 const STORE_NAME = 'Subway Payroll Publish Test';
 
 function uniquePdf(): Buffer {
-  return Buffer.from(`%PDF-1.7\n% liquidación ${randomUUID()}\n`);
+  return Buffer.from(`%PDF-1.7\n% liquidación ${randomUUID()}\n%%EOF\n`);
 }
 
 describe.skipIf(!databaseUrl)(
