@@ -481,7 +481,7 @@ Migración `20261108010000_importaciones_ventas_mrcomanda` (con reversa en
 | --- | --- |
 | `store_external_codes` | Identificador explícito de un local en un sistema externo (`ExternalSystem`, hoy solo `MRCOMANDA`), con el nombre externo opcional. Un local tiene a lo más uno por sistema y un identificador nunca apunta a dos locales. |
 | `payment_method_aliases` | Alias externo de un medio del catálogo (`T. DEBITO` → `DEBIT_CARD`). Guarda la etiqueta configurada y su forma normalizada; una etiqueta normalizada resuelve un único medio por sistema. El código del medio no cambia. |
-| `sales_imports` | Cabecera por archivo importado: local, fecha de negocio, período y horario del reporte, identificador y nombre externos del local, versión, estado, total del reporte, nombre original, ruta privada, tipo, tamaño, SHA-256, quién lo subió (`uploaded_by_id`, `created_at`) y quién lo confirmó. |
+| `sales_imports` | Cabecera por archivo importado: local, fecha de negocio, período y horario del reporte, fecha de emisión (`issued_at`, informativa, desde SPRINT-4R-T10), identificador y nombre externos del local, versión, estado, total del reporte, nombre original, ruta privada, tipo, tamaño, SHA-256, quién lo subió (`uploaded_by_id`, `created_at`) y quién lo confirmó. |
 | `sales_import_lines` | Total por medio de pago dentro de una importación: número de línea, etiqueta original, etiqueta normalizada, medio resuelto, monto CLP entero con signo y porcentaje opcional. |
 
 Reglas que garantiza la base (CHECK, índices únicos y triggers):
@@ -531,6 +531,13 @@ ambiguo: `EFECTIVO` → `CASH`, `T. DEBITO` → `DEBIT_CARD` y `T. CREDITO` →
 `CREDIT_CARD`. «N.de Créd.» aparece en el reporte, pero el catálogo no tiene
 un medio equivalente; queda sin alias hasta que se defina (mientras tanto, un
 reporte con esa línea no se puede confirmar).
+
+SPRINT-4R-T10 agrega `issued_at` (migración
+`20261108020000_importaciones_fecha_emision`, con reversa): la fecha de
+emisión del reporte, solo informativa, nullable e inmutable como el resto de
+los datos del archivo (se suma a la comparación del trigger
+`sales_imports_enforce`). La API que usa este modelo está documentada en el
+README del backend.
 
 ## Cómo ver el modelo de forma visual
 
@@ -1232,6 +1239,7 @@ Table sales_imports {
   business_date date [not null, note: 'Fecha de inicio del período en hora de Chile (CHECK)']
   period_start timestamptz [not null]
   period_end timestamptz [not null, note: '> period_start y hasta 24 h (CHECK)']
+  issued_at timestamptz [note: 'Emisión del reporte (SPRINT-4R-T10); informativa e inmutable']
   external_store_code varchar(100) [not null, note: 'Debe estar configurado para store_id (trigger)']
   external_store_name varchar(150)
   version integer [not null, note: '>= 1']
