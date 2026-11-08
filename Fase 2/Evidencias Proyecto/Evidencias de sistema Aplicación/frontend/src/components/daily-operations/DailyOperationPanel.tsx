@@ -14,6 +14,10 @@ import {
   labelClass,
   filterPanelClass,
   panelTitleClass,
+  tableCellClass,
+  tableClass,
+  tableHeadClass,
+  tableHeadingClass,
   tablePanelClass,
   tableHeaderClass,
   tableDescriptionClass,
@@ -70,28 +74,30 @@ function SharesTable({
   caption: string;
 }): ReactElement {
   return (
-    <table className="mt-3 w-full min-w-0 table-fixed text-sm">
+    <table className={`${tableClass} mt-3`}>
       <caption className="sr-only">{caption}</caption>
-      <thead>
-        <tr className="text-left text-xs text-ink2">
-          <th scope="col" className="pb-2 font-normal">
+      <thead className={tableHeadClass}>
+        <tr>
+          <th scope="col" className={tableHeadingClass}>
             Trabajador
           </th>
-          <th scope="col" className="w-32 pb-2 text-right font-normal">
+          <th scope="col" className={`${tableHeadingClass} text-right`}>
             Monto del día
           </th>
         </tr>
       </thead>
       <tbody>
         {lines.map((line) => (
-          <tr key={line.id} className="border-t border-line">
+          <tr key={line.id} className="border-b border-line">
             <th
               scope="row"
-              className="break-words py-2 pr-3 text-left font-semibold"
+              className={`${tableCellClass} break-words font-medium`}
             >
               {line.name}
             </th>
-            <td className="py-2 text-right font-semibold tabular-nums">
+            <td
+              className={`${tableCellClass} whitespace-nowrap text-right font-medium tabular-nums`}
+            >
               {formatClp(line.amount)}
             </td>
           </tr>
@@ -743,12 +749,17 @@ export function DailyOperationPanel({
             </p>
             <section
               aria-labelledby="daily-preview-title"
-              aria-live="polite"
               className="min-w-0 rounded-lg border border-line2 bg-bg p-4"
             >
               <h3 id="daily-preview-title" className="text-sm font-semibold">
                 Vista previa del reparto del día
               </h3>
+              {/* Solo un resumen breve: anunciar la tabla repetiría todo en cada tecla. */}
+              <p aria-live="polite" className="sr-only">
+                {sharePreview
+                  ? `Fondo ${formatClp(sharePreview.tipFundAmount)} entre ${sharePreview.lines.length} participantes.`
+                  : ''}
+              </p>
               {fundPreview === null && (
                 <p className="mt-2 text-sm text-ink2">
                   Ingresa ambas propinas para calcular el monto por trabajador.

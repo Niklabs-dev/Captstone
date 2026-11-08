@@ -816,7 +816,7 @@ test('precarga la corrección y explica el 409 de un reparto confirmado', () => 
   });
   assert.match(
     dailyOperationCorrectionErrorMessage(409),
-    /reparto confirmado o pagado/,
+    /reparto confirmado o pagado.*ya no es elegible/,
   );
   assert.equal(
     dailyOperationCorrectionErrorMessage(503),
