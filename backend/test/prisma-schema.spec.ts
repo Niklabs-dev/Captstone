@@ -36,7 +36,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(output).toContain('is valid');
   });
 
-  it('las migraciones crean las 35 tablas del modelo', () => {
+  it('las migraciones crean las 37 tablas del modelo', () => {
     const sql = readMigrations();
     const tablasEsperadas = [
       'stores',
@@ -69,6 +69,8 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'payment_method_aliases',
       'sales_imports',
       'sales_import_lines',
+      'store_operating_schedules',
+      'store_closures',
       'products',
       'inventory_movements',
       'inventory_counts',
@@ -632,5 +634,36 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'ALTER TABLE "sales_imports" DROP COLUMN "issued_at"',
     );
     expect(down).not.toContain('NEW."issued_at"');
+  });
+
+  it('modela el calendario de operación y los cierres por local (SPRINT-4R-T12)', () => {
+    const sql = readMigration('calendario_operacion_locales');
+    expect(sql).toContain('CREATE TABLE "store_operating_schedules"');
+    expect(sql).toContain('CREATE TABLE "store_closures"');
+    // Un calendario por local con al menos un día abierto.
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "store_operating_schedules_store_id_key"',
+    );
+    expect(sql).toContain('"store_operating_schedules_opens_some_day" CHECK');
+    expect(sql).toContain('"tracking_start_date" DATE NOT NULL');
+    // Una excepción por local y fecha, con motivo obligatorio.
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "store_closures_store_id_closure_date_key"',
+    );
+    expect(sql).toContain('"store_closures_reason_not_blank" CHECK');
+    // Independiente de los horarios de trabajadores y de las ventas.
+    expect(sql).not.toContain('REFERENCES "work_hours_records"');
+    expect(sql).not.toContain('ALTER TABLE "work_hours_records"');
+    expect(sql).not.toContain('ALTER TABLE "sales_imports"');
+
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('calendario_operacion_locales'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toContain('DROP TABLE "store_closures"');
+    expect(down).toContain('DROP TABLE "store_operating_schedules"');
   });
 });
