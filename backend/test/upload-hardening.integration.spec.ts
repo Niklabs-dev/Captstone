@@ -18,7 +18,9 @@ import { MAX_REPORT_FILE_BYTES } from '../src/sales-imports/parser/xlsx-workbook
 import {
   buildReportSheet,
   buildReportXlsx,
+  type FixtureLine,
 } from './helpers/mrcomanda-report-fixture.js';
+import { paymentMethodIdOf } from './helpers/payment-methods.js';
 import {
   createSwitchablePrisma,
   type SwitchablePrisma,
@@ -93,6 +95,7 @@ interface Fixture {
   tx: Tx;
   storeId: string;
   externalCode: string;
+  reportLines: FixtureLine[];
   admin: AuthUser;
   accountant: AuthUser;
   supervisor: AuthUser;
@@ -176,6 +179,7 @@ describe.skipIf(!databaseUrl)(
           title: null,
           period: `${day}/03/2026 al ${day}/03/2026`,
           filters: ` - Todas las Empresas - Local: ${f.externalCode} - Todos los Sectores`,
+          lines: f.reportLines,
         }),
       ]);
     }
@@ -407,48 +411,29 @@ describe.skipIf(!databaseUrl)(
       await tx.storeExternalCode.create({
         data: { system: 'MRCOMANDA', externalCode, storeId: store.id },
       });
-      const aliases = [
+      // Etiquetas propias en el Excel y en sus alias: no se escriben los
+      // alias compartidos (EFECTIVO, T. DEBITO, ...), porque la transacción
+      // de rollback retendría su bloqueo y provocaría deadlocks con el seed
+      // y otros tests que corren en paralelo. Los medios base los siembra la
+      // migración: solo se leen. Este test cubre la seguridad de las cargas;
+      // la lectura de las etiquetas reales la cubren SPRINT-4R-T09 y T10.
+      const suffix = randomUUID().slice(0, 8).toUpperCase();
+      const reportAliases = [
+        { label: `T18 DEBITO ${suffix}`, code: 'DEBIT_CARD', amount: 400_000 },
+        { label: `T18 EFECTIVO ${suffix}`, code: 'CASH', amount: 150_000 },
         {
-          label: 'T. DEBITO',
-          code: 'DEBIT_CARD',
-          behavior: 'RECONCILABLE_CARD',
-        },
-        { label: 'EFECTIVO', code: 'CASH', behavior: 'CASH' },
-        {
-          label: 'T. CREDITO',
+          label: `T18 CREDITO ${suffix}`,
           code: 'CREDIT_CARD',
-          behavior: 'RECONCILABLE_CARD',
-        },
-        {
-          label: 'N.DE CRED.',
-          code: 'T18_CREDIT_NOTE',
-          behavior: 'EXTERNAL_OTHER',
+          amount: 100_000,
         },
       ] as const;
-      for (const [index, alias] of aliases.entries()) {
-        const method = await tx.paymentMethod.upsert({
-          where: { code: alias.code },
-          update: {},
-          create: {
-            code: alias.code,
-            name: alias.code,
-            sortOrder: 970 + index,
-            behavior: alias.behavior,
-          },
-        });
-        await tx.paymentMethodAlias.upsert({
-          where: {
-            system_normalizedLabel: {
-              system: 'MRCOMANDA',
-              normalizedLabel: alias.label,
-            },
-          },
-          update: { paymentMethodId: method.id },
-          create: {
+      for (const alias of reportAliases) {
+        await tx.paymentMethodAlias.create({
+          data: {
             system: 'MRCOMANDA',
             label: alias.label,
             normalizedLabel: alias.label,
-            paymentMethodId: method.id,
+            paymentMethodId: await paymentMethodIdOf(tx, alias.code),
           },
         });
       }
@@ -456,6 +441,10 @@ describe.skipIf(!databaseUrl)(
         tx,
         storeId: store.id,
         externalCode,
+        reportLines: reportAliases.map(({ label, amount }) => ({
+          label,
+          amount,
+        })),
         admin: await createUser(tx, ROLE.ADMINISTRADOR, null),
         accountant: await createUser(tx, ROLE.CONTADOR, null),
         supervisor: await createUser(tx, ROLE.SUPERVISOR, store.id),
