@@ -81,6 +81,19 @@ describe('parseMrComandaReport (SPRINT-4R-T09)', () => {
     it('toma la fecha del «Período» y no de la fecha de emisión', () => {
       const report = parse({ emitted: 'Fecha 20/03/2026 - 11:14:55' });
       expect(report.businessDate).toBe('2026-03-14');
+      // La emisión se conserva solo como dato informativo (SPRINT-4R-T10).
+      expect(report.issuedAt?.toISOString()).toBe('2026-03-20T14:14:55.000Z');
+    });
+
+    it('la fecha de emisión es opcional', () => {
+      expect(parse({ emitted: null }).issuedAt).toBeNull();
+    });
+
+    it('rechaza una fecha de emisión ilegible', () => {
+      expectError(
+        () => parse({ emitted: 'Fecha 32/13/2026 - 11:14:55' }),
+        'ISSUED_AT_INVALID',
+      );
     });
 
     it('acepta un período de una sola fecha y reportes sin título ni emisión', () => {

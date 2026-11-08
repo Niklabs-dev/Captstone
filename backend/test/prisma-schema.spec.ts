@@ -608,4 +608,29 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(down).toContain('DROP FUNCTION "normalize_external_label"(TEXT)');
     expect(down).toContain('DROP TYPE "ExternalSystem"');
   });
+
+  it('guarda la fecha de emisión inmutable de la importación (SPRINT-4R-T10)', () => {
+    const sql = readMigration('importaciones_fecha_emision');
+    expect(sql).toContain(
+      'ALTER TABLE "sales_imports" ADD COLUMN "issued_at" TIMESTAMPTZ(6)',
+    );
+    // La columna entra en la comparación de inmutabilidad del trigger.
+    expect(sql).toContain(
+      'CREATE OR REPLACE FUNCTION "sales_imports_enforce"()',
+    );
+    expect(sql).toContain('NEW."issued_at")');
+    expect(sql).toContain('OLD."issued_at") THEN');
+
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('importaciones_fecha_emision'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toContain(
+      'ALTER TABLE "sales_imports" DROP COLUMN "issued_at"',
+    );
+    expect(down).not.toContain('NEW."issued_at"');
+  });
 });
