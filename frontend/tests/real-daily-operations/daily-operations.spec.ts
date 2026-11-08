@@ -680,6 +680,168 @@ test('BFF y páginas: sesión, roles, origen, multipart e identidad/local no edi
   ).toBe(403);
 });
 
+test('Participantes: seleccionar todos, vista previa del reparto, foco, corrección sin duplicar y fondo 0 (SPRINT-4R-T05)', async ({
+  page,
+  context,
+  baseURL,
+}, info) => {
+  const correctionDate = '2026-10-29';
+  const secondWorker = 'Dana Prueba de operación';
+  await login(context, baseURL!);
+  await page.goto('/propinas/diarias');
+  await registerDate(page, correctionDate);
+  await expect(
+    page.getByRole('heading', { name: 'No hay operación registrada' }),
+  ).toBeVisible();
+  const preview = page.getByRole('region', {
+    name: 'Vista previa del reparto del día',
+  });
+  await expect(preview).toContainText('Ingresa ambas propinas');
+  await fillOperation(page, { card: '0', cash: '10001', difference: '0' });
+  await expect(preview).toContainText(
+    'Fondo de $10.001. Selecciona participantes',
+  );
+
+  // Seleccionar todos con contador y control táctil de al menos 44 px.
+  const participants = page.getByRole('group', {
+    name: 'Trabajadores participantes del reparto',
+  });
+  await expect(participants).toContainText('0 de 2 seleccionados');
+  const toggleAll = participants.getByRole('button', {
+    name: 'Seleccionar todos',
+  });
+  expect((await toggleAll.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(
+    44,
+  );
+  await toggleAll.click();
+  await expect(participants).toContainText('2 de 2 seleccionados');
+  await expect(page.getByRole('checkbox', { name: workerName })).toBeChecked();
+  await expect(
+    page.getByRole('checkbox', { name: secondWorker }),
+  ).toBeChecked();
+
+  // Vista previa: $10.001 entre 2 da $5.001 y $5.000 con $1 de residuo.
+  const shares = preview.getByRole('table');
+  await expect(shares).toContainText(workerName);
+  await expect(shares).toContainText(secondWorker);
+  await expect(shares).toContainText('$5.001');
+  await expect(shares).toContainText('$5.000');
+  await expect(preview).toContainText('queda $1 de residuo');
+
+  // Sin participantes con fondo: error y foco en la primera casilla.
+  await participants.getByRole('button', { name: 'Quitar selección' }).click();
+  await expect(participants).toContainText('0 de 2 seleccionados');
+  const save = page.getByRole('button', {
+    name: 'Guardar operación',
+    exact: true,
+  });
+  await save.click();
+  await expect(
+    page.getByText(
+      'Selecciona al menos un trabajador participante: hay propinas por repartir.',
+    ),
+  ).toBeVisible();
+  const firstWorker = page.getByRole('checkbox', { name: workerName });
+  await expect(firstWorker).toBeFocused();
+  // Uso con teclado: Espacio marca la casilla enfocada.
+  await page.keyboard.press('Space');
+  await expect(firstWorker).toBeChecked();
+  await page.getByRole('checkbox', { name: secondWorker }).check();
+  await save.click();
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'Operación diaria registrada correctamente.' }),
+  ).toBeVisible();
+  const registered = page.locator('section', {
+    has: page.getByRole('heading', { name: /Operación registrada/ }),
+  });
+  await expect(registered).toContainText('$10.001');
+  await expect(registered.getByRole('table')).toContainText('$5.001');
+  await expect(registered.getByRole('table')).toContainText('$5.000');
+  const idText = await registered.getByText(/ID de la operación/).innerText();
+  const operationId = /[0-9a-f-]{36}/.exec(idText)?.[0] ?? '';
+  expect(operationId).not.toBe('');
+
+  // Corrección: precarga, fecha fija, mismo ID y sin duplicar.
+  await registered.getByRole('button', { name: 'Corregir operación' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Corregir operación diaria' }),
+  ).toBeVisible();
+  await expect(page.getByLabel(/Fecha de operación/)).toBeDisabled();
+  await expect(
+    page.getByRole('textbox', { name: /Propina en efectivo/ }),
+  ).toHaveValue('10001');
+  await expect(participants).toContainText('2 de 2 seleccionados');
+  await fillOperation(page, { cash: '9000' });
+  await page.getByRole('checkbox', { name: secondWorker }).uncheck();
+  await expect(preview.getByRole('table')).not.toContainText(secondWorker);
+  await expect(preview).toContainText('$9.000');
+  await expect(preview).toContainText('sin residuo');
+  await page.getByRole('button', { name: 'Guardar corrección' }).click();
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'Operación diaria corregida correctamente.' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Registrar operación diaria' }),
+  ).toBeVisible();
+  await expect(registered).toContainText('$9.000');
+  await expect(registered.getByRole('table')).toContainText(workerName);
+  await expect(registered.getByRole('table')).not.toContainText(secondWorker);
+  await expect(registered).toContainText(operationId);
+  const listed = await context.request.get(
+    '/api/daily-operations?storeId=' +
+      storeId +
+      '&businessDate=' +
+      correctionDate,
+  );
+  expect(listed.status()).toBe(200);
+  const listedBody: unknown = await listed.json();
+  expect(Array.isArray(listedBody) && listedBody.length).toBe(1);
+
+  // Un trabajador ajeno al local no se puede inyectar por el BFF.
+  const injected = multipartBody({
+    cashTipAmount: '9000',
+    participantIds: [accounts[4].id],
+  });
+  const injectedResponse = await context.request.patch(
+    '/api/daily-operations/' + operationId,
+    {
+      headers: { Origin: baseURL!, 'Content-Type': injected.contentType },
+      data: injected.body,
+    },
+  );
+  expect(injectedResponse.status()).toBeGreaterThanOrEqual(400);
+  expect(injectedResponse.status()).toBeLessThan(500);
+  await page.getByRole('button', { name: 'Actualizar consulta' }).click();
+  await expect(registered.getByRole('table')).toContainText(workerName);
+
+  // Fondo 0: la selección marcada no se envía y el detalle queda sin reparto.
+  await registered.getByRole('button', { name: 'Corregir operación' }).click();
+  await fillOperation(page, { cash: '0' });
+  await expect(firstWorker).toBeChecked();
+  await expect(
+    page.getByText('Sin propinas no hay reparto: la selección no se guardará.'),
+  ).toBeVisible();
+  await expect(preview).toContainText('No hay propinas por repartir');
+  await page.getByRole('button', { name: 'Guardar corrección' }).click();
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'Operación diaria corregida correctamente.' }),
+  ).toBeVisible();
+  await expect(registered).toContainText('Sin reparto');
+  await noOverflow(page);
+  const folder = 'output/playwright/daily-operations/' + info.project.name;
+  await mkdir(folder, { recursive: true });
+  await page.screenshot({
+    path: folder + '/participantes-correccion.png',
+    scale: 'css',
+  });
+});
+
 test('Carga, error, reintento y conservación de campos sobre la API real', async ({
   page,
   context,
