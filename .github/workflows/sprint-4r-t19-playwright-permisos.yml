@@ -1,0 +1,158 @@
+name: Sprint 4R T19 - Playwright sin EACCES ni permisos abiertos
+
+# Ejecuta las suites de Playwright contra la API real que alteran y retiran
+# archivos del almacenamiento (archivo alterado y ausente) y deja evidencia de
+# que corren sin EACCES y sin abrir permisos: el backend corre con el mismo
+# UID/GID del runner (docker-compose.test.yml), la carpeta se prepara con
+# frontend/scripts/prepare-real-storage.mjs (0700, sin chmod 0777) y al final
+# se verifica que todos los archivos creados sean del runner y privados.
+
+on:
+  push:
+    branches:
+      - feat/sprint-4r-t19-playwright-permisos
+    paths:
+      - ".github/workflows/sprint-4r-t19-playwright-permisos.yml"
+      - "Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/sprint-4r-t19-playwright-permisos.yml"
+      - "Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/docker-compose*.yml"
+      - "Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/backend/src/storage/**"
+      - "Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/scripts/**"
+      - "Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/tests/real-*/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sprint-4r-t19-playwright-permisos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-api-permissions:
+    name: Playwright contra API real con permisos privados
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación
+    env:
+      COMPOSE_PROJECT_NAME: sprint4r-t19-ci
+      # El override local publica 3000/3001/5433 en el runner para curl, Playwright y Prisma
+      COMPOSE_FILE: docker-compose.yml:docker-compose.override.yml:docker-compose.test.yml
+      DB_PASSWORD: ci-disposable-password
+      DATABASE_URL: postgresql://postgres:ci-disposable-password@127.0.0.1:5433/subway_gestion
+      ADMIN_PASSWORD: ci-admin-test-only-2026
+      TEST_REAL_ADMIN_PASSWORD: ci-admin-test-only-2026
+      TEST_REAL_DISPOSABLE: "true"
+      TEST_REAL_FRONTEND_URL: http://127.0.0.1:3000
+      TEST_REAL_BACKEND_URL: http://127.0.0.1:3001
+      TEST_REAL_STORAGE_PATH: ${{ github.workspace }}/Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/output/real-api/storage
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/backend/package-lock.json
+            Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/package-lock.json
+      - name: Instalar dependencias de pruebas
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix frontend
+          cd frontend
+          npx playwright install --with-deps chromium
+          echo "CI_UID=$(id -u)" >> "$GITHUB_ENV"
+          echo "CI_GID=$(id -g)" >> "$GITHUB_ENV"
+      - name: Registrar el ambiente de la prueba
+        run: |
+          mkdir -p frontend/output/ci
+          {
+            echo "fecha_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "commit=${GITHUB_SHA}"
+            echo "runner_os=$(uname -srm)"
+            echo "usuario=$(id)"
+            echo "node=$(node --version)"
+            echo "docker=$(docker --version)"
+            echo "compose=$(docker compose version --short)"
+            echo "playwright=$(cd frontend && npx playwright --version)"
+          } | tee frontend/output/ci/ambiente.txt
+      - name: Preparar el almacenamiento privado (sin chmod 0777)
+        run: node frontend/scripts/prepare-real-storage.mjs | tee -a frontend/output/ci/ambiente.txt
+      - name: Levantar sistema completo con migraciones y seed reales
+        run: |
+          docker compose up --build -d 2>&1 | tee frontend/output/ci/compose-build.log
+          for attempt in {1..90}; do
+            if curl --fail --silent http://127.0.0.1:3001/ >/dev/null && curl --fail --silent http://127.0.0.1:3000/login >/dev/null; then
+              docker compose ps
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs --no-color
+          exit 1
+      - name: Comprobar que el backend corre con el usuario del runner
+        run: |
+          backend_uid="$(docker compose exec -T backend id -u)"
+          backend_gid="$(docker compose exec -T backend id -g)"
+          echo "backend=${backend_uid}:${backend_gid} runner=${CI_UID}:${CI_GID}" | tee -a frontend/output/ci/ambiente.txt
+          test "${backend_uid}" = "${CI_UID}"
+          test "${backend_gid}" = "${CI_GID}"
+          test "${backend_uid}" != "0"
+      - name: Probar archivo alterado y ausente desde el navegador
+        run: |
+          cd frontend
+          node scripts/prepare-real-api.mjs
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE=output/ci/real-api.xml npx playwright test --config playwright.real-api.config.ts --reporter=line,junit 2>&1 | tee output/ci/real-api.log
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE=output/ci/my-documents.xml npx playwright test --config playwright.my-documents.config.ts --reporter=line,junit 2>&1 | tee output/ci/my-documents.log
+      - name: Verificar permisos de los archivos creados
+        if: always()
+        run: |
+          storage="frontend/output/real-api/storage"
+          report="frontend/output/ci/permisos.txt"
+          total="$(find "$storage" -type f | wc -l)"
+          ajenos="$(find "$storage" ! -user "$CI_UID" | wc -l)"
+          abiertos="$(find "$storage" -perm /0077 | wc -l)"
+          {
+            echo "archivos_creados=${total}"
+            echo "entradas_de_otro_dueno=${ajenos}"
+            echo "entradas_con_permisos_de_grupo_u_otros=${abiertos}"
+            echo "--- muestra (permisos dueño ruta)"
+            find "$storage" -printf '%m %u:%g %P\n' | head -20
+          } | tee "$report"
+          test "$total" -gt 0
+          test "$ajenos" -eq 0
+          test "$abiertos" -eq 0
+      - name: Guardar logs y estado de los contenedores
+        if: always()
+        run: |
+          mkdir -p frontend/output/ci
+          docker compose ps --all > frontend/output/ci/compose-status.txt
+          docker compose logs --no-color > frontend/output/ci/compose.log 2>&1
+      - name: Confirmar que no hubo EACCES
+        if: always()
+        run: |
+          eacces="$(cat frontend/output/ci/compose.log frontend/output/ci/*.log 2>/dev/null | grep -c 'EACCES' || true)"
+          echo "apariciones_de_EACCES=${eacces}" | tee -a frontend/output/ci/permisos.txt
+          test "${eacces}" -eq 0
+      - name: Adjuntar evidencia de las pruebas
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sprint-4r-t19-evidencia-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/output/ci
+            Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/output/playwright/real-api
+            Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicación/frontend/output/playwright/my-documents
+      - name: Eliminar únicamente los recursos efímeros de este runner
+        if: always()
+        run: docker compose down --volumes --remove-orphans
