@@ -37,6 +37,9 @@ export interface ParsedMrComandaReport {
   // Inicio y fin del horario del reporte como instantes (hora de Chile).
   periodStart: Date;
   periodEnd: Date;
+  // Fecha de emisión del reporte («Fecha dd/mm/aaaa - hh:mm:ss», hora de
+  // Chile); null si el reporte no la trae. Solo informativa (SPRINT-4R-T10).
+  issuedAt: Date | null;
   // Identificador del local tal como aparece en el encabezado y normalizado.
   externalStoreLabel: string;
   externalStoreCode: string;

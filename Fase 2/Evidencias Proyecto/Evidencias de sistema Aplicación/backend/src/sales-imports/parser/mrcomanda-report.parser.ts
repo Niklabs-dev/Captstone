@@ -43,6 +43,10 @@ const DATE_TEXT = /(\d{1,2})\/(\d{1,2})\/(\d{4})/g;
 const SCHEDULE_TEXT =
   /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s+a\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/i;
 const TITLE_TEXT = /informe de ventas diario/i;
+// La celda de emisión empieza con «Fecha» (normalizado: «FECHA …»).
+const ISSUED_PREFIX = /^FECHA\s/;
+const ISSUED_TEXT =
+  /^fecha\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s*-\s*(\d{1,2}):(\d{2})(?::(\d{2}))?$/i;
 const STORE_MARKER = /\blocal(es)?\s*:/gi;
 // Los filtros del encabezado se separan con « - » seguido de texto; el
 // identificador del local («208 - 72597») tiene guiones entre números.
@@ -196,6 +200,37 @@ function assertTitleMatchesPeriod(
       }
     }
   }
+}
+
+// Fecha de emisión del reporte («Fecha 06/11/2026 - 11:14:55», en hora de
+// Chile), solo informativa (SPRINT-4R-T10): nunca define la fecha de negocio.
+// Es opcional; si aparece debe ser legible y única.
+function parseIssuedAt(rows: readonly ReportRow[]): Date | null {
+  const candidates = findCells(rows, (text) => ISSUED_PREFIX.test(text));
+  if (candidates.length === 0) return null;
+  if (candidates.length > 1) {
+    throw new MrComandaReportError(
+      'ISSUED_AT_AMBIGUOUS',
+      'El reporte tiene más de una fecha de emisión («Fecha …»). Sube un solo informe por archivo.',
+    );
+  }
+  const candidate = candidates[0];
+  const row = excelRow(candidate.rowIndex);
+  const match = ISSUED_TEXT.exec(candidate.text);
+  const date = match
+    ? parseCalendarDate(
+        `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`,
+      )
+    : null;
+  const time = match ? parseClock(match[4], match[5], match[6]) : null;
+  if (!date || !time) {
+    throw new MrComandaReportError(
+      'ISSUED_AT_INVALID',
+      `La fecha de emisión de la fila ${row} no es válida (se esperaba «Fecha dd/mm/aaaa - hh:mm:ss» y se leyó «${candidate.text}»).`,
+      row,
+    );
+  }
+  return zonedWallClockToInstant(date, time);
 }
 
 function parseClock(
@@ -539,12 +574,14 @@ export function parseMrComandaReport(
   assertTitleMatchesPeriod(sheet.rows, period);
   const { periodStart, periodEnd } = parseSchedule(sheet.rows, period);
   const store = parseStore(sheet.rows);
+  const issuedAt = parseIssuedAt(sheet.rows);
   const { totalAmount, lines } = parsePayments(sheet.rows);
   return {
     sheetName: sheet.name,
     businessDate: period.isoDate,
     periodStart,
     periodEnd,
+    issuedAt,
     externalStoreLabel: store.label,
     externalStoreCode: store.code,
     totalAmount,

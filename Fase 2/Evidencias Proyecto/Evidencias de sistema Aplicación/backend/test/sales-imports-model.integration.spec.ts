@@ -630,6 +630,25 @@ describe.skipIf(!databaseUrl)(
         });
       });
 
+      it('guarda la fecha de emisión y no permite cambiarla (SPRINT-4R-T10)', async () => {
+        await withinRollback(async (tx) => {
+          const base = await crearBase(tx);
+          const issuedAt = new Date('2026-11-06T14:14:55.000Z');
+          const importId = await crearImportacion(tx, base, { issuedAt });
+          await confirmar(tx, base, importId);
+          const saved = await tx.salesImport.findUniqueOrThrow({
+            where: { id: importId },
+          });
+          expect(saved.issuedAt).toEqual(issuedAt);
+          await expect(
+            tx.salesImport.update({
+              where: { id: importId },
+              data: { issuedAt: new Date('2026-11-07T10:00:00.000Z') },
+            }),
+          ).rejects.toThrow(/son inmutables/);
+        });
+      });
+
       it('las líneas de una importación confirmada no cambian', async () => {
         await withinRollback(async (tx) => {
           const base = await crearBase(tx);
