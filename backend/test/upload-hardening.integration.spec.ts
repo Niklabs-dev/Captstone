@@ -45,8 +45,11 @@ type Tx = Prisma.TransactionClient;
 // - Excel de ventas MrComanda (POST /sales-imports/preview, ADMINISTRADOR).
 // Casos: carga válida, tamaño excedido (413), extensión o tipo falsos (415),
 // archivo cortado (422), dos archivos en una solicitud (400), sin sesión
-// (401) o con un rol ajeno (403), acceso directo a la carpeta privada (404)
-// y descarga de un archivo ausente en disco (404). En TODAS las respuestas,
+// (401) o con un rol ajeno (403), bomba zip en el Excel (413), acceso
+// directo a la carpeta privada (404), descarga autorizada íntegra (mismos
+// bytes e integridad VALID), descarga negada entre locales, entre dueños y
+// por rol (403/404 sin filtrar el archivo) y descarga de un archivo ausente
+// en disco (404). En TODAS las respuestas,
 // de éxito y de error, se verifica que no aparezcan rutas internas del
 // servidor, y tras cada rechazo que no quedó ningún archivo en disco.
 // Todo corre dentro de withinRollback; los archivos se escriben en una
@@ -130,6 +133,10 @@ interface Fixture {
   accountant: AuthUser;
   supervisor: AuthUser;
   worker: AuthUser;
+  // Trabajador del mismo local que no es dueño de los archivos y supervisor
+  // de otro local (cruce entre dueños y entre locales en las descargas).
+  otherWorker: AuthUser;
+  otherSupervisor: AuthUser;
 }
 
 interface UploadFile {
@@ -183,6 +190,18 @@ describe.skipIf(!databaseUrl)(
     function get(url: string, user: AuthUser | null): request.Test {
       const req = request(app.getHttpServer()).get(url);
       return user ? req.set('Authorization', `Bearer ${token(user)}`) : req;
+    }
+
+    // Descarga con el cuerpo como bytes crudos, sea cual sea el tipo (PDF,
+    // imagen, .xlsx o el JSON de un error).
+    function download(url: string, user: AuthUser | null): request.Test {
+      return get(url, user)
+        .buffer(true)
+        .parse((res, callback) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+          res.on('end', () => callback(null, Buffer.concat(chunks)));
+        });
     }
 
     function attachAll(
@@ -437,6 +456,14 @@ describe.skipIf(!databaseUrl)(
           address: 'Calle sintética 123',
         },
       });
+      // Segundo local para probar el cruce entre locales en las descargas.
+      const otherStore = await tx.store.create({
+        data: {
+          name: `Subway Cargas Otro ${randomUUID()}`,
+          city: 'Calera',
+          address: 'Calle sintética 456',
+        },
+      });
       const externalCode = `6${randomInt(10, 99)} - ${randomInt(10_000, 99_999)}`;
       await tx.storeExternalCode.create({
         data: { system: 'MRCOMANDA', externalCode, storeId: store.id },
@@ -479,6 +506,8 @@ describe.skipIf(!databaseUrl)(
         accountant: await createUser(tx, ROLE.CONTADOR, null),
         supervisor: await createUser(tx, ROLE.SUPERVISOR, store.id),
         worker: await createUser(tx, ROLE.TRABAJADOR, store.id),
+        otherWorker: await createUser(tx, ROLE.TRABAJADOR, store.id),
+        otherSupervisor: await createUser(tx, ROLE.SUPERVISOR, otherStore.id),
       };
     }
 
@@ -732,6 +761,130 @@ describe.skipIf(!databaseUrl)(
           // antes de buscar rutas internas.
           const echoed = JSON.stringify(response.body).replace(url, '');
           expectNoInternalPaths(echoed, url);
+        }
+      });
+    });
+
+    // Carga un archivo de cada tipo y devuelve su URL de descarga con el
+    // contenido exacto que se subió. La liquidación se publica para que su
+    // dueño pueda descargarla.
+    interface Uploaded {
+      url: string;
+      content: Buffer;
+      filename: string;
+      integrityHeader: string;
+    }
+
+    async function uploadAll(f: Fixture): Promise<{
+      document: Uploaded;
+      payslip: Uploaded;
+      voucher: Uploaded;
+      excel: Uploaded;
+    }> {
+      const [documentTarget, payslipTarget, voucherTarget, excelTarget] =
+        TARGETS;
+      const documentFile = await documentTarget.valid();
+      const document = await documentTarget.send(f, f.admin, [documentFile]);
+      expect(document.status).toBe(201);
+      const payslipFile = await payslipTarget.valid();
+      const payslip = await payslipTarget.send(f, f.accountant, [payslipFile]);
+      expect(payslip.status).toBe(201);
+      const uploadedPayslip = payslip.body as { id: string; revision: number };
+      await request(app.getHttpServer())
+        .post(`/payroll/${uploadedPayslip.id}/publish`)
+        .set('Authorization', `Bearer ${token(f.accountant)}`)
+        .send({ revision: uploadedPayslip.revision })
+        .expect(200);
+      const voucherFile = await voucherTarget.valid();
+      const voucher = await voucherTarget.send(f, f.supervisor, [voucherFile]);
+      expect(voucher.status).toBe(201);
+      const excelFile = await excelTarget.valid();
+      const excel = await excelTarget.send(f, f.admin, [excelFile]);
+      expect(excel.status).toBe(201);
+
+      const versionId = (document.body as { latestVersion: { id: string } })
+        .latestVersion.id;
+      return {
+        document: {
+          url: `/documents/versions/${versionId}/download`,
+          content: documentFile.content,
+          integrityHeader: 'x-document-integrity',
+        },
+        payslip: {
+          url: `/payroll/mine/${uploadedPayslip.id}/download`,
+          content: payslipFile.content,
+          integrityHeader: 'x-document-integrity',
+        },
+        voucher: {
+          url: `/daily-operations/${(voucher.body as { id: string }).id}/voucher`,
+          content: voucherFile.content,
+          integrityHeader: 'x-voucher-integrity',
+        },
+        excel: {
+          url: `/sales-imports/${(excel.body as { import: { id: string } }).import.id}/file`,
+          content: excelFile.content,
+          integrityHeader: 'x-file-integrity',
+        },
+      };
+    }
+
+    it('la descarga autorizada entrega el archivo íntegro y sin rutas', async () => {
+      await withinRollback(async (f) => {
+        const files = await uploadAll(f);
+        const allowed: [Uploaded, AuthUser, string][] = [
+          [files.document, f.admin, 'documento: administrador'],
+          [files.document, f.worker, 'documento: trabajador dueño'],
+          [files.payslip, f.worker, 'liquidación: trabajador dueño'],
+          [files.voucher, f.supervisor, 'voucher: supervisor del local'],
+          [files.voucher, f.accountant, 'voucher: contador'],
+          [files.voucher, f.admin, 'voucher: administrador'],
+          [files.excel, f.admin, 'Excel: administrador'],
+        ];
+        for (const [file, user, context] of allowed) {
+          const response = await download(file.url, user);
+          expect(response.status, context).toBe(200);
+          expect(
+            (response.body as Buffer).equals(file.content),
+            `${context}: mismos bytes que se subieron`,
+          ).toBe(true);
+          expect(response.headers[file.integrityHeader], context).toBe('VALID');
+          expect(response.headers['x-content-type-options'], context).toBe(
+            'nosniff',
+          );
+          const disposition = String(response.headers['content-disposition']);
+          expect(disposition, context).toMatch(/^attachment;/);
+          expectNoInternalPaths(disposition, context);
+        }
+      });
+    });
+
+    it('la descarga se niega entre locales, entre dueños y por rol sin filtrar el archivo', async () => {
+      await withinRollback(async (f) => {
+        const files = await uploadAll(f);
+        const denied: [Uploaded, AuthUser, number, string][] = [
+          [
+            files.voucher,
+            f.otherSupervisor,
+            403,
+            'voucher: supervisor de otro local',
+          ],
+          [files.document, f.otherWorker, 403, 'documento: otro trabajador'],
+          [
+            files.document,
+            f.otherSupervisor,
+            403,
+            'documento: supervisor de otro local',
+          ],
+          [files.payslip, f.otherWorker, 404, 'liquidación: otro trabajador'],
+          [files.excel, f.supervisor, 403, 'Excel: supervisor'],
+          [files.excel, f.accountant, 403, 'Excel: contador'],
+        ];
+        for (const [file, user, status, context] of denied) {
+          const response = await download(file.url, user);
+          expect(response.status, context).toBe(status);
+          const body = response.body as Buffer;
+          expect(body.includes(file.content), context).toBe(false);
+          expectNoInternalPaths(body.toString('utf8'), context);
         }
       });
     });
