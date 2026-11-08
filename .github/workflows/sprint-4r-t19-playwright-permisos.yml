@@ -125,7 +125,9 @@ jobs:
             echo "entradas_de_otro_dueno=${ajenos}"
             echo "entradas_con_permisos_de_grupo_u_otros=${abiertos}"
             echo "--- muestra (permisos dueño ruta)"
-            find "$storage" -printf '%m %u:%g %P\n' | head -20
+            # sed lee toda la entrada: head cortaría la tubería y find
+            # terminaría con SIGPIPE, que con pipefail haría fallar el paso.
+            find "$storage" -printf '%m %u:%g %P\n' | sed -n '1,20p'
           } | tee "$report"
           test "$total" -gt 0
           test "$ajenos" -eq 0
