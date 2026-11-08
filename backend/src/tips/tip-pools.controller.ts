@@ -63,8 +63,10 @@ import type {
 export class TipPoolsController {
   constructor(private readonly tipPoolsService: TipPoolsService) {}
 
+  // SUPERVISOR solo lee los repartos de su local (SPRINT-4R-T06): el servicio
+  // aplica canAccessStore y las acciones siguen siendo del contador.
   @Get()
-  @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR)
+  @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR, ROLE.SUPERVISOR)
   @ApiOperation({
     summary: 'Consulta un reparto por local y período, sin recalcular',
   })
@@ -74,7 +76,10 @@ export class TipPoolsController {
     isArray: true,
   })
   @ApiBadRequestResponse({ description: 'Local o período inválidos.' })
-  @ApiForbiddenResponse({ description: 'Solo contador y administrador.' })
+  @ApiForbiddenResponse({
+    description:
+      'Solo contador, administrador y el supervisor del local consultado.',
+  })
   list(
     @Query() query: PreviewTipPoolDto,
     @CurrentUser() user: AuthUser,
@@ -155,7 +160,7 @@ export class TipPoolsController {
   }
 
   @Get(':id')
-  @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR)
+  @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR, ROLE.SUPERVISOR)
   @ApiOperation({
     summary: 'Obtiene la foto guardada de un reparto sin recalcularlo',
   })

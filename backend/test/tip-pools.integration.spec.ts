@@ -1134,11 +1134,11 @@ describe.skipIf(!databaseUrl)(
       }
     });
 
-    it('consulta por ID: contador y administrador sí, supervisor no', async () => {
+    it('consulta por ID: contador, administrador y supervisor del local sí; trabajador no', async () => {
       const pool = await prisma.tipPool.findFirstOrThrow({
         where: { storeId, periodStart: day(HTTP_PERIOD.start) },
       });
-      for (const name of ['accountant', 'admin']) {
+      for (const name of ['accountant', 'admin', 'supervisor']) {
         const body = (await getPool(pool.id, tokens[name]).expect(200))
           .body as TipPoolResponse;
         expect(body).toMatchObject({
@@ -1147,7 +1147,7 @@ describe.skipIf(!databaseUrl)(
           totalAmount: 10001,
         });
       }
-      await getPool(pool.id, tokens.supervisor).expect(403);
+      await getPool(pool.id, tokens.workerOne).expect(403);
       await getPool(randomUUID(), tokens.accountant).expect(404);
     });
 
