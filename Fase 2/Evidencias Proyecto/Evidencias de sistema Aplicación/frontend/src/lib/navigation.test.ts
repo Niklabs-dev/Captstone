@@ -130,6 +130,19 @@ test('Mis propinas solo se enlaza y permite a trabajador y supervisor (SPRINT-4-
   );
 });
 
+test('El supervisor consulta los repartos; el trabajador no (SPRINT-4R-T06)', () => {
+  assert.equal(getPageRedirect('SUPERVISOR', '/propinas/repartos'), null);
+  assert.ok(
+    getNavigationItems('SUPERVISOR').some(
+      (item) => item.href === '/propinas/repartos',
+    ),
+  );
+  assert.equal(
+    getPageRedirect('TRABAJADOR', '/propinas/repartos'),
+    '/portal?reason=forbidden',
+  );
+});
+
 test('Solo el administrador entra a las páginas administrativas', () => {
   assert.equal(getPageRedirect('ADMINISTRADOR', '/admin/usuarios'), null);
   for (const role of ['SUPERVISOR', 'CONTADOR'] as const) {

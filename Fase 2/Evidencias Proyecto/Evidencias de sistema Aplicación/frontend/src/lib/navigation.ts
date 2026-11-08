@@ -70,6 +70,7 @@ export function getNavigationItems(
     return [
       home,
       { href: '/propinas/diarias', label: 'Operación diaria' },
+      { href: '/propinas/repartos', label: 'Reparto de propinas' },
       MY_TIPS,
       { href: '/portal/documentos', label: 'Mis documentos' },
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
@@ -130,7 +131,8 @@ export function getPageRedirect(role: Role, pathname: string): string | null {
     (pathname === '/propinas/repartos' ||
       pathname.startsWith('/propinas/repartos/')) &&
     role !== 'CONTADOR' &&
-    role !== 'ADMINISTRADOR'
+    role !== 'ADMINISTRADOR' &&
+    role !== 'SUPERVISOR'
   )
     return '/dashboard?reason=forbidden';
   const inAdmin = pathname === '/admin' || pathname.startsWith('/admin/');

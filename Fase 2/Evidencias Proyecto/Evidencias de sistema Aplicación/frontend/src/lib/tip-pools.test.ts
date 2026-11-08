@@ -10,6 +10,7 @@ import {
   poolError,
   poolReconciliation,
   poolRuleLabel,
+  poolStaleSources,
 } from './tip-pools';
 const id = 'a9000000-0000-4000-8000-000000000001';
 const person = { id, name: 'Prueba', passwordHash: 'private' };
@@ -218,7 +219,8 @@ test('Acepta el reparto equitativo sin horas ni pacto y concilia sus operaciones
     beneficiaries: 2,
     individualTotal: 10_001,
     sourcesTotal: 10_001,
-    difference: 0,
+    linesDifference: 0,
+    sourcesDifference: 0,
   });
   assert.match(poolRuleLabel(parsed.rule), /equitativo/);
 });
@@ -233,10 +235,6 @@ test('No inventa horas ni mezcla reglas y expone la conciliación fallida', () =
     { ...equalPool, dailySources: undefined },
     {
       ...equalPool,
-      dailySources: [{ ...equalPool.dailySources[0], cardTipAmount: 2 }],
-    },
-    {
-      ...equalPool,
       dailySources: [...equalPool.dailySources, ...equalPool.dailySources],
     },
   ])
@@ -248,5 +246,30 @@ test('No inventa horas ni mezcla reglas y expone la conciliación fallida', () =
   });
   assert.ok(failed);
   assert.equal(failed.reconciled, false);
-  assert.equal(poolReconciliation(failed).difference, 1);
+  assert.equal(poolReconciliation(failed).linesDifference, 1);
+  const excess = parsePool({
+    ...equalPool,
+    lines: [lines[0], { ...lines[1], amount: 5_001 }],
+    reconciled: false,
+  });
+  assert.ok(excess);
+  assert.equal(poolReconciliation(excess).linesDifference, -1);
+});
+test('Una operación corregida deja el borrador visible y desactualizado', () => {
+  const parsed = parsePool({
+    ...equalPool,
+    dailySources: [{ ...equalPool.dailySources[0], cashTipAmount: 10_200 }],
+  });
+  assert.ok(parsed);
+  assert.equal(parsed.reconciled, true);
+  assert.deepEqual(poolStaleSources(parsed), [
+    {
+      businessDate: '2026-01-01',
+      calculatedAmount: 10_001,
+      currentAmount: 10_201,
+    },
+  ]);
+  const current = parsePool(equalPool);
+  assert.ok(current);
+  assert.deepEqual(poolStaleSources(current), []);
 });
