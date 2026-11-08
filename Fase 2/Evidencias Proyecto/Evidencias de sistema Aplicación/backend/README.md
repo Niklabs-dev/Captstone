@@ -49,7 +49,9 @@ $ npm run prisma:migrate:deploy   # producción/CI (solo aplica)
 
 # datos base: roles (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR),
 # tipos de documento laboral, catálogo de medios de pago (CASH, DEBIT_CARD,
-# CREDIT_CARD y TRANSFER), tres locales iniciales y administrador inicial.
+# CREDIT_CARD y TRANSFER) con sus alias MrComanda conocidos (EFECTIVO,
+# T. DEBITO y T. CREDITO; SPRINT-4R-T08), tres locales iniciales y
+# administrador inicial.
 # Idempotente; no revierte los cambios administrativos de los locales ni del
 # catálogo ni carga datos demo en producción (SEED_DEMO_DATA=false por defecto).
 $ npm run prisma:seed
@@ -407,6 +409,107 @@ PDF explica la regla en vez de mostrar horas.
 ejemplo el `DRAFT` del seed demo) se consultan, confirman y pagan tal cual,
 con sus horas, fuentes `tip_entries` y constancias. Recalcular uno de ellos lo
 reemplaza por la foto equitativa del período (si hay operaciones diarias).
+
+## Lectura del Excel diario de MrComanda (SPRINT-4R-T09)
+
+Las ventas del día salen del «Informe de Ventas Diario» que exporta MrComanda
+(.xlsx). `src/sales-imports/parser/` lo lee y valida sin persistir nada, y
+`SalesImportResolverService` lo resuelve contra las equivalencias de
+SPRINT-4R-T08. La API de previsualización y confirmación llega con
+SPRINT-4R-T10.
+
+**Qué lee y de dónde** (siempre por etiqueta, nunca por filas fijas):
+
+| Dato | Origen en el reporte |
+| --- | --- |
+| Fecha de negocio | Fila «Período:» (un solo día). **No** el nombre del archivo ni la «Fecha» de emisión: el informe del 05/11 se emite el 06/11 y suele llamarse `ventas-06-11-2026.xlsx`. Si el título «Informe de Ventas Diario …» trae otra fecha, se rechaza. |
+| Período (inicio y fin) | Fila «Horario:» en hora de Chile (`America/Santiago`); si termina antes de empezar, cruza la medianoche. |
+| Local | `Local: …` en la fila de filtros del encabezado (ej. «208 - 72597»). Un informe de todos los locales o de varios se rechaza. |
+| Total y medios de pago | Sección «Medios de pago»: total en su misma fila, una línea por medio con importe y «Porcentaje» opcional, hasta la primera fila vacía o la siguiente sección. «Venta por depto.» se ignora. |
+
+Cada línea conserva la etiqueta original (sin el relleno de espacios) y su
+forma normalizada (`normalizeExternalLabel`, misma regla que la función SQL
+`normalize_external_label`). Admite cualquier cantidad de medios.
+
+**Rechazos** (`MrComandaReportError` con `code`, fila y mensaje en español que
+dice qué revisar): archivo vacío, mayor a 5 MB, `.xls` antiguo, contenido que
+no es .xlsx o dañado; sin informe o con varios informes; período ausente,
+ilegible, de varios días o que contradice el título; horario ausente o
+inválido; local ausente, combinado o ambiguo; total o montos que no son pesos
+enteros, porcentajes fuera de 0–100, medios repetidos y suma de líneas
+distinta del total del reporte. Las propinas y la diferencia de efectivo no
+se leen: el reporte no las trae y vienen de la operación diaria.
+
+**Resolución.** Un local sin identificador configurado o una etiqueta sin
+alias quedan como `issues` y `canConfirm = false`: nunca se crean
+equivalencias automáticamente. Con el reporte real de ejemplo, «N.de Créd.»
+queda sin alias hasta que el PO defina su medio equivalente.
+
+**Dependencia XLSX.** `read-excel-file` con versión exacta (9.3.12): solo lee
+.xlsx, depende de pocos paquetes y no tenía vulnerabilidades en `npm audit`
+al elegirla. Se descartaron `xlsx`/SheetJS (la versión de npm arrastra
+prototype pollution y ReDoS sin corrección en el registro) y `exceljs` (~170
+paquetes y una vulnerabilidad moderada en `uuid`). Los tests generan
+planillas ficticias en memoria con `write-excel-file` (solo desarrollo, versión
+exacta); el archivo real no se versiona y sirve de aceptación manual:
+
+```bash
+MRCOMANDA_SAMPLE_XLSX=/ruta/ventas-06-11-2026.xlsx npx vitest run test/mrcomanda-report-reader.spec.ts
+# esperado: fecha 2026-11-05, local 208 - 72597, 4 líneas que suman $873.260
+```
+
+## Importación diaria de ventas (SPRINT-4R-T10)
+
+El ADMINISTRADOR importa los totales diarios por medio de pago de cada local
+desde el Excel de MrComanda. Es la única vía de ingreso de ventas: no hay otro
+formulario manual y el archivo no aporta propinas ni descuadres (vienen de la
+operación diaria). Todos los endpoints exigen JWT de **ADMINISTRADOR**
+(lectura incluida; SPRINT-4R-T15 revisa después los permisos del bloque de
+ventas).
+
+| Método y ruta | Qué hace |
+| --- | --- |
+| `POST /sales-imports/preview` | Multipart con el campo `file` (.xlsx, máximo 5 MB; se valida por su contenido, no por el nombre ni el tipo declarado). Lee el reporte, resuelve local y medios y, si todo resuelve, guarda el archivo en el volumen privado (`DOCUMENTS_STORAGE_PATH/sales-imports/`, nombre aleatorio) y crea la importación `PENDING` con su siguiente versión. |
+| `POST /sales-imports/:id/confirm` | Cuerpo `{ "expectedActiveImportId": "<uuid>" \| null }`. En una transacción la versión vigente del mismo local y fecha pasa a `SUPERSEDED` y esta a `ACTIVE`. |
+| `DELETE /sales-imports/:id` | Descarta una `PENDING` y su archivo. Las confirmadas o reemplazadas nunca se eliminan. |
+| `GET /sales-imports` | Lista con filtros `storeId`, `from`, `to` (YYYY-MM-DD), `status` y `limit` (1–200). |
+| `GET /sales-imports/:id` | Detalle con líneas por medio de pago y todas las versiones del mismo local y fecha. |
+| `GET /sales-imports/:id/file` | Descarga autorizada del Excel original; `X-File-Integrity: VALID` o `ALTERED` según el SHA-256. |
+
+**Resultados de la vista previa** (`outcome`):
+
+| outcome | HTTP | Significado |
+| --- | --- | --- |
+| `CREATED` | 201 | Archivo nuevo guardado como `PENDING`; `canConfirm: true`. `activeImport` indica la versión vigente que se reemplazaría. |
+| `EXISTING` | 200 | El mismo archivo (hash) ya estaba importado para ese local y fecha: se devuelve esa importación sin duplicarla ni volver a auditar. |
+| `UNRESOLVED` | 200 | El Excel es válido, pero el local o algún medio no tiene equivalencia (`issues`); no se guarda nada. Se configura la equivalencia y se vuelve a subir. |
+
+Los problemas del archivo responden con `code`, `row` y un mensaje accionable,
+sin guardar nada: 400 (sin archivo o vacío), 413 (más de 5 MB), 415 (`.xls` o
+algo que no es .xlsx) y 422 (dañado o estructura inválida: período de varios
+días, local combinado, total que no cuadra, etc.).
+
+**Correcciones y versiones.** Un archivo distinto para el mismo local y fecha
+crea la versión siguiente como `PENDING`; la vigente no cambia hasta
+confirmar. Confirmar exige `expectedActiveImportId` (el `activeImport.id` de
+la vista previa, o `null` si no había vigente): si otra confirmación cambió la
+vigente entretanto responde **409** con la vigente actual, así una corrección
+siempre es explícita. Confirmar de nuevo una ya vigente devuelve 200 sin
+cambios, y una versión reemplazada no puede volver a quedar vigente (409). En
+cuanto se confirma, la importación queda vigente para su día: una carga
+tardía no requiere ningún paso manual adicional.
+
+**Garantías.** Las cargas de un local se serializan (bloqueo del local) y las
+restricciones únicas de SPRINT-4R-T08 resuelven cualquier carrera: dos cargas
+simultáneas del mismo archivo dejan una sola importación y un solo archivo;
+dos confirmaciones simultáneas nunca dejan dos vigentes. Cabecera y líneas se
+crean en la misma transacción y, si falla, el archivo guardado se elimina.
+
+**Auditoría** (listas blancas, nunca el contenido del archivo):
+`SALES_IMPORT_PREVIEWED` (solo cargas nuevas), `SALES_IMPORT_CONFIRMED` (con
+la versión reemplazada), `SALES_IMPORT_DISCARDED` y
+`SALES_IMPORT_FILE_DOWNLOADED`, con actor, local, fecha de negocio, hash,
+versión y total.
 
 ## Registro diario de propinas (flujo anterior — histórico, modo lectura)
 
