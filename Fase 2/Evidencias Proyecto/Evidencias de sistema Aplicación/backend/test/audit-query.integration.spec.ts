@@ -260,7 +260,13 @@ describe.skipIf(!databaseUrl)('Consulta de auditoría (SPRINT-1-T14)', () => {
     // Cada rechazo queda como ACCESS_DENIED (SPRINT-4R-T15). Se purgan para
     // que las consultas siguientes vean solo los registros sembrados.
     const denied = { action: AUDIT_ACTION.ACCESS_DENIED, userId: worker.id };
-    expect(await prisma.auditLog.count({ where: denied })).toBe(3);
+    // El 403 no espera el insert de auditoría.
+    await vi.waitFor(
+      async () => {
+        expect(await prisma.auditLog.count({ where: denied })).toBe(3);
+      },
+      { timeout: 5_000, interval: 50 },
+    );
     await purgeTestAuditLogs(prisma, denied);
   });
 

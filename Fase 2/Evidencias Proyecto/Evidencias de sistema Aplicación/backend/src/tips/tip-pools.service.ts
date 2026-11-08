@@ -55,6 +55,7 @@ import {
   type TipPoolStatusCode,
   type TipPoolValidationErrorBody,
 } from './types/tip-pools.types.js';
+import { STORE_FORBIDDEN_MESSAGE } from '../auth/constants/forbidden-messages.constants.js';
 
 const PERSON_SELECT = {
   select: { id: true, firstName: true, lastName: true },
@@ -382,7 +383,7 @@ export class TipPoolsService {
     currentUser: AuthUser,
   ): Promise<TipPoolPreviewResult> {
     if (!canAccessStore(currentUser, dto.storeId)) {
-      throw new ForbiddenException('No tienes acceso a este local');
+      throw new ForbiddenException(STORE_FORBIDDEN_MESSAGE);
     }
     const period = this.parsePeriod(dto);
     await this.stores.assertActive(dto.storeId);

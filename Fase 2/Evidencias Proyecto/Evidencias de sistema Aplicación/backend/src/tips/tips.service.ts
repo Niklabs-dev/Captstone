@@ -23,6 +23,7 @@ import {
   type TipEntryCreateResult,
   type TipEntryResponse,
 } from './types/tips.types.js';
+import { STORE_FORBIDDEN_MESSAGE } from '../auth/constants/forbidden-messages.constants.js';
 
 const TIP_ENTRY_SELECT = {
   id: true,
@@ -281,7 +282,7 @@ export class TipsService {
 
   private assertStoreAccess(storeId: string, currentUser: AuthUser): void {
     if (!canAccessStore(currentUser, storeId)) {
-      throw new ForbiddenException('No tienes acceso a este local');
+      throw new ForbiddenException(STORE_FORBIDDEN_MESSAGE);
     }
   }
 

@@ -29,6 +29,7 @@ import type {
   EligibleWorkerResponse,
 } from './types/daily-operations.types.js';
 import { isIdenticalDailyOperationRetry } from './utils/daily-operation-retry.util.js';
+import { STORE_FORBIDDEN_MESSAGE } from '../auth/constants/forbidden-messages.constants.js';
 
 const PERSON_SELECT = {
   select: { id: true, firstName: true, lastName: true },
@@ -841,7 +842,7 @@ export class DailyOperationsService {
 
   private assertStoreAccess(storeId: string, currentUser: AuthUser): void {
     if (!canAccessStore(currentUser, storeId)) {
-      throw new ForbiddenException('No tienes acceso a este local');
+      throw new ForbiddenException(STORE_FORBIDDEN_MESSAGE);
     }
   }
 }
