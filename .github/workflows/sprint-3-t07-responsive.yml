@@ -66,8 +66,10 @@ jobs:
           node --test .test-build/{auth,users,audit,navigation,backend-proxy,display-date,documents,dt-alerts,payroll,my-payslips,my-documents,stores}.test.js
       - name: Levantar sistema completo con migraciones y seed reales
         run: |
-          mkdir -p frontend/output/ci frontend/output/real-api/storage
-          chmod 0777 frontend/output/real-api/storage
+          mkdir -p frontend/output/ci
+          # Almacenamiento privado (0700) a nombre del runner, que es el mismo
+          # usuario del backend (CI_UID/CI_GID); sin chmod 0777 (SPRINT-4R-T19).
+          node frontend/scripts/prepare-real-storage.mjs
           docker compose up --build -d 2>&1 | tee frontend/output/ci/compose-build.log
           for attempt in {1..90}; do
             if curl --fail --silent http://127.0.0.1:3001/ >/dev/null && curl --fail --silent http://127.0.0.1:3000/login >/dev/null; then
