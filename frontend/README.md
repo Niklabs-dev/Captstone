@@ -302,3 +302,9 @@ la descarga privada. La consulta histórica de propinas por medio, ventas y
 cierres por turno sigue disponible en modo lectura.
 
 Pruebas: `npm run test:daily-operations` (unitarias), `npm run test:daily-operations:integration` (BFF con backend simulado) y `TEST_REAL_DISPOSABLE=true npm run test:daily-operations:real` (recorrido real con base exclusiva, con las variables `TEST_REAL_*` de `.env.example`).
+
+## Detalle del reparto equitativo (SPRINT-4R-T06)
+
+`/propinas/repartos` muestra cada beneficiario con la columna destacada **Monto a pagar**, además de fondo total, beneficiarios, suma individual y regla aplicada. La conciliación compara suma individual, fondo y fuentes (operaciones diarias o registros históricos); si no coincide, avisa que los montos no deben usarse y bloquea la validación. Los repartos equitativos no muestran horas ni pacto; los proporcionales históricos los conservan. En «Mis propinas», una constancia equitativa indica que las horas no aplican.
+
+Pruebas: `npm run test:tip-pools`, `npm run test:my-tip-receipts` y `TEST_REAL_DISPOSABLE=true npx playwright test --config playwright.tip-pools.config.ts equal-pools`.
