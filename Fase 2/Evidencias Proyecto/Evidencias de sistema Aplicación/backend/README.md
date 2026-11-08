@@ -211,6 +211,78 @@ Una operación registrada no se puede modificar ni eliminar (criterio 2 de E1-H2
 
 Los triggers solo se omiten con `session_replication_role = replica`, que exige superusuario (mantenimiento de la base de datos). Los tests de integración que ejercitan la API por HTTP lo usan para purgar sus propios registros (`test/helpers/audit-cleanup.ts`), por lo que `TEST_DATABASE_URL` debe conectarse con un superusuario, como el `postgres` de docker compose.
 
+## Seguridad de cargas de archivos y dependencias (SPRINT-4R-T18)
+
+### Reglas comunes de las cargas
+
+El sistema recibe archivos en cuatro puntos. Todos validan el archivo **por
+su contenido** (nunca por el nombre ni por el tipo que declara el navegador),
+lo guardan en el volumen privado `DOCUMENTS_STORAGE_PATH` con un nombre
+físico aleatorio y calculan su SHA-256. Ninguno se sirve por una URL directa:
+solo se descargan por su endpoint autorizado, que verifica el hash.
+
+| Carga | Rol | Tipos | Tamaño máximo |
+| --- | --- | --- | --- |
+| `POST /documents` (documento laboral) | ADMINISTRADOR | PDF, PNG, JPEG | `DOCUMENTS_MAX_SIZE_MB` (25 por defecto) |
+| `POST /payroll` (liquidación) | CONTADOR | PDF | `DOCUMENTS_MAX_SIZE_MB` |
+| `POST/PATCH /daily-operations` (voucher) | SUPERVISOR (corrección: también ADMINISTRADOR) | JPEG, PNG, WebP | 5 MiB |
+| `POST /sales-imports/preview` (Excel) | ADMINISTRADOR | .xlsx | 5 MB |
+
+Respuestas ante un archivo inválido, sin guardar nada en disco:
+
+| Código | Cuándo |
+| --- | --- |
+| 400 | Sin archivo, archivo vacío o más de un archivo en la solicitud (Multer acepta uno solo por solicitud en las cuatro cargas). |
+| 413 | Supera el tamaño máximo: Multer corta la subida antes de cargarla completa en memoria. |
+| 415 | El contenido no es de un tipo permitido o no coincide con el tipo declarado (por ejemplo, un ejecutable o una imagen renombrados como `.pdf`). |
+| 422 | Es del tipo correcto pero está **cortado o dañado**. |
+
+El chequeo de archivos cortados (`src/storage/utils/file-structure.util.ts`)
+revisa, además de los primeros bytes, la marca de cierre de cada formato: PDF
+con `%%EOF` en los últimos 1.024 bytes, JPEG con su marcador de fin `FF D9`
+(se toleran datos extra después, como en las fotos «en movimiento» de
+algunos celulares), PNG con el bloque `IEND` y WebP del tamaño que declara su
+encabezado. El Excel se valida con el lector de SPRINT-4R-T09. Es un chequeo
+liviano: un archivo dañado por dentro con su cierre intacto pasa, y su
+integridad posterior la protege el SHA-256. Ninguna respuesta de éxito o de
+error expone la ruta física ni la carpeta del volumen.
+
+La regresión `test/upload-hardening.integration.spec.ts` recorre las cuatro
+cargas con los mismos casos (válido, 413, 415, 422, dos archivos, 401/403,
+acceso directo a la carpeta y descarga de un archivo ausente).
+
+### Dependencias
+
+`npm audit --omit=dev` (lo que llega a la imagen de producción) quedó **sin
+vulnerabilidades**. SPRINT-4R-T18 actualizó, eligiendo versiones con más de
+diez días publicadas:
+
+| Paquete | Antes | Después | Corrige |
+| --- | --- | --- | --- |
+| `@nestjs/core`, `common`, `platform-express`, `testing` | 12.0.4 | 12.3.0 | `multer` 2.4.0 → 2.5.0 (DoS en la carga de archivos) |
+| `prisma`, `@prisma/client`, `@prisma/adapter-pg` | 7.10.0 | 7.10.1 | `deepmerge-ts`, `@prisma/config` y `mysql2` |
+| `body-parser`, `express`, `qs`, `fast-uri`, `source-map-js` | — | dentro de sus rangos | DoS y suplantación de esquemas en URLs |
+
+Se descartó `@nestjs/platform-express` 12.4.0 (dos días publicada) porque la
+12.3.0 ya trae el `multer` corregido.
+
+**Residuales documentadas (solo desarrollo).** `npm audit` completo reporta
+20 vulnerabilidades (3 altas, 15 moderadas, 2 bajas) **únicamente en
+herramientas de desarrollo**, que no llegan al servidor: la etapa de
+compilación del `Dockerfile` ejecuta `npm prune --omit=dev` antes de armar la
+imagen final.
+
+| Origen | Severidad | Paquete afectado |
+| --- | --- | --- |
+| `@nestjs/mau` (telemetría opcional del CLI) | alta | `tmp`, `undici` |
+| `vitest` y `vite-tsconfig-paths` (pruebas) | alta / moderada | `vite`, `@vitest/mocker` |
+| `eslint`, `typescript-eslint`, `@nestjs/cli` | moderada | `minimatch` |
+| `inquirer` (CLI) | baja | `external-editor`, `tmp` |
+
+Corregirlas exige subir versiones de las herramientas de pruebas y lint de
+todo el equipo; queda como seguimiento de la auditoría de dependencias
+(SPRINT-4R-T23).
+
 ## Conservación de documentos laborales
 
 Los documentos laborales deben conservarse 5 años (art. 9 bis del Código del
