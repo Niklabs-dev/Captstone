@@ -123,7 +123,9 @@ export class SalesImportsController {
     type: SalesImportReportErrorDto,
   })
   @ApiPayloadTooLargeResponse({
-    description: 'El archivo supera los 5 MB.',
+    description:
+      'El archivo supera los 5 MB, o su contenido supera los 25 MB al ' +
+      'descomprimirse o los 100 archivos internos (code FILE_TOO_LARGE).',
   })
   @ApiUnsupportedMediaTypeResponse({
     description: 'El archivo no es un .xlsx (por ejemplo .xls antiguo o CSV).',
