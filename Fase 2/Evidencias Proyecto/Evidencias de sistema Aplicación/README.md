@@ -224,7 +224,7 @@ TEST_DATABASE_URL="postgresql://postgres:cambiar-en-produccion@localhost:5433/su
 | --- | --- |
 | `port is already allocated` en `5433`, `3000` o `3001` | Otro proceso usa el puerto. Detenerlo, o cambiar `DB_PORT_HOST` para la base de datos. |
 | El contenedor de `migrate` termina con error | Revisar `docker compose logs migrate`. Si la base local quedó en un estado inconsistente: `docker compose down -v` y volver a levantar (borra los datos). |
-| El backend no puede guardar archivos (`EACCES`) | El volumen o carpeta de `DOCUMENTS_STORAGE_PATH` no es escribible por el usuario `nestjs`. Con el volumen nombrado de Compose no ocurre; si se usa un *bind mount*, darle permisos a la carpeta del host. |
+| El backend no puede guardar archivos (`EACCES`) | La carpeta de `DOCUMENTS_STORAGE_PATH` no es del usuario que ejecuta el backend. Con el volumen nombrado de Compose no ocurre. En las pruebas con `docker-compose.test.yml` (*bind mount*), el backend corre con `CI_UID`/`CI_GID` = `id -u`/`id -g` y la carpeta se crea antes con `node frontend/scripts/prepare-real-storage.mjs`; nunca usar `chmod 0777` ni correr como root (SPRINT-4R-T19, ver `frontend/README.md`). |
 | El backend no conecta a la base desde `npm run start:dev` | `DATABASE_URL` en `backend/.env` debe apuntar a `localhost:5433`, no a `db:5432` (ese host solo existe dentro de la red Docker). |
 | El frontend no llega a la API tras cambiar `NEXT_PUBLIC_API_URL` | Es una variable de compilación: reconstruir con `docker compose up --build frontend`. |
 | Login falla con el administrador por defecto | El seed no sobrescribe un administrador existente; si cambió su contraseña, usar la nueva o recrear la base con `docker compose down -v`. |
