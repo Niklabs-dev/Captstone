@@ -17,8 +17,14 @@ import { DailyVoucherStorageService } from './daily-voucher-storage.service.js';
 
 // Imágenes mínimas completas: firma + marca de cierre de cada formato
 // (el chequeo estructural de SPRINT-4R-T18 rechaza las truncadas).
-const JPEG = Buffer.from([
-  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x00, 0x00, 0xff, 0xd9,
+// JPEG: inicio, APP0 «JFIF» con su largo real, SOS, datos y fin.
+const JPEG = Buffer.concat([
+  Buffer.from(
+    'ffd8ffe000104a46494600010100000100010000ffda0008010100003f00',
+    'hex',
+  ),
+  Buffer.from('datos'),
+  Buffer.from('ffd9', 'hex'),
 ]);
 const PNG = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x49,

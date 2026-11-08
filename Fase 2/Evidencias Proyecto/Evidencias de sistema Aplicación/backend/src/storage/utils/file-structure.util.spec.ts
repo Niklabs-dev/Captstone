@@ -5,9 +5,45 @@ import { hasCompleteStructure } from './file-structure.util.js';
 const PDF = Buffer.from(
   '%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n',
 );
-const JPEG = Buffer.from([
-  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0xff, 0xd9,
-]);
+// JPEG armado por segmentos, cada uno con su largo real (incluye los 2
+// bytes del largo), como lo escribe una cámara.
+const SOI = Buffer.from([0xff, 0xd8]);
+const EOI = Buffer.from([0xff, 0xd9]);
+
+function segment(marker: number, payload: Buffer): Buffer {
+  const header = Buffer.from([0xff, marker, 0x00, 0x00]);
+  header.writeUInt16BE(payload.length + 2, 2);
+  return Buffer.concat([header, payload]);
+}
+
+const APP0_JFIF = segment(
+  0xe0,
+  Buffer.from('4a46494600010100000100010000', 'hex'),
+);
+// Encabezado del SOS: 1 componente, tablas 0/0, Ss, Se y Ah/Al.
+const SOS_HEADER = Buffer.from('0101003f00', 'hex');
+
+function jpeg(scanData: Buffer, ...extraSegments: Buffer[]): Buffer {
+  return Buffer.concat([
+    SOI,
+    APP0_JFIF,
+    ...extraSegments,
+    segment(0xda, SOS_HEADER),
+    scanData,
+    EOI,
+  ]);
+}
+
+const JPEG = jpeg(Buffer.from('datos de imagen'));
+
+// Foto de celular: el segmento APP1 «Exif» lleva una miniatura que es un
+// JPEG completo, con su propio FF DA y su propio FF D9.
+const THUMBNAIL = jpeg(Buffer.from('miniatura'));
+const EXIF_PHOTO = jpeg(
+  Buffer.alloc(4096, 0x11),
+  segment(0xe1, Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), THUMBNAIL])),
+);
+
 const PNG = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x49,
   0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
@@ -56,15 +92,65 @@ describe('hasCompleteStructure (SPRINT-4R-T18)', () => {
     });
 
     it('rechaza un JPEG truncado sin FF D9', () => {
-      expect(hasCompleteStructure(JPEG.subarray(0, 10), 'image/jpeg')).toBe(
-        false,
-      );
+      expect(
+        hasCompleteStructure(JPEG.subarray(0, JPEG.length - 2), 'image/jpeg'),
+      ).toBe(false);
     });
 
     it('no confunde el FF D8 inicial con el cierre', () => {
       expect(
         hasCompleteStructure(Buffer.from([0xff, 0xd8, 0xff]), 'image/jpeg'),
       ).toBe(false);
+    });
+
+    it('acepta una foto completa con miniatura EXIF', () => {
+      expect(hasCompleteStructure(EXIF_PHOTO, 'image/jpeg')).toBe(true);
+    });
+
+    it('rechaza una foto con miniatura EXIF cortada a la mitad', () => {
+      const half = EXIF_PHOTO.subarray(0, EXIF_PHOTO.length / 2);
+      // El FF D9 de la miniatura sigue presente: es el caso que antes pasaba.
+      expect(half.includes(EOI)).toBe(true);
+      expect(hasCompleteStructure(half, 'image/jpeg')).toBe(false);
+    });
+
+    it('rechaza una foto cortada justo después de la miniatura EXIF', () => {
+      const exifEnd = EXIF_PHOTO.lastIndexOf(EOI, -3) + EOI.length;
+      expect(
+        hasCompleteStructure(EXIF_PHOTO.subarray(0, exifEnd), 'image/jpeg'),
+      ).toBe(false);
+    });
+
+    it('rechaza un segmento que declara más bytes de los recibidos', () => {
+      const cutInsideExif = EXIF_PHOTO.subarray(0, 40);
+      expect(hasCompleteStructure(cutInsideExif, 'image/jpeg')).toBe(false);
+    });
+
+    it('acepta datos con bytes de relleno FF 00 y marcadores RST', () => {
+      const scan = Buffer.from([0x12, 0xff, 0x00, 0x34, 0xff, 0xd0, 0x56]);
+      expect(hasCompleteStructure(jpeg(scan), 'image/jpeg')).toBe(true);
+    });
+
+    it('acepta bytes de relleno FF antes de un marcador', () => {
+      const padded = Buffer.concat([
+        SOI,
+        Buffer.from([0xff, 0xff]),
+        APP0_JFIF,
+        segment(0xda, SOS_HEADER),
+        Buffer.from('datos'),
+        EOI,
+      ]);
+      expect(hasCompleteStructure(padded, 'image/jpeg')).toBe(true);
+    });
+
+    it('rechaza un fin de imagen antes de los datos (sin SOS)', () => {
+      const noScan = Buffer.concat([SOI, APP0_JFIF, EOI]);
+      expect(hasCompleteStructure(noScan, 'image/jpeg')).toBe(false);
+    });
+
+    it('rechaza bytes que no son un marcador entre segmentos', () => {
+      const garbage = Buffer.concat([SOI, Buffer.from('basura'), EOI]);
+      expect(hasCompleteStructure(garbage, 'image/jpeg')).toBe(false);
     });
   });
 
