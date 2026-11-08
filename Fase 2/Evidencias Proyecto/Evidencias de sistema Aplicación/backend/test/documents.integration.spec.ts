@@ -36,7 +36,7 @@ const MAX_SIZE_MB = 1;
 
 // PDF mínimo con contenido único: el hash SHA-256 es único en toda la base.
 function uniquePdf(): Buffer {
-  return Buffer.from(`%PDF-1.7\n% prueba ${randomUUID()}\n`);
+  return Buffer.from(`%PDF-1.7\n% prueba ${randomUUID()}\n%%EOF\n`);
 }
 
 function sha256(content: Buffer): string {

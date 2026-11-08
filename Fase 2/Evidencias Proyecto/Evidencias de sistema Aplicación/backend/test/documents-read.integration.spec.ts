@@ -35,7 +35,7 @@ const DOMAIN = '@documents-read-test.moi-food.cl';
 const STORE_NAME = 'Subway Documents Read Test';
 
 function uniquePdf(): Buffer {
-  return Buffer.from(`%PDF-1.7\n% prueba ${randomUUID()}\n`);
+  return Buffer.from(`%PDF-1.7\n% prueba ${randomUUID()}\n%%EOF\n`);
 }
 
 function sha256(content: Buffer): string {

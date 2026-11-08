@@ -30,6 +30,7 @@ import {
   ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
+  ApiUnprocessableEntityResponse,
   ApiUnsupportedMediaTypeResponse,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -169,6 +170,10 @@ export class DailyOperationsController {
     description:
       'El voucher no es JPEG, PNG ni WebP, o su tipo declarado no coincide.',
   })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'La foto del voucher es del tipo correcto pero está dañada o incompleta (por ejemplo, cortada antes de su cierre).',
+  })
   async create(
     // El cuerpo se valida contra el DTO sin el campo voucher (solo campos de
     // texto): el archivo va por req.file. El FormDto con el binario se usa
@@ -255,6 +260,10 @@ export class DailyOperationsController {
   @ApiUnsupportedMediaTypeResponse({
     description:
       'El voucher no es JPEG, PNG ni WebP, o su tipo declarado no coincide.',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'La foto del voucher es del tipo correcto pero está dañada o incompleta (por ejemplo, cortada antes de su cierre).',
   })
   update(
     @Param('id', new ParseUUIDPipe()) id: string,
