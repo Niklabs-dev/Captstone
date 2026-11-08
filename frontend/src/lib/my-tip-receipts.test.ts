@@ -60,6 +60,7 @@ test('Se rechaza todo el listado si contiene una constancia ajena o no pagada', 
     { ...receipt, amount: -1 },
     { ...receipt, amount: 1.5 },
     { ...receipt, hoursWorked: 'NaN' },
+    { ...receipt, hoursWorked: undefined },
   ])
     assert.equal(parseOwnReceipts([receipt, bad], id), null);
   assert.equal(parseOwnReceipts([receipt, receipt], id), null);
@@ -140,4 +141,9 @@ test('Los fallos de permiso y servicio no exponen mensajes internos', async (ctx
       e.status === 403 &&
       !e.message.includes('secret'),
   );
+});
+
+test('Acepta constancias de repartos equitativos sin horas (SPRINT-4R-T06)', () => {
+  const parsed = parseOwnReceipts([{ ...receipt, hoursWorked: null }], id);
+  assert.equal(parsed?.[0].hoursWorked, null);
 });

@@ -10,6 +10,8 @@ import {
 import {
   POOL_STATUS,
   poolError,
+  poolReconciliation,
+  poolRuleLabel,
   type TipPool,
   type PaymentAlert,
   type PoolReceipt,
@@ -299,7 +301,8 @@ export function PoolWorkspace({
       setBusy(false);
     }
   }
-  const sum = pool?.lines.reduce((n, l) => n + l.amount, 0) ?? 0;
+  const totals = pool ? poolReconciliation(pool) : null;
+  const showHours = pool?.rule === 'PROPORTIONAL_TO_HOURS';
   return (
     <>
       <p className={introClass}>
@@ -430,7 +433,7 @@ export function PoolWorkspace({
         <p role="status" className={filterPanelClass}>
           No hay un reparto guardado para este local y período.
           {!readOnly &&
-            ' Puedes calcularlo cuando existan pacto, horas y propinas registradas.'}
+            ' Puedes calcularlo cuando existan operaciones diarias con participantes.'}
         </p>
       )}
       {pool && (
@@ -451,29 +454,57 @@ export function PoolWorkspace({
             </div>
           </header>
           <div className="space-y-3 border-b border-line p-5 text-sm">
-            <p>
-              Fondo del período: <strong>{clp(pool.totalAmount)}</strong> ·
-              Horas totales: {pool.totalHours}
-            </p>
-            <p>
-              Pacto aplicado:{' '}
-              <strong>
-                {pool.agreement?.name ?? 'Sin pacto histórico disponible'}
-              </strong>
-              {pool.agreement && (
-                <>
-                  {' '}
-                  ·{' '}
-                  {pool.agreement.rule === 'PROPORTIONAL_TO_HOURS'
-                    ? 'Proporcional a las horas trabajadas'
-                    : pool.agreement.rule}{' '}
-                  · Desde {date(pool.agreement.validFrom)}
-                  {pool.agreement.validTo
-                    ? ' hasta ' + date(pool.agreement.validTo)
-                    : ' sin término'}
-                </>
+            <dl className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="min-w-0">
+                <dt className="text-xs text-ink2">Fondo total</dt>
+                <dd className="mt-1 font-semibold tabular-nums">
+                  {clp(pool.totalAmount)}
+                </dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-xs text-ink2">Beneficiarios</dt>
+                <dd className="mt-1 font-semibold tabular-nums">
+                  {totals?.beneficiaries}
+                </dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-xs text-ink2">Suma individual</dt>
+                <dd className="mt-1 font-semibold tabular-nums">
+                  {clp(totals?.individualTotal ?? 0)}
+                </dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-xs text-ink2">Regla aplicada</dt>
+                <dd className="mt-1 font-semibold">
+                  {poolRuleLabel(pool.rule)}
+                </dd>
+              </div>
+              {showHours && (
+                <div className="min-w-0">
+                  <dt className="text-xs text-ink2">Horas totales</dt>
+                  <dd className="mt-1 font-semibold tabular-nums">
+                    {pool.totalHours}
+                  </dd>
+                </div>
               )}
-            </p>
+            </dl>
+            {showHours && (
+              <p>
+                Pacto aplicado:{' '}
+                <strong>
+                  {pool.agreement?.name ?? 'Sin pacto histórico disponible'}
+                </strong>
+                {pool.agreement && (
+                  <>
+                    {' '}
+                    · Desde {date(pool.agreement.validFrom)}
+                    {pool.agreement.validTo
+                      ? ' hasta ' + date(pool.agreement.validTo)
+                      : ' sin término'}
+                  </>
+                )}
+              </p>
+            )}
             <p>
               Calculado por {pool.calculatedBy.name} el{' '}
               {formatChileDate(pool.calculatedAt)}.
@@ -505,23 +536,35 @@ export function PoolWorkspace({
           >
             <table className={tableClass}>
               <caption className="sr-only">
-                Horas y montos asignados por trabajador
+                Monto a pagar por trabajador
               </caption>
               <thead className={tableHeadClass}>
                 <tr>
-                  {['Trabajador', 'Horas', 'Monto en CLP'].map((t) => (
-                    <th scope="col" key={t} className={tableHeadingClass}>
-                      {t}
+                  <th scope="col" className={tableHeadingClass}>
+                    Trabajador
+                  </th>
+                  {showHours && (
+                    <th scope="col" className={tableHeadingClass}>
+                      Horas
                     </th>
-                  ))}
+                  )}
+                  <th scope="col" className={tableHeadingClass}>
+                    Monto a pagar
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {pool.lines.map((l) => (
                   <tr key={l.userId} className="border-b border-line">
                     <td className={tableCellClass}>{l.workerName}</td>
-                    <td className={tableCellClass}>{l.hoursWorked}</td>
-                    <td className={tableCellClass}>{clp(l.amount)}</td>
+                    {showHours && (
+                      <td className={tableCellClass}>{l.hoursWorked}</td>
+                    )}
+                    <td
+                      className={`${tableCellClass} font-bold tabular-nums text-ink`}
+                    >
+                      {clp(l.amount)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -535,9 +578,16 @@ export function PoolWorkspace({
               {pool.reconciled
                 ? 'Conciliación correcta'
                 : 'Reparto sin conciliar'}
-              : líneas {clp(sum)} · fondo {clp(pool.totalAmount)} · diferencia{' '}
-              {clp(pool.totalAmount - sum)}.
+              : suma individual {clp(totals?.individualTotal ?? 0)} · fondo{' '}
+              {clp(pool.totalAmount)} · fuentes {clp(totals?.sourcesTotal ?? 0)}{' '}
+              · diferencia {clp(Math.abs(totals?.difference ?? 0))}.
             </p>
+            {!pool.reconciled && (
+              <p role="alert" className="text-crit">
+                No uses estos montos para pagar: las cifras no coinciden.
+                Recalcula el borrador o revisa sus operaciones diarias.
+              </p>
+            )}
             {!readOnly && pool.status !== 'PAID' && (
               <div className="flex flex-wrap gap-3">
                 {pool.status === 'DRAFT' ? (
@@ -552,7 +602,10 @@ export function PoolWorkspace({
                     <button
                       className={primaryButtonClass}
                       disabled={
-                        busy || conflict || !pool.reconciled || !pool.agreement
+                        busy ||
+                        conflict ||
+                        !pool.reconciled ||
+                        (pool.rule !== 'EQUAL_SHARES' && !pool.agreement)
                       }
                       onClick={() => setAction('confirm')}
                     >
@@ -814,9 +867,9 @@ function PoolDialog({
         </h2>
         <p className="text-sm text-ink2">
           {action === 'preview'
-            ? 'Se guardará un cálculo con las propinas y las horas del período. Si ya hay un borrador, se reemplazará su cálculo y se limpiará su observación.'
+            ? 'Se guardará un cálculo con las operaciones diarias del período. Si ya hay un borrador, se reemplazará su cálculo y se limpiará su observación.'
             : action === 'confirm'
-              ? 'Los montos quedarán protegidos. Revisa la conciliación y el pacto antes de confirmar.'
+              ? 'Los montos quedarán protegidos. Revisa la conciliación y la regla aplicada antes de confirmar.'
               : action === 'pay'
                 ? 'Esta acción registra que las propinas fueron entregadas y genera las constancias de los trabajadores.'
                 : 'La observación queda guardada en el borrador para revisar sus antecedentes.'}

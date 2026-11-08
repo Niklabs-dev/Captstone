@@ -208,7 +208,11 @@ export function MyTipReceiptsPanel({ workerId }: { workerId: string }) {
                     </div>
                     <div>
                       <dt className="text-xs text-muted">Horas consideradas</dt>
-                      <dd>{receipt.hoursWorked.replace('.', ',')}</dd>
+                      <dd>
+                        {receipt.hoursWorked === null
+                          ? 'No aplica (reparto equitativo)'
+                          : receipt.hoursWorked.replace('.', ',')}
+                      </dd>
                     </div>
                     <div>
                       <dt className="text-xs text-muted">Emitida el</dt>
