@@ -3,6 +3,9 @@ import { JwtService } from '@nestjs/jwt';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { AUDIT_ACTION } from '../src/audit/constants/audit-actions.constants.js';
@@ -56,6 +59,7 @@ describe.skipIf(!databaseUrl)(
     let jwt: JwtService;
     let prisma: PrismaClient;
     let admin: AuthUser;
+    let storageRoot: string | undefined;
 
     function token(user: AuthUser): string {
       const payload: JwtPayload = {
@@ -90,6 +94,10 @@ describe.skipIf(!databaseUrl)(
       process.env.JWT_SECRET = 'secreto-de-pruebas';
       process.env.JWT_EXPIRES_IN = '1h';
       process.env.JWT_REFRESH_EXPIRES_IN = '7d';
+      // AppModule exige la carpeta del gestor documental: se usa una temporal
+      // para no depender del .env local.
+      storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'moifood-cal-cc-'));
+      process.env.DOCUMENTS_STORAGE_PATH = storageRoot;
 
       const moduleFixture: TestingModule = await Test.createTestingModule({
         imports: [AppModule],
@@ -134,6 +142,15 @@ describe.skipIf(!databaseUrl)(
     }, 60_000);
 
     afterAll(async () => {
+      if (storageRoot) {
+        await fs.rm(storageRoot, { recursive: true, force: true });
+      }
+      // Si beforeAll falló antes de crear el cliente o la app, no hay nada
+      // que limpiar y se deja visible el error original.
+      if (!prisma) {
+        await app?.close();
+        return;
+      }
       // La auditoría es inmutable (Restrict): se purga como mantenimiento con
       // session_replication_role = replica (superusuario de TEST_DATABASE_URL).
       await purgeTestAuditLogs(prisma, {
