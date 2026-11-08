@@ -1,12 +1,19 @@
 import { Module } from '@nestjs/common';
 import { SalesImportResolverService } from './sales-import-resolver.service.js';
+import { SalesImportStorageService } from './sales-import-storage.service.js';
+import { SalesImportsController } from './sales-imports.controller.js';
+import { SalesImportsService } from './sales-imports.service.js';
 
-// Módulo de importación diaria de ventas MrComanda. SPRINT-4R-T09 aporta la
-// lectura del Excel (src/sales-imports/parser) y la resolución contra las
-// equivalencias de SPRINT-4R-T08; el controller de previsualización y
-// confirmación llega con SPRINT-4R-T10.
+// Importación diaria de ventas MrComanda: lectura del Excel y resolución de
+// equivalencias (SPRINT-4R-T09) y API de vista previa, confirmación,
+// descarte, consulta y descarga privada del archivo (SPRINT-4R-T10).
 @Module({
-  providers: [SalesImportResolverService],
-  exports: [SalesImportResolverService],
+  controllers: [SalesImportsController],
+  providers: [
+    SalesImportResolverService,
+    SalesImportStorageService,
+    SalesImportsService,
+  ],
+  exports: [SalesImportResolverService, SalesImportsService],
 })
 export class SalesImportsModule {}
