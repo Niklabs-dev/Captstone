@@ -36,7 +36,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(output).toContain('is valid');
   });
 
-  it('las migraciones crean las 31 tablas del modelo', () => {
+  it('las migraciones crean las 35 tablas del modelo', () => {
     const sql = readMigrations();
     const tablasEsperadas = [
       'stores',
@@ -65,6 +65,10 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'daily_operation_vouchers',
       'daily_operation_participants',
       'tip_pool_daily_operation_sources',
+      'store_external_codes',
+      'payment_method_aliases',
+      'sales_imports',
+      'sales_import_lines',
       'products',
       'inventory_movements',
       'inventory_counts',
@@ -542,5 +546,66 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(down).toContain(
       'DROP TRIGGER "daily_operation_participants_validate_worker_rows" ON "daily_operation_participants"',
     );
+  });
+
+  it('modela importaciones diarias MrComanda con equivalencias y versiones (SPRINT-4R-T08)', () => {
+    const sql = readMigration('importaciones_ventas_mrcomanda');
+
+    // Normalización inmutable usada por los CHECK de equivalencias y líneas.
+    expect(sql).toContain(
+      'CREATE FUNCTION "normalize_external_label"("label" TEXT) RETURNS TEXT',
+    );
+    expect(sql).toContain('IMMUTABLE STRICT PARALLEL SAFE');
+    expect(sql).toContain('"payment_method_aliases_label_normalized" CHECK');
+    expect(sql).toContain('"store_external_codes_code_normalized" CHECK');
+
+    // Equivalencias explícitas: un identificador por local y sistema, y una
+    // etiqueta normalizada por medio y sistema.
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "store_external_codes_system_external_code_key"',
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "store_external_codes_system_store_id_key"',
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "payment_method_aliases_system_normalized_label_key"',
+    );
+
+    // Versiones, idempotencia por hash y una sola vigente por local y fecha.
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "sales_imports_store_id_business_date_version_key"',
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "sales_imports_store_id_business_date_sha256_hash_key"',
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "sales_imports_store_id_business_date_is_current_key"',
+    );
+    expect(sql).toContain('"sales_imports_status_consistency" CHECK');
+    expect(sql).toContain('"sales_imports_business_date_matches_period" CHECK');
+    expect(sql).toContain('CREATE TRIGGER "sales_imports_enforce_rows"');
+    expect(sql).toContain('CREATE TRIGGER "sales_import_lines_enforce_rows"');
+
+    // No toca ventas, propinas, operaciones diarias ni el catálogo existente.
+    expect(sql).not.toContain('ALTER TABLE "sales"');
+    expect(sql).not.toContain('ALTER TABLE "payment_methods"');
+    expect(sql).not.toContain('ALTER TABLE "daily_operations"');
+    expect(sql).not.toContain('ALTER TABLE "tip_entries"');
+    expect(sql).not.toContain('tip_amount');
+
+    // La reversa vive junto a la migración y retira todo el esquema nuevo.
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('importaciones_ventas_mrcomanda'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toContain('DROP TABLE "sales_import_lines"');
+    expect(down).toContain('DROP TABLE "sales_imports"');
+    expect(down).toContain('DROP TABLE "payment_method_aliases"');
+    expect(down).toContain('DROP TABLE "store_external_codes"');
+    expect(down).toContain('DROP FUNCTION "normalize_external_label"(TEXT)');
+    expect(down).toContain('DROP TYPE "ExternalSystem"');
   });
 });
