@@ -105,9 +105,13 @@ export function voucherFileError(file: {
     return 'La foto del voucher está vacía. Vuelve a tomarla.';
   return null;
 }
+// Al corregir (SPRINT-4R-T05) el voucher ya registrado cuenta como adjunto
+// mientras la propina con tarjeta siga mayor que 0; voucherSelected se refiere
+// solo a una foto nueva.
 export function dailyOperationFieldErrors(
   fields: DailyOperationFormFields,
   voucherSelected: boolean,
+  existingVoucher = false,
 ): DailyOperationFieldErrors {
   const errors: DailyOperationFieldErrors = {};
   const cardTip = parseDailyAmount(fields.cardTipAmount);
@@ -134,7 +138,7 @@ export function dailyOperationFieldErrors(
   else if (difference !== null && difference !== 0 && !reason)
     errors.differenceReason =
       'Indica el motivo de la diferencia cuando no es cero.';
-  if (cardTip !== null && cardTip > 0 && !voucherSelected)
+  if (cardTip !== null && cardTip > 0 && !voucherSelected && !existingVoucher)
     errors.voucher = 'Adjunta la foto del voucher de las propinas con tarjeta.';
   if (cardTip !== null && cardTip === 0 && voucherSelected)
     errors.voucher =
@@ -155,6 +159,99 @@ export function dailyParticipantSelectionError(
     return 'Selecciona al menos un trabajador participante: hay propinas por repartir.';
   return null;
 }
+// SPRINT-4R-T05: orden visual de los campos del formulario. El foco va al
+// primer campo con error según este orden, no según el orden de validación.
+export const DAILY_FIELD_ORDER: readonly DailyOperationField[] = [
+  'businessDate',
+  'cardTipAmount',
+  'voucher',
+  'cashTipAmount',
+  'cashDifference',
+  'differenceReason',
+  'participants',
+];
+export function firstInvalidDailyField(
+  errors: DailyOperationFieldErrors,
+): DailyOperationField | null {
+  return DAILY_FIELD_ORDER.find((field) => Boolean(errors[field])) ?? null;
+}
+// Con fondo 0 el servidor exige la selección vacía (SPRINT-4R-T03): la
+// selección marcada se conserva en pantalla, pero no se envía.
+export function participantIdsToSend(
+  tipFundAmount: number,
+  participantIds: readonly string[],
+): string[] {
+  return tipFundAmount > 0 ? [...participantIds] : [];
+}
+
+export interface EqualSharePreviewLine {
+  id: string;
+  name: string;
+  amount: number;
+  // true si recibe uno de los pesos del residuo.
+  receivesResidual: boolean;
+}
+export interface EqualSharePreview {
+  tipFundAmount: number;
+  baseAmount: number;
+  residual: number;
+  lines: EqualSharePreviewLine[];
+}
+const MS_PER_DAY = 86_400_000;
+// Mismo orden que el backend: por unidades de código, sin depender del idioma.
+function compareIds(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+// Vista previa del reparto equitativo del día (SPRINT-4R-T05). Replica la
+// regla del backend (SPRINT-4R-T04, splitDailyFund): cada participante recibe
+// floor(fondo / n) y los r pesos sobrantes se entregan de a $1, empezando en
+// la posición (días desde 1970-01-01 mod n) de la lista ordenada por ID y
+// rotando día a día. Las líneas conservan el orden de entrada (por nombre) y
+// suman el fondo exacto. null si el fondo o la fecha no son válidos o no hay
+// participantes.
+export function previewEqualShares(
+  tipFundAmount: number,
+  participants: readonly DailyOperationParticipant[],
+  businessDate: string,
+): EqualSharePreview | null {
+  if (!isDailyAmount(tipFundAmount) || tipFundAmount === 0) return null;
+  if (participants.length === 0 || !isTipDate(businessDate)) return null;
+  const ids = participants.map((participant) => participant.id);
+  if (new Set(ids).size !== ids.length) return null;
+  const [year, month, day] = businessDate.split('-').map(Number);
+  const epochDay = Math.floor(Date.UTC(year, month - 1, day) / MS_PER_DAY);
+  const count = participants.length;
+  const baseAmount = Math.floor(tipFundAmount / count);
+  const residual = tipFundAmount % count;
+  const offset = ((epochDay % count) + count) % count;
+  const sorted = [...ids].sort(compareIds);
+  const extra = new Set(
+    sorted.filter((_, index) => (index - offset + count) % count < residual),
+  );
+  return {
+    tipFundAmount,
+    baseAmount,
+    residual,
+    lines: participants.map((participant) => ({
+      id: participant.id,
+      name: participant.name,
+      amount: baseAmount + (extra.has(participant.id) ? 1 : 0),
+      receivesResidual: extra.has(participant.id),
+    })),
+  };
+}
+// Texto del tratamiento del residuo en CLP para la vista previa.
+export function residualDescription(preview: EqualSharePreview): string {
+  if (preview.residual === 0)
+    return `El fondo se divide en partes iguales: ${formatClp(preview.baseAmount)} por trabajador, sin residuo.`;
+  const single = preview.residual === 1;
+  const people = single
+    ? '1 trabajador recibe'
+    : `${preview.residual} trabajadores reciben`;
+  return `Cada trabajador recibe ${formatClp(preview.baseAmount)} y ${single ? 'queda' : 'quedan'} ${formatClp(preview.residual)} de residuo: ${people} $1 extra. Ese peso rota entre los participantes según la fecha.`;
+}
+
 function timestamp(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -297,6 +394,26 @@ export function formatSignedClp(amount: number): string {
   if (amount > 0) return '+' + formatClp(amount);
   if (amount < 0) return '-' + formatClp(Math.abs(amount));
   return formatClp(0);
+}
+// Campos del formulario precargados con una operación registrada, para
+// corregirla (SPRINT-4R-T05).
+export function dailyFormFieldsFrom(
+  operation: DailyOperation,
+): DailyOperationFormFields {
+  return {
+    businessDate: operation.businessDate,
+    cardTipAmount: String(operation.cardTipAmount),
+    cashTipAmount: String(operation.cashTipAmount),
+    cashDifference: String(operation.cashDifference),
+    differenceReason: operation.differenceReason ?? '',
+  };
+}
+// Errores de la corrección: el 409 significa que la operación ya alimentó un
+// reparto confirmado o pagado y no admite cambios (triggers de SPRINT-4R-T02).
+export function dailyOperationCorrectionErrorMessage(status: number): string {
+  if (status === 409)
+    return 'No se puede corregir: esta operación ya forma parte de un reparto confirmado o pagado.';
+  return dailyOperationErrorMessage(status);
 }
 export function dailyOperationErrorMessage(status: number): string {
   const messages: Record<number, string> = {

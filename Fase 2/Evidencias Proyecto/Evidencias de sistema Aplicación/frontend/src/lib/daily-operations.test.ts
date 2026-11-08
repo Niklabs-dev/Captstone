@@ -5,9 +5,16 @@ import {
   MAX_DAILY_AMOUNT,
   MAX_DIFFERENCE_REASON_LENGTH,
   MAX_VOUCHER_BYTES,
+  DAILY_FIELD_ORDER,
+  dailyFormFieldsFrom,
+  dailyOperationCorrectionErrorMessage,
   dailyOperationErrorMessage,
   dailyOperationFieldErrors,
   dailyParticipantSelectionError,
+  firstInvalidDailyField,
+  participantIdsToSend,
+  previewEqualShares,
+  residualDescription,
   formatSignedClp,
   isCashDifference,
   isDailyAmount,
@@ -607,5 +614,212 @@ test('La corrección conserva el voucher de reemplazo y mapea el conflicto', asy
       assert.equal(error.existingOperationId, operationId);
       return true;
     },
+  );
+});
+
+// SPRINT-4R-T05: vista previa del reparto equitativo, idéntica a
+// splitDailyFund del backend (SPRINT-4R-T04). Mismos IDs y fechas que su
+// prueba: 2026-10-05 tiene desfase 1 con 3 participantes y 2026-10-07 tiene
+// desfase 1 con 4 participantes.
+const SHARE_A = 'a0000000-0000-4000-8000-000000000001';
+const SHARE_B = 'b0000000-0000-4000-8000-000000000002';
+const SHARE_C = 'c0000000-0000-4000-8000-000000000003';
+const SHARE_D = 'd0000000-0000-4000-8000-000000000004';
+const person = (id: string, name: string) => ({ id, name });
+
+test('vista previa: $10.000 entre 3 da $3.334 a la posición del día y suma exacta', () => {
+  const preview = previewEqualShares(
+    10_000,
+    [person(SHARE_C, 'Carla'), person(SHARE_A, 'Ana'), person(SHARE_B, 'Beto')],
+    '2026-10-05',
+  );
+  assert.ok(preview);
+  assert.equal(preview.baseAmount, 3333);
+  assert.equal(preview.residual, 1);
+  // Conserva el orden de entrada (por nombre en la interfaz).
+  assert.deepEqual(
+    preview.lines.map((line) => [line.name, line.amount]),
+    [
+      ['Carla', 3333],
+      ['Ana', 3333],
+      ['Beto', 3334],
+    ],
+  );
+  assert.equal(
+    preview.lines.reduce((sum, line) => sum + line.amount, 0),
+    10_000,
+  );
+  assert.deepEqual(
+    preview.lines.filter((line) => line.receivesResidual).map((l) => l.id),
+    [SHARE_B],
+  );
+});
+
+test('vista previa: varios pesos sobrantes avanzan circularmente desde el desfase', () => {
+  const preview = previewEqualShares(
+    10,
+    [
+      person(SHARE_D, 'D'),
+      person(SHARE_C, 'C'),
+      person(SHARE_B, 'B'),
+      person(SHARE_A, 'A'),
+    ],
+    '2026-10-07',
+  );
+  assert.ok(preview);
+  assert.deepEqual(
+    Object.fromEntries(preview.lines.map((line) => [line.id, line.amount])),
+    { [SHARE_A]: 2, [SHARE_B]: 3, [SHARE_C]: 3, [SHARE_D]: 2 },
+  );
+});
+
+test('vista previa: el peso extra rota con la fecha y no depende del orden de entrada', () => {
+  const people = [
+    person(SHARE_A, 'A'),
+    person(SHARE_B, 'B'),
+    person(SHARE_C, 'C'),
+  ];
+  const extraOn = (date: string) =>
+    previewEqualShares(10_000, people, date)
+      ?.lines.filter((line) => line.receivesResidual)
+      .map((line) => line.id);
+  assert.deepEqual(extraOn('2026-10-05'), [SHARE_B]);
+  assert.deepEqual(extraOn('2026-10-06'), [SHARE_C]);
+  assert.deepEqual(extraOn('2026-10-07'), [SHARE_A]);
+  const reversed = previewEqualShares(
+    10_000,
+    [...people].reverse(),
+    '2026-10-05',
+  );
+  assert.deepEqual(
+    reversed?.lines.filter((line) => line.receivesResidual).map((l) => l.id),
+    [SHARE_B],
+  );
+});
+
+test('vista previa: sin residuo, un participante y casos sin reparto', () => {
+  const exact = previewEqualShares(
+    9_000,
+    [person(SHARE_A, 'A'), person(SHARE_B, 'B'), person(SHARE_C, 'C')],
+    '2026-10-05',
+  );
+  assert.deepEqual(
+    exact?.lines.map((line) => line.amount),
+    [3000, 3000, 3000],
+  );
+  assert.equal(exact?.residual, 0);
+  assert.deepEqual(
+    previewEqualShares(9_001, [person(SHARE_B, 'B')], '2026-10-05')?.lines.map(
+      (line) => line.amount,
+    ),
+    [9_001],
+  );
+  assert.equal(
+    previewEqualShares(0, [person(SHARE_A, 'A')], '2026-10-05'),
+    null,
+  );
+  assert.equal(previewEqualShares(10, [], '2026-10-05'), null);
+  assert.equal(
+    previewEqualShares(10, [person(SHARE_A, 'A')], '2026-02-30'),
+    null,
+  );
+  assert.equal(
+    previewEqualShares(10.5, [person(SHARE_A, 'A')], '2026-10-05'),
+    null,
+  );
+  assert.equal(
+    previewEqualShares(
+      10,
+      [person(SHARE_A, 'A'), person(SHARE_A, 'A otra vez')],
+      '2026-10-05',
+    ),
+    null,
+  );
+});
+
+test('describe el tratamiento del residuo en CLP', () => {
+  const people = [
+    person(SHARE_A, 'A'),
+    person(SHARE_B, 'B'),
+    person(SHARE_C, 'C'),
+  ];
+  const withResidual = previewEqualShares(10_000, people, '2026-10-05');
+  const exact = previewEqualShares(9_000, people, '2026-10-05');
+  assert.ok(withResidual && exact);
+  assert.match(residualDescription(withResidual), /\$3\.333/);
+  assert.match(
+    residualDescription(withResidual),
+    /1 trabajador recibe \$1 extra/,
+  );
+  assert.match(residualDescription(exact), /sin residuo/);
+});
+
+test('el foco va al primer error según el orden visual del formulario', () => {
+  assert.deepEqual(DAILY_FIELD_ORDER, [
+    'businessDate',
+    'cardTipAmount',
+    'voucher',
+    'cashTipAmount',
+    'cashDifference',
+    'differenceReason',
+    'participants',
+  ]);
+  assert.equal(
+    firstInvalidDailyField({
+      participants: 'x',
+      differenceReason: 'x',
+      voucher: 'x',
+    }),
+    'voucher',
+  );
+  assert.equal(firstInvalidDailyField({ participants: 'x' }), 'participants');
+  assert.equal(firstInvalidDailyField({}), null);
+});
+
+test('con fondo 0 no se envía la selección; con fondo se envía completa', () => {
+  assert.deepEqual(participantIdsToSend(0, [SHARE_A, SHARE_B]), []);
+  assert.deepEqual(participantIdsToSend(500, [SHARE_A, SHARE_B]), [
+    SHARE_A,
+    SHARE_B,
+  ]);
+});
+
+test('al corregir, el voucher registrado cuenta como adjunto con propina de tarjeta', () => {
+  const fields: DailyOperationFormFields = {
+    businessDate: '2026-10-05',
+    cardTipAmount: '1000',
+    cashTipAmount: '0',
+    cashDifference: '0',
+    differenceReason: '',
+  };
+  assert.ok(dailyOperationFieldErrors(fields, false).voucher);
+  assert.equal(
+    dailyOperationFieldErrors(fields, false, true).voucher,
+    undefined,
+  );
+  // Una foto nueva con tarjeta 0 sigue siendo un error aunque haya registrada.
+  assert.ok(
+    dailyOperationFieldErrors({ ...fields, cardTipAmount: '0' }, true, true)
+      .voucher,
+  );
+});
+
+test('precarga la corrección y explica el 409 de un reparto confirmado', () => {
+  const registered = parseDailyOperation(operation);
+  assert.ok(registered);
+  assert.deepEqual(dailyFormFieldsFrom(registered), {
+    businessDate: '2026-10-26',
+    cardTipAmount: '12500',
+    cashTipAmount: '8000',
+    cashDifference: '-1500',
+    differenceReason: 'Vale de caja firmado por la encargada',
+  });
+  assert.match(
+    dailyOperationCorrectionErrorMessage(409),
+    /reparto confirmado o pagado/,
+  );
+  assert.equal(
+    dailyOperationCorrectionErrorMessage(503),
+    dailyOperationErrorMessage(503),
   );
 });

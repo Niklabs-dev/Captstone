@@ -25,18 +25,26 @@ import {
   loadDailyOperationById,
   loadDailyOperations,
   loadEligibleWorkers,
+  patchDailyOperation,
 } from '@/lib/daily-operations-client';
 import {
+  dailyFormFieldsFrom,
+  dailyOperationCorrectionErrorMessage,
   dailyOperationFieldErrors,
   dailyOperationErrorMessage,
   dailyParticipantSelectionError,
+  firstInvalidDailyField,
   formatSignedClp,
   parseCashDifference,
   parseDailyAmount,
+  participantIdsToSend,
+  previewEqualShares,
+  residualDescription,
   voucherFileError,
   type DailyOperation,
   type DailyOperationFieldErrors,
   type DailyOperationFormFields,
+  type DailyOperationParticipant,
 } from '@/lib/daily-operations';
 import { formatCalendarDate } from '@/lib/display-date';
 import { formatClp, isTipDate } from '@/lib/tips';
@@ -50,7 +58,48 @@ type QueryState =
 type WorkersState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; workers: { id: string; name: string }[] };
+  | { status: 'ready'; workers: DailyOperationParticipant[] };
+
+// Montos del día por participante con la regla equitativa (SPRINT-4R-T05):
+// la misma tabla sirve para la vista previa y para el detalle registrado.
+function SharesTable({
+  lines,
+  caption,
+}: {
+  lines: { id: string; name: string; amount: number }[];
+  caption: string;
+}): ReactElement {
+  return (
+    <table className="mt-3 w-full min-w-0 table-fixed text-sm">
+      <caption className="sr-only">{caption}</caption>
+      <thead>
+        <tr className="text-left text-xs text-ink2">
+          <th scope="col" className="pb-2 font-normal">
+            Trabajador
+          </th>
+          <th scope="col" className="w-32 pb-2 text-right font-normal">
+            Monto del día
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {lines.map((line) => (
+          <tr key={line.id} className="border-t border-line">
+            <th
+              scope="row"
+              className="break-words py-2 pr-3 text-left font-semibold"
+            >
+              {line.name}
+            </th>
+            <td className="py-2 text-right font-semibold tabular-nums">
+              {formatClp(line.amount)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 export function DailyOperationPanel({
   store,
@@ -66,6 +115,11 @@ export function DailyOperationPanel({
   const [reason, setReason] = useState('');
   const [voucher, setVoucher] = useState<File | null>(null);
   const [participantIds, setParticipantIds] = useState<string[]>([]);
+  // Operación que se está corrigiendo (SPRINT-4R-T05); null al registrar.
+  const [editing, setEditing] = useState<DailyOperation | null>(null);
+  // Participantes registrados que ya no son elegibles (desactivados o
+  // reasignados): no se pueden volver a enviar y se avisan al corregir.
+  const [removedParticipants, setRemovedParticipants] = useState<string[]>([]);
   const [workersRevision, setWorkersRevision] = useState(0);
   const [workers, setWorkers] = useState<WorkersState>({ status: 'loading' });
   const [revision, setRevision] = useState(0);
@@ -80,7 +134,9 @@ export function DailyOperationPanel({
   const [saving, setSaving] = useState(false);
   const inFlight = useRef(false);
   const form = useRef<HTMLFormElement>(null);
+  const formTitle = useRef<HTMLHeadingElement>(null);
   const voucherInput = useRef<HTMLInputElement>(null);
+  const participantsBox = useRef<HTMLFieldSetElement>(null);
   const key = date + ':' + revision;
   const current: QueryState = !isTipDate(date)
     ? { status: 'idle', key }
@@ -140,10 +196,30 @@ export function DailyOperationPanel({
     setErrors((value) => ({ ...value, participants: undefined }));
     clearFeedback();
   }
+  function toggleAllParticipants(): void {
+    if (workers.status !== 'ready') return;
+    const allIds = workers.workers.map((worker) => worker.id);
+    setParticipantIds((value) =>
+      allIds.every((id) => value.includes(id)) ? [] : allIds,
+    );
+    setErrors((value) => ({ ...value, participants: undefined }));
+    clearFeedback();
+  }
   function clearFeedback(): void {
     setFailure('');
     setNotice('');
     setConflictId('');
+  }
+  function resetForm(): void {
+    setCardTip('');
+    setCashTip('');
+    setDifference('0');
+    setReason('');
+    setVoucher(null);
+    setParticipantIds([]);
+    setRemovedParticipants([]);
+    setErrors({});
+    if (voucherInput.current) voucherInput.current.value = '';
   }
   function selectVoucher(file: File | null): void {
     setVoucher(file);
@@ -152,6 +228,56 @@ export function DailyOperationPanel({
       voucher: file ? (voucherFileError(file) ?? undefined) : undefined,
     }));
     clearFeedback();
+  }
+  // Precarga el formulario con la operación registrada para corregirla. Solo
+  // se conservan los participantes que siguen siendo elegibles del local.
+  function startEditing(operation: DailyOperation): void {
+    if (workers.status !== 'ready') return;
+    const eligible = new Set(workers.workers.map((worker) => worker.id));
+    const fields = dailyFormFieldsFrom(operation);
+    setCardTip(fields.cardTipAmount);
+    setCashTip(fields.cashTipAmount);
+    setDifference(fields.cashDifference);
+    setReason(fields.differenceReason);
+    setVoucher(null);
+    if (voucherInput.current) voucherInput.current.value = '';
+    setParticipantIds(
+      operation.participants
+        .filter((participant) => eligible.has(participant.id))
+        .map((participant) => participant.id),
+    );
+    setRemovedParticipants(
+      operation.participants
+        .filter((participant) => !eligible.has(participant.id))
+        .map((participant) => participant.name),
+    );
+    setErrors({});
+    clearFeedback();
+    setEditing(operation);
+    formTitle.current?.scrollIntoView({ block: 'start' });
+    formTitle.current?.focus();
+  }
+  function cancelEditing(): void {
+    setEditing(null);
+    resetForm();
+    clearFeedback();
+  }
+  function focusField(field: string): void {
+    if (field === 'participants') {
+      // Primera casilla; sin trabajadores, el botón de reintento o el grupo.
+      const box = participantsBox.current;
+      const target =
+        box?.querySelector<HTMLElement>('input[type="checkbox"]') ??
+        box?.querySelector<HTMLElement>('button') ??
+        box;
+      target?.focus();
+      return;
+    }
+    const element =
+      field === 'voucher'
+        ? voucherInput.current
+        : form.current?.elements.namedItem(field);
+    if (element instanceof HTMLElement) element.focus();
   }
   async function submit(event: FormEvent<HTMLFormElement>): Promise<undefined> {
     event.preventDefault();
@@ -172,7 +298,11 @@ export function DailyOperationPanel({
     const cardTipAmount = parseDailyAmount(cardTip);
     const cashTipAmount = parseDailyAmount(cashTip);
     const cashDifference = parseCashDifference(difference);
-    const validation = dailyOperationFieldErrors(fields, voucher !== null);
+    const validation = dailyOperationFieldErrors(
+      fields,
+      voucher !== null,
+      Boolean(editing?.voucher),
+    );
     if (voucher && !validation.voucher) {
       const fileError = voucherFileError(voucher);
       if (fileError) validation.voucher = fileError;
@@ -185,13 +315,9 @@ export function DailyOperationPanel({
     if (participantsError) validation.participants = participantsError;
     setErrors(validation);
     clearFeedback();
-    const invalid = Object.keys(validation)[0];
+    const invalid = firstInvalidDailyField(validation);
     if (invalid) {
-      const field =
-        invalid === 'voucher'
-          ? voucherInput.current
-          : form.current?.elements.namedItem(invalid);
-      if (field instanceof HTMLElement) field.focus();
+      focusField(invalid);
       return;
     }
     if (
@@ -200,36 +326,51 @@ export function DailyOperationPanel({
       cashDifference === null
     )
       return;
+    const selection = participantIdsToSend(
+      cardTipAmount + cashTipAmount,
+      participantIds,
+    );
     inFlight.current = true;
     setSaving(true);
     try {
-      const result = await createDailyOperation(
-        {
-          storeId: store.id,
-          businessDate: date,
-          cardTipAmount,
-          cashTipAmount,
-          cashDifference,
-          differenceReason: reason,
-          participantIds,
-        },
-        voucher,
-      );
-      setNotice(
-        result.created
-          ? 'Operación diaria registrada correctamente.'
-          : 'Esta operación ya estaba registrada con los mismos valores. No se creó un duplicado.',
-      );
-      setCardTip('');
-      setCashTip('');
-      setDifference('0');
-      setReason('');
-      setVoucher(null);
-      setParticipantIds([]);
-      if (voucherInput.current) voucherInput.current.value = '';
+      if (editing) {
+        await patchDailyOperation(
+          editing.id,
+          {
+            cardTipAmount,
+            cashTipAmount,
+            cashDifference,
+            differenceReason: reason,
+            participantIds: selection,
+          },
+          voucher,
+        );
+        setNotice('Operación diaria corregida correctamente.');
+        setEditing(null);
+      } else {
+        const result = await createDailyOperation(
+          {
+            storeId: store.id,
+            businessDate: date,
+            cardTipAmount,
+            cashTipAmount,
+            cashDifference,
+            differenceReason: reason,
+            participantIds: selection,
+          },
+          voucher,
+        );
+        setNotice(
+          result.created
+            ? 'Operación diaria registrada correctamente.'
+            : 'Esta operación ya estaba registrada con los mismos valores. No se creó un duplicado.',
+        );
+      }
+      resetForm();
       setRevision((value) => value + 1);
     } catch (cause) {
       if (
+        !editing &&
         cause instanceof DailyOperationRequestError &&
         cause.status === 409 &&
         cause.existingOperationId
@@ -248,6 +389,12 @@ export function DailyOperationPanel({
         } catch {
           setFailure(cause.message);
         }
+      } else if (editing && cause instanceof DailyOperationRequestError) {
+        setFailure(
+          cause.status === 409
+            ? dailyOperationCorrectionErrorMessage(409)
+            : cause.message,
+        );
       } else {
         setFailure(
           cause instanceof DailyOperationRequestError
@@ -261,13 +408,44 @@ export function DailyOperationPanel({
     }
   }
   const registered = current.status === 'ready' ? current.operation : null;
+  // Con una operación ya registrada se sugiere corregirla; registrar otra
+  // con distinto contenido sigue respondiendo 409 con la registrada.
+  const showCorrectionHint = registered !== null && editing === null;
   const cardTipPreview = parseDailyAmount(cardTip);
+  const cashTipPreview = parseDailyAmount(cashTip);
   const differencePreview = parseCashDifference(difference);
+  const fundPreview =
+    cardTipPreview !== null && cashTipPreview !== null
+      ? cardTipPreview + cashTipPreview
+      : null;
+  const eligibleWorkers = workers.status === 'ready' ? workers.workers : [];
+  const selectedWorkers = eligibleWorkers.filter((worker) =>
+    participantIds.includes(worker.id),
+  );
+  const allSelected =
+    eligibleWorkers.length > 0 &&
+    selectedWorkers.length === eligibleWorkers.length;
+  const sharePreview =
+    fundPreview !== null
+      ? previewEqualShares(fundPreview, selectedWorkers, date)
+      : null;
+  const registeredShares = registered
+    ? previewEqualShares(
+        registered.tipFundAmount,
+        registered.participants,
+        registered.businessDate,
+      )
+    : null;
   return (
     <div className="min-w-0 space-y-5">
       <section aria-labelledby="daily-form-title" className={filterPanelClass}>
-        <h2 id="daily-form-title" className={panelTitleClass}>
-          Registrar operación diaria
+        <h2
+          id="daily-form-title"
+          ref={formTitle}
+          tabIndex={-1}
+          className={`${panelTitleClass} scroll-mt-24 outline-none`}
+        >
+          {editing ? 'Corregir operación diaria' : 'Registrar operación diaria'}
         </h2>
         <p className="mt-2 break-words text-sm text-ink2">
           Local asignado:{' '}
@@ -279,6 +457,16 @@ export function DailyOperationPanel({
           diferencia de efectivo declarada y los trabajadores participantes del
           reparto.
         </p>
+        {editing && (
+          <p
+            role="status"
+            className="mt-4 rounded-lg border border-line2 bg-tint2 p-3 text-sm text-ink2"
+          >
+            Estás corrigiendo la operación del{' '}
+            {formatCalendarDate(editing.businessDate)}. Los cambios reemplazan
+            los valores registrados.
+          </p>
+        )}
         {!store.isActive && (
           <p
             role="alert"
@@ -307,6 +495,7 @@ export function DailyOperationPanel({
                   min="0100-01-01"
                   max="9999-12-31"
                   required
+                  disabled={editing !== null}
                   value={date}
                   onChange={(event) => {
                     const value = event.target.value;
@@ -350,7 +539,9 @@ export function DailyOperationPanel({
               <label className={labelClass}>
                 Foto del voucher{' '}
                 <span className="font-normal">
-                  (obligatoria si hay propina con tarjeta)
+                  {editing?.voucher
+                    ? '(opcional: reemplaza la registrada)'
+                    : '(obligatoria si hay propina con tarjeta)'}
                 </span>
                 <input
                   ref={voucherInput}
@@ -438,19 +629,41 @@ export function DailyOperationPanel({
               </label>
             </div>
             <fieldset
+              ref={participantsBox}
               name="participants"
-              className="min-w-0 rounded-lg border border-line bg-tint p-4"
+              tabIndex={-1}
+              className="min-w-0 rounded-lg border border-line bg-tint p-4 outline-none"
               aria-describedby="daily-participants-help daily-participants-error"
             >
               <legend className="sr-only">
                 Trabajadores participantes del reparto
               </legend>
-              <p className={labelClass}>
-                Trabajadores participantes{' '}
-                <span className="font-normal">
-                  (obligatorio si hay propinas por repartir)
-                </span>
-              </p>
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                <p className={labelClass}>
+                  Trabajadores participantes{' '}
+                  <span className="font-normal">
+                    (obligatorio si hay propinas por repartir)
+                  </span>
+                </p>
+                {workers.status === 'ready' && eligibleWorkers.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p
+                      aria-live="polite"
+                      className="text-sm tabular-nums text-ink2"
+                    >
+                      {selectedWorkers.length} de {eligibleWorkers.length}{' '}
+                      seleccionados
+                    </p>
+                    <button
+                      type="button"
+                      onClick={toggleAllParticipants}
+                      className={`${buttonClass} min-h-11`}
+                    >
+                      {allSelected ? 'Quitar selección' : 'Seleccionar todos'}
+                    </button>
+                  </div>
+                )}
+              </div>
               {workers.status === 'loading' && (
                 <p role="status" className="mt-3 text-sm text-ink2">
                   Consultando trabajadores de tu local…
@@ -468,18 +681,27 @@ export function DailyOperationPanel({
                   </button>
                 </div>
               )}
-              {workers.status === 'ready' && workers.workers.length === 0 && (
+              {workers.status === 'ready' && eligibleWorkers.length === 0 && (
                 <p role="status" className="mt-3 text-sm text-ink2">
                   No hay trabajadores activos asignados a tu local. Pide al
                   administrador que asigne trabajadores para repartir las
                   propinas.
                 </p>
               )}
-              {workers.status === 'ready' && workers.workers.length > 0 && (
+              {removedParticipants.length > 0 && (
+                <p
+                  role="status"
+                  className="mt-3 rounded-lg bg-warn-bg p-3 text-sm text-warn"
+                >
+                  Ya no son elegibles en tu local y se quitarán del reparto al
+                  guardar: {removedParticipants.join(', ')}.
+                </p>
+              )}
+              {workers.status === 'ready' && eligibleWorkers.length > 0 && (
                 <ul className="mt-3 space-y-2">
-                  {workers.workers.map((worker) => (
+                  {eligibleWorkers.map((worker) => (
                     <li key={worker.id} className="min-w-0">
-                      <label className="flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-lg border border-line2 bg-bg px-3 py-2">
+                      <label className="flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-lg border border-line2 bg-bg px-3 py-2 focus-within:ring-2 focus-within:ring-salmon-ink">
                         <input
                           type="checkbox"
                           name={'participant-' + worker.id}
@@ -498,6 +720,11 @@ export function DailyOperationPanel({
                   ))}
                 </ul>
               )}
+              {fundPreview === 0 && selectedWorkers.length > 0 && (
+                <p role="status" className="mt-3 text-sm text-ink2">
+                  Sin propinas no hay reparto: la selección no se guardará.
+                </p>
+              )}
             </fieldset>
             <p
               id="daily-participants-help"
@@ -514,9 +741,62 @@ export function DailyOperationPanel({
             >
               {errors.participants}
             </p>
+            <section
+              aria-labelledby="daily-preview-title"
+              aria-live="polite"
+              className="min-w-0 rounded-lg border border-line2 bg-bg p-4"
+            >
+              <h3 id="daily-preview-title" className="text-sm font-semibold">
+                Vista previa del reparto del día
+              </h3>
+              {fundPreview === null && (
+                <p className="mt-2 text-sm text-ink2">
+                  Ingresa ambas propinas para calcular el monto por trabajador.
+                </p>
+              )}
+              {fundPreview === 0 && (
+                <p className="mt-2 text-sm text-ink2">
+                  No hay propinas por repartir en esta fecha.
+                </p>
+              )}
+              {fundPreview !== null &&
+                fundPreview > 0 &&
+                sharePreview === null && (
+                  <p className="mt-2 text-sm text-ink2">
+                    Fondo de {formatClp(fundPreview)}. Selecciona participantes
+                    para ver el monto por trabajador.
+                  </p>
+                )}
+              {sharePreview && (
+                <>
+                  <dl className="mt-3 grid min-w-0 grid-cols-2 gap-3 text-sm">
+                    <div className="min-w-0">
+                      <dt className="text-xs text-ink2">Fondo de propinas</dt>
+                      <dd className="mt-1 font-semibold tabular-nums">
+                        {formatClp(sharePreview.tipFundAmount)}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-xs text-ink2">Participantes</dt>
+                      <dd className="mt-1 font-semibold tabular-nums">
+                        {sharePreview.lines.length}
+                      </dd>
+                    </div>
+                  </dl>
+                  <SharesTable
+                    lines={sharePreview.lines}
+                    caption="Monto por trabajador antes de guardar"
+                  />
+                  <p className="mt-3 text-xs leading-5 text-ink2">
+                    {residualDescription(sharePreview)}
+                  </p>
+                </>
+              )}
+            </section>
             <p id="daily-date-help" className="text-xs leading-5 text-ink2">
-              Al cambiar la fecha se consulta su operación registrada. Las
-              fechas corresponden al día de negocio en Chile.
+              {editing
+                ? 'La fecha no cambia al corregir una operación.'
+                : 'Al cambiar la fecha se consulta su operación registrada. Las fechas corresponden al día de negocio en Chile.'}
             </p>
             <p
               id="daily-date-error"
@@ -541,6 +821,9 @@ export function DailyOperationPanel({
             <p id="daily-voucher-help" className="text-xs leading-5 text-ink2">
               Fotografía privada del voucher de propinas con tarjeta. Formatos
               JPEG, PNG o WebP, máximo 5 MiB.
+              {editing?.voucher && !voucher
+                ? ' Se conserva el voucher registrado mientras haya propina con tarjeta.'
+                : ''}
               {voucher
                 ? ` Archivo seleccionado: ${voucher.name} (${Math.ceil(voucher.size / 1024)} KiB).`
                 : ''}
@@ -598,6 +881,13 @@ export function DailyOperationPanel({
               Corrige los campos indicados antes de guardar.
             </p>
           )}
+          {showCorrectionHint && (
+            <p role="status" className="text-sm text-ink2">
+              Ya hay una operación registrada para esta fecha. Usa «Corregir
+              operación» para modificarla; registrar otros valores responde con
+              un conflicto.
+            </p>
+          )}
           {failure && (
             <p
               role="alert"
@@ -612,18 +902,34 @@ export function DailyOperationPanel({
               )}
             </p>
           )}
-          <button
-            type="submit"
-            disabled={
-              saving ||
-              !store.isActive ||
-              current.status !== 'ready' ||
-              workers.status !== 'ready'
-            }
-            className={primaryButtonClass}
-          >
-            {saving ? 'Guardando…' : 'Guardar operación'}
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="submit"
+              disabled={
+                saving ||
+                !store.isActive ||
+                current.status !== 'ready' ||
+                workers.status !== 'ready'
+              }
+              className={primaryButtonClass}
+            >
+              {saving
+                ? 'Guardando…'
+                : editing
+                  ? 'Guardar corrección'
+                  : 'Guardar operación'}
+            </button>
+            {editing && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={cancelEditing}
+                className={buttonClass}
+              >
+                Cancelar corrección
+              </button>
+            )}
+          </div>
         </form>
       </section>
       {notice && (
@@ -656,10 +962,23 @@ export function DailyOperationPanel({
                 Registrada
               </span>
             )}
+            {registered && store.isActive && editing === null && (
+              <button
+                type="button"
+                disabled={saving || workers.status !== 'ready'}
+                onClick={() => startEditing(registered)}
+                className={buttonClass}
+              >
+                Corregir operación
+              </button>
+            )}
             <button
               type="button"
               disabled={
-                saving || current.status === 'loading' || !isTipDate(date)
+                saving ||
+                current.status === 'loading' ||
+                !isTipDate(date) ||
+                editing !== null
               }
               onClick={() => setRevision((value) => value + 1)}
               className={buttonClass}
@@ -749,22 +1068,6 @@ export function DailyOperationPanel({
                 </dd>
               </div>
               <div className="min-w-0">
-                <dt className="text-xs text-ink2">Participantes del reparto</dt>
-                <dd className="mt-2 text-sm font-semibold">
-                  {registered.participants.length > 0 ? (
-                    <ul className="space-y-1">
-                      {registered.participants.map((participant) => (
-                        <li key={participant.id} className="break-words">
-                          {participant.name}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <span className="text-ink2">Sin reparto</span>
-                  )}
-                </dd>
-              </div>
-              <div className="min-w-0">
                 <dt className="text-xs text-ink2">Registrada · Chile</dt>
                 <dd className="mt-2 text-sm tabular-nums">
                   <time dateTime={registered.createdAt}>
@@ -777,6 +1080,24 @@ export function DailyOperationPanel({
                 </dd>
               </div>
             </dl>
+            <div className="min-w-0 rounded-lg border border-line bg-tint p-4">
+              <h3 className="text-sm font-semibold">
+                Participantes del reparto
+              </h3>
+              {registeredShares ? (
+                <>
+                  <SharesTable
+                    lines={registeredShares.lines}
+                    caption="Monto del día por participante registrado"
+                  />
+                  <p className="mt-3 text-xs leading-5 text-ink2">
+                    {residualDescription(registeredShares)}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-2 text-sm text-ink2">Sin reparto</p>
+              )}
+            </div>
             {registered.voucher && (
               <div className="flex flex-col gap-3 rounded-lg border border-line bg-tint p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
