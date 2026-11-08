@@ -8,6 +8,8 @@ import {
   parseAlerts,
   parseReceipts,
   poolError,
+  poolReconciliation,
+  poolRuleLabel,
 } from './tip-pools';
 const id = 'a9000000-0000-4000-8000-000000000001';
 const person = { id, name: 'Prueba', passwordHash: 'private' };
@@ -22,6 +24,7 @@ const pool = {
   status: 'DRAFT',
   store: person,
   ...period,
+  rule: 'PROPORTIONAL_TO_HOURS',
   totalAmount: 5,
   totalHours: '1.00',
   agreement: null,
@@ -36,6 +39,7 @@ const pool = {
       amount: 5,
     },
   ],
+  dailySources: [],
   reconciled: true,
   notes: null,
   calculatedBy: person,
@@ -160,7 +164,7 @@ test('Los códigos de medios salen del catálogo y no de una lista fija (SPRINT-
 });
 test('Los conflictos indican recargar y los fallos no publican errores internos', () => {
   assert.match(poolError(409), /Actualiza/);
-  assert.match(poolError(422), /pacto/);
+  assert.match(poolError(422), /operaciones diarias/);
   assert.match(poolError(500), /Conservamos tus campos/);
 });
 
@@ -180,4 +184,69 @@ test('El cálculo y la consulta rechazan respuestas de otro local o período', (
     parsePoolForPeriod({ ...pool, periodEnd: '2026-01-03' }, period),
     null,
   );
+});
+
+// SPRINT-4R-T06: reparto equitativo sin horas, con operaciones diarias.
+const otherId = 'a9000000-0000-4000-8000-000000000002';
+const equalPool = {
+  ...pool,
+  rule: 'EQUAL_SHARES',
+  totalAmount: 10_001,
+  totalHours: null,
+  lines: [
+    { userId: id, workerName: 'Ana', hoursWorked: null, amount: 5_001 },
+    { userId: otherId, workerName: 'Bruno', hoursWorked: null, amount: 5_000 },
+  ],
+  sources: [],
+  dailySources: [
+    {
+      operationId: id,
+      businessDate: '2026-01-01',
+      cardTipAmount: 1,
+      cashTipAmount: 10_000,
+      amount: 10_001,
+    },
+  ],
+};
+test('Acepta el reparto equitativo sin horas ni pacto y concilia sus operaciones', () => {
+  const parsed = parsePool(equalPool);
+  assert.ok(parsed);
+  assert.equal(parsed.rule, 'EQUAL_SHARES');
+  assert.equal(parsed.totalHours, null);
+  assert.equal(parsed.lines[0].hoursWorked, null);
+  assert.deepEqual(poolReconciliation(parsed), {
+    beneficiaries: 2,
+    individualTotal: 10_001,
+    sourcesTotal: 10_001,
+    difference: 0,
+  });
+  assert.match(poolRuleLabel(parsed.rule), /equitativo/);
+});
+test('No inventa horas ni mezcla reglas y expone la conciliación fallida', () => {
+  const lines = equalPool.lines;
+  for (const bad of [
+    { ...equalPool, totalHours: '0.00' },
+    { ...equalPool, lines: [{ ...lines[0], hoursWorked: '1.00' }, lines[1]] },
+    { ...pool, totalHours: null },
+    { ...pool, lines: [{ ...pool.lines[0], hoursWorked: null }] },
+    { ...pool, rule: 'OTRA' },
+    { ...equalPool, dailySources: undefined },
+    {
+      ...equalPool,
+      dailySources: [{ ...equalPool.dailySources[0], cardTipAmount: 2 }],
+    },
+    {
+      ...equalPool,
+      dailySources: [...equalPool.dailySources, ...equalPool.dailySources],
+    },
+  ])
+    assert.equal(parsePool(bad), null);
+  const failed = parsePool({
+    ...equalPool,
+    lines: [lines[0], { ...lines[1], amount: 4_999 }],
+    reconciled: false,
+  });
+  assert.ok(failed);
+  assert.equal(failed.reconciled, false);
+  assert.equal(poolReconciliation(failed).difference, 1);
 });
