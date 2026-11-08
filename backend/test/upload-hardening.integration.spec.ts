@@ -6,6 +6,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { deflateRawSync } from 'node:zlib';
 import request from 'supertest';
 import { DOCUMENT_TYPES } from '../prisma/seed.js';
 import { AppModule } from '../src/app.module.js';
@@ -15,6 +16,7 @@ import { MAX_VOUCHER_BYTES } from '../src/daily-operations/types/daily-operation
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { MAX_REPORT_FILE_BYTES } from '../src/sales-imports/parser/xlsx-workbook.reader.js';
+import { MAX_UNCOMPRESSED_BYTES } from '../src/sales-imports/parser/xlsx-zip-guard.js';
 import {
   buildReportSheet,
   buildReportXlsx,
@@ -77,6 +79,37 @@ const EXE = Buffer.from('MZ\x90\x00\x03\x00\x00\x00ejecutable disfrazado');
 const CSV = Buffer.from('Fecha;Monto\n05/11/2026;1000\n');
 
 // Archivo que supera el límite y empieza con una firma válida.
+// «Bomba zip»: un .xlsx de decenas de KB cuya hoja se descomprime a
+// `uncompressedBytes` de espacios. ZIP mínimo de una entrada deflate.
+function zipBomb(uncompressedBytes: number): Buffer {
+  const name = Buffer.from('xl/worksheets/sheet1.xml', 'latin1');
+  const data = deflateRawSync(Buffer.alloc(uncompressedBytes, 0x20));
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(8, 8);
+  local.writeUInt32LE(data.length, 18);
+  local.writeUInt32LE(uncompressedBytes, 22);
+  local.writeUInt16LE(name.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(8, 10);
+  central.writeUInt32LE(data.length, 20);
+  central.writeUInt32LE(uncompressedBytes, 24);
+  central.writeUInt16LE(name.length, 28);
+  const localBlock = Buffer.concat([local, name, data]);
+  const centralBlock = Buffer.concat([central, name]);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(centralBlock.length, 12);
+  end.writeUInt32LE(localBlock.length, 16);
+  return Buffer.concat([localBlock, centralBlock, end]);
+}
+
 function oversized(head: Buffer, limitBytes: number): Buffer {
   return Buffer.concat([head, Buffer.alloc(limitBytes + 1 - head.length + 1)]);
 }
@@ -648,6 +681,32 @@ describe.skipIf(!databaseUrl)(
         });
       },
     );
+
+    it('Excel de ventas MrComanda: una bomba zip responde 413 sin guardar nada', async () => {
+      await withinRollback(async (f) => {
+        const bomb = zipBomb(MAX_UNCOMPRESSED_BYTES + 5 * 1024 * 1024);
+        // Pesa menos que el límite de carga: solo el tope descomprimido la
+        // detiene.
+        expect(bomb.length).toBeLessThan(MAX_REPORT_FILE_BYTES);
+        const before = await storedFiles();
+        const response = await attachAll(
+          post('/sales-imports/preview', f.admin),
+          'file',
+          [
+            {
+              content: bomb,
+              filename: 'ventas.xlsx',
+              contentType:
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            },
+          ],
+        );
+        expect(response.status).toBe(413);
+        expect(response.body).toMatchObject({ code: 'FILE_TOO_LARGE' });
+        expectNoInternalPaths(response.body, 'bomba zip');
+        expect(await storedFiles()).toEqual(before);
+      });
+    });
 
     it('la carpeta privada no se sirve por URL directa', async () => {
       await withinRollback(async (f) => {
