@@ -206,7 +206,8 @@ El detalle se arma solo con campos declarados (listas blancas): nunca incluye co
 Todo rechazo **403** de un usuario autenticado queda registrado como
 `ACCESS_DENIED`, venga de un guard (rol o local) o de un servicio (recurso de
 otro local). Lo registra el filtro global `AccessDeniedAuditFilter`, porque los
-guards corren antes que el `AuditInterceptor`. El cliente recibe el mismo 403.
+guards corren antes que el `AuditInterceptor`. El cliente recibe el mismo 403,
+sin esperar a que termine el registro.
 
 - `entityType`: primer segmento de la ruta (ej. `sales-dashboard`); `entityId`:
   el `:id` de la ruta solo si es un UUID.
@@ -219,10 +220,11 @@ guards corren antes que el `AuditInterceptor`. El cliente recibe el mismo 403.
 
 Las rutas exclusivas del administrador se declaran en
 `src/auth/constants/admin-only-routes.constants.ts`: hoy el panel consolidado
-(`sales-dashboard`). La importación de ventas (SPRINT-4R-T10), el calendario de
-operación (SPRINT-4R-T12) y los reportes (SPRINT-4R-T13) agregan ahí la ruta de
-su controlador, y `test/admin-only-routes.spec.ts` falla si algún endpoint de
-esas rutas admite otro rol o es público.
+(`sales-dashboard`) y la importación de ventas (`sales-imports`, incluida la
+descarga directa del Excel). El calendario de operación (SPRINT-4R-T12) y los
+reportes (SPRINT-4R-T13) agregan ahí la ruta de su controlador, y
+`test/admin-only-routes.spec.ts` falla si algún endpoint de esas rutas admite
+otro rol o es público.
 
 ### Inmutabilidad del registro
 
