@@ -148,18 +148,23 @@ export class OperatingDaysService {
     private readonly stores: StoresService,
   ) {}
 
-  async getCalendar(storeId: string): Promise<OperatingCalendarResponse> {
-    const store = await this.prisma.store.findUnique({
+  // `client` permite leer dentro de una transacción en curso (updateCalendar)
+  // para responder y auditar exactamente lo que se guardó.
+  async getCalendar(
+    storeId: string,
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<OperatingCalendarResponse> {
+    const store = await client.store.findUnique({
       where: { id: storeId },
       select: { id: true, name: true },
     });
     if (!store) throw new NotFoundException('Local no encontrado');
     const [schedule, closures] = await Promise.all([
-      this.prisma.storeOperatingSchedule.findUnique({
+      client.storeOperatingSchedule.findUnique({
         where: { storeId },
         select: SCHEDULE_SELECT,
       }),
-      this.prisma.storeClosure.findMany({
+      client.storeClosure.findMany({
         where: { storeId },
         orderBy: { closureDate: 'desc' },
         select: CLOSURE_SELECT,
@@ -181,7 +186,12 @@ export class OperatingDaysService {
   }
 
   // Crea o reemplaza el calendario del local. Devuelve también la
-  // configuración anterior para auditar el cambio.
+  // configuración anterior para auditar el cambio. La lectura y el upsert
+  // van en una transacción con la fila del local bloqueada (FOR UPDATE): dos
+  // PUT simultáneos al mismo local se serializan, sin P2002 cuando el
+  // calendario aún no existe y con `previous` igual a lo que guardó el otro.
+  // La respuesta también se lee dentro de la transacción, para que cada PUT
+  // devuelva y audite lo que él mismo guardó.
   async updateCalendar(
     storeId: string,
     dto: UpdateOperatingCalendarDto,
@@ -191,22 +201,31 @@ export class OperatingDaysService {
     previous: { weekdays: IsoWeekday[]; trackingStartDate: string } | null;
   }> {
     await this.stores.assertActive(storeId);
-    const previous = await this.prisma.storeOperatingSchedule.findUnique({
-      where: { storeId },
-      select: SCHEDULE_SELECT,
-    });
     const data = {
       ...flagsOf(dto.weekdays),
       trackingStartDate: dbDate(dto.trackingStartDate),
       updatedById: currentUser.id,
     };
-    await this.prisma.storeOperatingSchedule.upsert({
-      where: { storeId },
-      update: data,
-      create: { storeId, ...data },
-    });
+    const { previous, calendar } = await this.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM stores WHERE id = ${storeId}::uuid FOR UPDATE`;
+        const before = await tx.storeOperatingSchedule.findUnique({
+          where: { storeId },
+          select: SCHEDULE_SELECT,
+        });
+        await tx.storeOperatingSchedule.upsert({
+          where: { storeId },
+          update: data,
+          create: { storeId, ...data },
+        });
+        return {
+          previous: before,
+          calendar: await this.getCalendar(storeId, tx),
+        };
+      },
+    );
     return {
-      calendar: await this.getCalendar(storeId),
+      calendar,
       previous: previous
         ? {
             weekdays: weekdaysOf(previous),
