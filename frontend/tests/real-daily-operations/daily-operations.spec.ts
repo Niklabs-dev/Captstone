@@ -71,8 +71,20 @@ async function login(
     ).status(),
   ).toBe(200);
 }
+// El título de la consulta sale del estado de React: si muestra la fecha, la
+// página ya hidrató y el input controlado no vuelve a la fecha inicial.
 async function registerDate(page: Page, value = date): Promise<undefined> {
-  await page.getByLabel(/Fecha de operación/).fill(value);
+  const input = page.getByLabel(/Fecha de operación/);
+  const [year, month, day] = value.split('-');
+  const title = page.getByRole('heading', {
+    name: `Operación registrada · ${day}-${month}-${year}`,
+  });
+  await expect(async () => {
+    await input.fill(value);
+    await expect(input).toHaveValue(value, { timeout: 1000 });
+    await expect(title).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 30000 });
+  await expect(input).toHaveValue(value);
   await expect(
     page.getByRole('button', { name: 'Guardar operación', exact: true }),
   ).toBeEnabled();

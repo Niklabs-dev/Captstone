@@ -408,11 +408,12 @@ export function dailyFormFieldsFrom(
     differenceReason: operation.differenceReason ?? '',
   };
 }
-// Errores de la corrección: el 409 significa que la operación ya alimentó un
-// reparto confirmado o pagado y no admite cambios (triggers de SPRINT-4R-T02).
+// Errores de la corrección: el backend responde 409 por varias reglas (reparto
+// confirmado o pagado, participante que dejó de ser elegible), así que el
+// mensaje no afirma una sola causa.
 export function dailyOperationCorrectionErrorMessage(status: number): string {
   if (status === 409)
-    return 'No se puede corregir: esta operación ya forma parte de un reparto confirmado o pagado.';
+    return 'No se pudo corregir: la operación puede formar parte de un reparto confirmado o pagado, o tener un participante que ya no es elegible. Actualiza la consulta y revisa la selección.';
   return dailyOperationErrorMessage(status);
 }
 export function dailyOperationErrorMessage(status: number): string {
