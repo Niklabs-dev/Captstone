@@ -17,6 +17,8 @@ const paths = {
   more: 'M5 11v2M12 11v2M19 11v2',
   arrow: 'M5 12h14m-6-6 6 6-6 6',
   user: 'M20 21a8 8 0 0 0-16 0M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
+  chart: 'M3 3v18h18M8 17v-5M13 17V8M18 17v-9',
+  calendar: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z',
 };
 
 export function Icon({ name }: { name: keyof typeof paths }): ReactElement {
