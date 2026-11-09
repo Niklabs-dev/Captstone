@@ -364,3 +364,7 @@ Pruebas: `npm run test:daily-operations` (unitarias), `npm run test:daily-operat
 Si una operación diaria se corrige después del cálculo, el borrador sigue visible como **desactualizado**, con el monto calculado y el actual, y no se puede validar hasta recalcularlo. El **SUPERVISOR** consulta en solo lectura los repartos de su local, sin acciones, alertas ni constancias de otras personas.
 
 Pruebas: `npm run test:tip-pools`, `npm run test:my-tip-receipts` y `TEST_REAL_DISPOSABLE=true npx playwright test --config playwright.tip-pools.config.ts equal-pools`.
+
+## Verificación end-to-end del flujo diario y el reparto (SPRINT-4R-T07)
+
+`TEST_REAL_DISPOSABLE=true npm run test:daily-flow:real` recorre con API y base reales, en cuatro anchos, el flujo completo: el supervisor registra los días desde el formulario, el contador calcula, valida y entrega el reparto, y cada trabajador ve su monto en el portal; además comprueba que ya no existe cierre por turno ni captura de ventas o Mercado Pago. El equivalente por HTTP está en `backend/test/daily-flow-equal-pool.integration.spec.ts`. Trazabilidad con la DoD, comandos, conteos y hallazgos: [SPRINT-4R-T07](docs/SPRINT-4R-T07.md).
