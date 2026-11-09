@@ -22,7 +22,7 @@ import {
   type Consolidation,
 } from './calculation/sales-consolidation.js';
 import type { SalesReportQueryDto } from './dto/sales-reports-query.dto.js';
-import type { Prisma } from '../generated/prisma/client.js';
+import { Prisma } from '../generated/prisma/client.js';
 import type {
   LegacyBalanceStatus,
   LegacyClosingLineDifference,
@@ -162,19 +162,31 @@ export class SalesReportsService {
     includeStoreIds: readonly string[] = [],
   ): Promise<ConsolidatedRange> {
     const today = this.validateRange(range, now);
-    await this.assertStoreExists(range.storeId);
+    const consolidation = await this.snapshot((tx) =>
+      this.readConsolidation(tx, range, now, includeStoreIds),
+    );
+    return { today, ...consolidation };
+  }
+
+  private async readConsolidation(
+    tx: Prisma.TransactionClient,
+    range: ReportRange,
+    now: Date,
+    includeStoreIds: readonly string[],
+  ): Promise<Consolidation> {
+    await this.assertStoreExists(range.storeId, tx);
     const dates = { gte: dbDate(range.from), lte: dbDate(range.to) };
     const storeFilter =
       range.storeId === undefined ? {} : { storeId: range.storeId };
 
     const [stores, paymentMethods, imports, operations, salesDays] =
       await Promise.all([
-        this.prisma.store.findMany({
+        tx.store.findMany({
           where: range.storeId === undefined ? {} : { id: range.storeId },
           select: { id: true, name: true, city: true, isActive: true },
           orderBy: [{ name: 'asc' }, { id: 'asc' }],
         }),
-        this.prisma.paymentMethod.findMany({
+        tx.paymentMethod.findMany({
           select: {
             id: true,
             code: true,
@@ -185,7 +197,7 @@ export class SalesReportsService {
           orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
         }),
         // Solo la versión vigente: PENDING y SUPERSEDED nunca son ventas.
-        this.prisma.salesImport.findMany({
+        tx.salesImport.findMany({
           where: {
             ...storeFilter,
             businessDate: dates,
@@ -205,7 +217,7 @@ export class SalesReportsService {
             },
           },
         }),
-        this.prisma.dailyOperation.findMany({
+        tx.dailyOperation.findMany({
           where: { ...storeFilter, businessDate: dates },
           select: {
             id: true,
@@ -221,6 +233,7 @@ export class SalesReportsService {
         this.operatingDays.listSalesDays(
           { from: range.from, to: range.to, storeId: range.storeId },
           now,
+          tx,
         ),
       ]);
 
@@ -231,7 +244,7 @@ export class SalesReportsService {
       ...operations.map((item) => item.storeId),
       ...includeStoreIds,
     ]);
-    const consolidation = consolidateSales({
+    return consolidateSales({
       stores: stores.filter(
         (store) => store.isActive || withData.has(store.id),
       ),
@@ -267,7 +280,6 @@ export class SalesReportsService {
         closure: item.closure,
       })),
     });
-    return { today, ...consolidation };
   }
 
   // Históricos del flujo previo a SPRINT-4R-T01, separados del contrato
@@ -278,7 +290,14 @@ export class SalesReportsService {
     now: Date = new Date(),
   ): Promise<LegacySalesReport> {
     this.validateRange(query, now);
-    await this.assertStoreExists(query.storeId);
+    return this.snapshot((tx) => this.readLegacy(tx, query));
+  }
+
+  private async readLegacy(
+    tx: Prisma.TransactionClient,
+    query: SalesReportQueryDto,
+  ): Promise<LegacySalesReport> {
+    await this.assertStoreExists(query.storeId, tx);
     const storeFilter =
       query.storeId === undefined ? {} : { storeId: query.storeId };
     const { start, end } = businessDayRange(
@@ -287,7 +306,7 @@ export class SalesReportsService {
     );
 
     const [closings, saleGroups, stores, paymentMethods] = await Promise.all([
-      this.prisma.cashClosing.findMany({
+      tx.cashClosing.findMany({
         where: {
           ...storeFilter,
           businessDate: { gte: dbDate(query.from), lte: dbDate(query.to) },
@@ -317,14 +336,14 @@ export class SalesReportsService {
       }),
       // Ventas históricas en hora de Chile: [inicio de from, inicio del día
       // siguiente a to).
-      this.prisma.sale.groupBy({
+      tx.sale.groupBy({
         by: ['storeId', 'paymentMethodId', 'source'],
         where: { ...storeFilter, soldAt: { gte: start, lt: end } },
         _count: { _all: true },
         _sum: { grossAmount: true, tipAmount: true },
       }),
-      this.prisma.store.findMany({ select: { id: true, name: true } }),
-      this.prisma.paymentMethod.findMany({
+      tx.store.findMany({ select: { id: true, name: true } }),
+      tx.paymentMethod.findMany({
         select: { id: true, code: true, name: true, sortOrder: true },
       }),
     ]);
@@ -421,9 +440,23 @@ export class SalesReportsService {
     return today;
   }
 
-  private async assertStoreExists(storeId: string | undefined): Promise<void> {
+  // Todas las lecturas de un reporte en una sola transacción REPEATABLE READ:
+  // ven la misma foto de la base aunque entre medio se confirme una
+  // importación o se registre una operación diaria. Solo lee.
+  private snapshot<T>(
+    read: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(read, {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    });
+  }
+
+  private async assertStoreExists(
+    storeId: string | undefined,
+    tx: Prisma.TransactionClient,
+  ): Promise<void> {
     if (storeId === undefined) return;
-    const store = await this.prisma.store.findUnique({
+    const store = await tx.store.findUnique({
       where: { id: storeId },
       select: { id: true },
     });
