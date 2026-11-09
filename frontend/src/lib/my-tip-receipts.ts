@@ -8,7 +8,8 @@ export interface OwnTipReceipt {
   storeName: string;
   periodStart: string;
   periodEnd: string;
-  hoursWorked: string;
+  // null en los repartos equitativos (SPRINT-4R-T04).
+  hoursWorked: string | null;
   amount: number;
   paymentDate: string;
   paidByName: string;
@@ -44,8 +45,11 @@ export function parseOwnReceipts(
       !isTipDate(r.periodStart) ||
       !isTipDate(r.periodEnd) ||
       r.periodStart > r.periodEnd ||
-      typeof r.hoursWorked !== 'string' ||
-      !/^\d+(\.\d{1,2})?$/.test(r.hoursWorked) ||
+      !(
+        r.hoursWorked === null ||
+        (typeof r.hoursWorked === 'string' &&
+          /^\d+(\.\d{1,2})?$/.test(r.hoursWorked))
+      ) ||
       typeof r.amount !== 'number' ||
       !Number.isSafeInteger(r.amount) ||
       r.amount < 0 ||

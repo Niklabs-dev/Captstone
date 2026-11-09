@@ -33,7 +33,7 @@ const DOMAIN = '@documents-delete-test.moi-food.cl';
 const STORE_NAME = 'Subway Documents Delete Test';
 
 function uniquePdf(): Buffer {
-  return Buffer.from(`%PDF-1.7\n% prueba ${randomUUID()}\n`);
+  return Buffer.from(`%PDF-1.7\n% prueba ${randomUUID()}\n%%EOF\n`);
 }
 
 describe.skipIf(!databaseUrl)(

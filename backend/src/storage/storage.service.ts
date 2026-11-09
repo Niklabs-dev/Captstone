@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
   PayloadTooLargeException,
+  UnprocessableEntityException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -17,6 +18,7 @@ import {
   MAX_ALLOWED_SIZE_MB,
   type StoredFile,
 } from './types/storage.types.js';
+import { hasCompleteStructure } from './utils/file-structure.util.js';
 import { detectMimeType } from './utils/file-signature.util.js';
 
 // Almacenamiento de archivos del gestor documental (SPRINT-2-T04).
@@ -65,6 +67,12 @@ export class StorageService {
     ) {
       throw new UnsupportedMediaTypeException(
         'El tipo declarado no coincide con el contenido del archivo',
+      );
+    }
+    // Tipo correcto pero archivo incompleto o dañado (SPRINT-4R-T18).
+    if (!hasCompleteStructure(content, mimeType)) {
+      throw new UnprocessableEntityException(
+        'El archivo está dañado o incompleto; vuelve a generarlo y súbelo de nuevo',
       );
     }
 
