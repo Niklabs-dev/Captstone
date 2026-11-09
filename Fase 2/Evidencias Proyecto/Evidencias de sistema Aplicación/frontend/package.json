@@ -49,7 +49,7 @@
     "test:payment-methods:e2e": "playwright test --config playwright.payment-methods.config.ts"
   },
   "dependencies": {
-    "next": "16.3.6",
+    "next": "16.4.5",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
@@ -60,7 +60,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.6",
+    "eslint-config-next": "16.4.5",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.8",
     "tailwindcss": "^4",
