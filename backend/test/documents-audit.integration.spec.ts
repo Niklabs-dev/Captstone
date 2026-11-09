@@ -33,7 +33,7 @@ const STORE_NAME = 'Subway Documents Audit Test';
 const USER_AGENT = 'documents-audit-test-agent';
 
 function uniquePdf(marker: string): Buffer {
-  return Buffer.from(`%PDF-1.7\n% ${marker} ${randomUUID()}\n`);
+  return Buffer.from(`%PDF-1.7\n% ${marker} ${randomUUID()}\n%%EOF\n`);
 }
 
 describe.skipIf(!databaseUrl)(

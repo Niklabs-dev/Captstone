@@ -56,6 +56,8 @@ model Store {
   dailyOperations    DailyOperation[]
   externalCodes      StoreExternalCode[]
   salesImports       SalesImport[]
+  operatingSchedule  StoreOperatingSchedule?
+  closures           StoreClosure[]
 
   @@map("stores")
 }
@@ -126,6 +128,8 @@ model User {
   dailyOperationParticipations DailyOperationParticipant[]
   uploadedSalesImports       SalesImport[]        @relation("UploadedSalesImports")
   confirmedSalesImports      SalesImport[]        @relation("ConfirmedSalesImports")
+  updatedOperatingSchedules  StoreOperatingSchedule[] @relation("UpdatedOperatingSchedules")
+  createdStoreClosures       StoreClosure[]       @relation("CreatedStoreClosures")
   inventoryMovements         InventoryMovement[]  @relation("CreatedInventoryMovements")
   inventoryCounts            InventoryCount[]     @relation("CreatedInventoryCounts")
   ownDataRightsRequests      DataRightsRequest[]  @relation("OwnDataRightsRequests")
@@ -1027,6 +1031,58 @@ model SalesImportLine {
   @@unique([importId, normalizedLabel])
   @@index([paymentMethodId])
   @@map("sales_import_lines")
+}
+
+// -------------------------------------------------------------
+// CALENDARIO DE OPERACIÓN DE LOCALES (SPRINT-4R-T12)
+// Días semanales en que abre cada local y excepciones de cierre, para
+// calcular (al consultar, sin guardar alertas) si cada día está IMPORTADO,
+// PENDIENTE, ATRASADO o CERRADO. Independiente de los horarios de los
+// trabajadores. Reglas en la migración
+// 20261108030000_calendario_operacion_locales.
+// -------------------------------------------------------------
+
+/// Días de la semana en que abre un local y desde cuándo se le exigen
+/// ventas importadas. Uno por local; al menos un día abierto (CHECK). Un local
+/// sin calendario no genera alertas de ventas faltantes.
+model StoreOperatingSchedule {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  opensMonday       Boolean  @map("opens_monday")
+  opensTuesday      Boolean  @map("opens_tuesday")
+  opensWednesday    Boolean  @map("opens_wednesday")
+  opensThursday     Boolean  @map("opens_thursday")
+  opensFriday       Boolean  @map("opens_friday")
+  opensSaturday     Boolean  @map("opens_saturday")
+  opensSunday       Boolean  @map("opens_sunday")
+  /// Primer día de negocio en que se exigen ventas; los anteriores no se
+  /// informan.
+  trackingStartDate DateTime @map("tracking_start_date") @db.Date
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store       Store  @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId     String @unique @map("store_id") @db.Uuid
+  updatedBy   User   @relation("UpdatedOperatingSchedules", fields: [updatedById], references: [id], onDelete: Restrict)
+  updatedById String @map("updated_by_id") @db.Uuid
+
+  @@map("store_operating_schedules")
+}
+
+/// Cierre excepcional de un local en una fecha (feriado, mantención, etc.),
+/// con motivo obligatorio. Uno por local y fecha; ese día nunca genera alerta.
+model StoreClosure {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  closureDate DateTime @map("closure_date") @db.Date
+  reason      String   @db.VarChar(300)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  store       Store  @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId     String @map("store_id") @db.Uuid
+  createdBy   User   @relation("CreatedStoreClosures", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById String @map("created_by_id") @db.Uuid
+
+  @@unique([storeId, closureDate])
+  @@map("store_closures")
 }
 
 // -------------------------------------------------------------

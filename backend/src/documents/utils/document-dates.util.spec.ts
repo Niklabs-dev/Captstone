@@ -3,6 +3,7 @@ import {
   addYears,
   businessDateOf,
   computeDocumentDeadlines,
+  daysBetween,
   formatDbDate,
   isRetentionExpired,
 } from './document-dates.util.js';
@@ -95,5 +96,41 @@ describe('Vencimiento del plazo de conservación (SPRINT-2-T07)', () => {
     expect(
       isRetentionExpired(retainUntil, new Date('2031-10-18T03:30:00.000Z')),
     ).toBe(true);
+  });
+});
+
+describe('Días corridos entre fechas del calendario (SPRINT-4R-T13)', () => {
+  it('cuenta días corridos, cruzando meses, años bisiestos y el cambio de hora', () => {
+    expect(
+      daysBetween(
+        { year: 2026, month: 11, day: 1 },
+        { year: 2026, month: 11, day: 7 },
+      ),
+    ).toBe(6);
+    expect(
+      daysBetween(
+        { year: 2024, month: 2, day: 28 },
+        { year: 2024, month: 3, day: 1 },
+      ),
+    ).toBe(2);
+    // Chile cambia de hora en abril y septiembre: las fechas no se afectan.
+    expect(
+      daysBetween(
+        { year: 2026, month: 1, day: 1 },
+        { year: 2026, month: 12, day: 31 },
+      ),
+    ).toBe(364);
+    expect(
+      daysBetween(
+        { year: 2026, month: 3, day: 10 },
+        { year: 2026, month: 3, day: 10 },
+      ),
+    ).toBe(0);
+    expect(
+      daysBetween(
+        { year: 2026, month: 3, day: 10 },
+        { year: 2026, month: 3, day: 9 },
+      ),
+    ).toBe(-1);
   });
 });

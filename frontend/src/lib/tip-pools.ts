@@ -8,6 +8,9 @@ export const POOL_STATUS = {
 } as const;
 export type PoolStatus = keyof typeof POOL_STATUS;
 export type PoolAction = 'observations' | 'confirm' | 'pay';
+// SPRINT-4R-T06: todo cálculo nuevo es equitativo; las horas solo existen en
+// los repartos proporcionales históricos.
+export type PoolRule = 'PROPORTIONAL_TO_HOURS' | 'EQUAL_SHARES';
 export interface PoolPeriod {
   storeId: string;
   periodStart: string;
@@ -20,7 +23,14 @@ export interface PoolPerson {
 export interface PoolLine {
   userId: string;
   workerName: string;
-  hoursWorked: string;
+  hoursWorked: string | null;
+  amount: number;
+}
+export interface PoolDailySource {
+  operationId: string;
+  businessDate: string;
+  cardTipAmount: number;
+  cashTipAmount: number;
   amount: number;
 }
 export interface TipPool {
@@ -30,8 +40,9 @@ export interface TipPool {
   store: PoolPerson;
   periodStart: string;
   periodEnd: string;
+  rule: PoolRule;
   totalAmount: number;
-  totalHours: string;
+  totalHours: string | null;
   agreement: {
     id: string;
     name: string;
@@ -46,6 +57,7 @@ export interface TipPool {
     paymentMethod: string;
     amount: number;
   }[];
+  dailySources: PoolDailySource[];
   reconciled: boolean;
   notes: string | null;
   calculatedBy: PoolPerson;
@@ -90,6 +102,54 @@ const hours = (v: unknown): v is string =>
   Number.isFinite(Number(v));
 const instant = (v: unknown): v is string =>
   typeof v === 'string' && Number.isFinite(Date.parse(v));
+const isPoolRule = (v: unknown): v is PoolRule =>
+  v === 'PROPORTIONAL_TO_HOURS' || v === 'EQUAL_SHARES';
+export function poolRuleLabel(rule: PoolRule): string {
+  return rule === 'EQUAL_SHARES'
+    ? 'Reparto equitativo diario entre participantes'
+    : 'Proporcional a las horas trabajadas';
+}
+// Cifras de la conciliación visible del reparto (SPRINT-4R-T06).
+export function poolReconciliation(
+  pool: Pick<TipPool, 'lines' | 'sources' | 'dailySources' | 'totalAmount'>,
+): {
+  beneficiaries: number;
+  individualTotal: number;
+  sourcesTotal: number;
+  linesDifference: number;
+  sourcesDifference: number;
+} {
+  const individualTotal = pool.lines.reduce((a, l) => a + l.amount, 0);
+  const sourcesTotal =
+    pool.sources.reduce((a, s) => a + s.amount, 0) +
+    pool.dailySources.reduce((a, s) => a + s.amount, 0);
+  return {
+    beneficiaries: pool.lines.length,
+    individualTotal,
+    sourcesTotal,
+    linesDifference: pool.totalAmount - individualTotal,
+    sourcesDifference: pool.totalAmount - sourcesTotal,
+  };
+}
+// Operaciones corregidas después del cálculo (SPRINT-4R-T06): amount quedó
+// congelado al calcular y tarjeta + efectivo son los valores actuales. Un
+// borrador así se muestra para recalcularlo; no es una respuesta inválida.
+export function poolStaleSources(
+  pool: Pick<TipPool, 'dailySources'>,
+): { businessDate: string; calculatedAmount: number; currentAmount: number }[] {
+  return pool.dailySources.flatMap((s) => {
+    const currentAmount = s.cardTipAmount + s.cashTipAmount;
+    return currentAmount === s.amount
+      ? []
+      : [
+          {
+            businessDate: s.businessDate,
+            calculatedAmount: s.amount,
+            currentAmount,
+          },
+        ];
+  });
+}
 export function parsePeriod(v: unknown): PoolPeriod | null {
   if (
     !isRecord(v) ||
@@ -117,13 +177,17 @@ export function parsePool(v: unknown): TipPool | null {
     !isTipDate(v.periodStart) ||
     !isTipDate(v.periodEnd) ||
     v.periodStart > v.periodEnd ||
+    !isPoolRule(v.rule) ||
     !money(v.totalAmount) ||
-    !hours(v.totalHours) ||
+    !(v.rule === 'EQUAL_SHARES'
+      ? v.totalHours === null
+      : hours(v.totalHours)) ||
     !person(v.calculatedBy) ||
     !instant(v.calculatedAt) ||
     !(v.notes === null || typeof v.notes === 'string') ||
     !Array.isArray(v.lines) ||
     !Array.isArray(v.sources) ||
+    !Array.isArray(v.dailySources) ||
     typeof v.reconciled !== 'boolean' ||
     !money(v.receiptsCount)
   )
@@ -134,14 +198,16 @@ export function parsePool(v: unknown): TipPool | null {
       !isRecord(l) ||
       !isUuid(l.userId) ||
       typeof l.workerName !== 'string' ||
-      !hours(l.hoursWorked) ||
+      !(v.rule === 'EQUAL_SHARES'
+        ? l.hoursWorked === null
+        : hours(l.hoursWorked)) ||
       !money(l.amount)
     )
       return null;
     lines.push({
       userId: l.userId,
       workerName: l.workerName,
-      hoursWorked: l.hoursWorked,
+      hoursWorked: l.hoursWorked as string | null,
       amount: l.amount,
     });
   }
@@ -162,14 +228,37 @@ export function parsePool(v: unknown): TipPool | null {
       amount: s.amount,
     });
   }
+  const dailySources: PoolDailySource[] = [];
+  for (const s of v.dailySources) {
+    if (
+      !isRecord(s) ||
+      !isUuid(s.operationId) ||
+      !isTipDate(s.businessDate) ||
+      !money(s.cardTipAmount) ||
+      !money(s.cashTipAmount) ||
+      !money(s.amount)
+    )
+      return null;
+    dailySources.push({
+      operationId: s.operationId,
+      businessDate: s.businessDate,
+      cardTipAmount: s.cardTipAmount,
+      cashTipAmount: s.cashTipAmount,
+      amount: s.amount,
+    });
+  }
   if (
     new Set(lines.map((l) => l.userId)).size !== lines.length ||
-    new Set(sources.map((s) => s.tipEntryId)).size !== sources.length
+    new Set(sources.map((s) => s.tipEntryId)).size !== sources.length ||
+    new Set(dailySources.map((s) => s.operationId)).size !== dailySources.length
   )
     return null;
+  // Misma regla del backend: líneas y fuentes de ambos tipos suman el fondo.
   const reconciled =
     lines.reduce((a, l) => a + l.amount, 0) === v.totalAmount &&
-    sources.reduce((a, s) => a + s.amount, 0) === v.totalAmount;
+    sources.reduce((a, s) => a + s.amount, 0) +
+      dailySources.reduce((a, s) => a + s.amount, 0) ===
+      v.totalAmount;
   if (v.reconciled !== reconciled) return null;
   let agreement: TipPool['agreement'] = null;
   if (v.agreement !== null) {
@@ -204,11 +293,13 @@ export function parsePool(v: unknown): TipPool | null {
     store: projectPerson(v.store),
     periodStart: v.periodStart,
     periodEnd: v.periodEnd,
+    rule: v.rule,
     totalAmount: v.totalAmount,
-    totalHours: v.totalHours,
+    totalHours: v.totalHours as string | null,
     agreement,
     lines,
     sources,
+    dailySources,
     reconciled,
     notes: v.notes,
     calculatedBy: projectPerson(v.calculatedBy),
@@ -347,6 +438,11 @@ export const POOL_ISSUES: Record<string, string> = {
   WORK_HOURS_PERIOD_MISMATCH: 'Las horas no corresponden al período.',
   WORK_HOURS_TOTAL_ZERO: 'Las horas totales deben ser mayores que cero.',
   WORKER_NOT_IN_STORE: 'Un trabajador no pertenece al local.',
+  DAILY_OPERATIONS_MISSING: 'No hay operaciones diarias para el período.',
+  DAILY_OPERATION_ALREADY_USED:
+    'Hay operaciones diarias incluidas en otro reparto.',
+  DAILY_PARTICIPANTS_MISSING:
+    'Hay operaciones diarias con propinas y sin participantes.',
 };
 export function poolError(status: number): string {
   return (
@@ -357,7 +453,7 @@ export function poolError(status: number): string {
         403: 'Tu cuenta no tiene permiso para realizar esta acción.',
         404: 'No se encontró el reparto solicitado.',
         409: 'El reparto cambió desde que lo revisaste. Actualiza el reparto antes de continuar.',
-        422: 'No se puede calcular con los datos disponibles. Revisa el pacto, las horas y los registros del período.',
+        422: 'No se puede calcular con los datos disponibles. Revisa las operaciones diarias del período y sus participantes.',
         429: 'Hay demasiadas solicitudes. Espera un momento y vuelve a intentar.',
       } as Record<number, string>
     )[status] ??

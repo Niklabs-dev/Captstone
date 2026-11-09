@@ -73,6 +73,12 @@ export const AUDIT_ACTION = {
   SALES_IMPORT_CONFIRMED: 'SALES_IMPORT_CONFIRMED',
   SALES_IMPORT_DISCARDED: 'SALES_IMPORT_DISCARDED',
   SALES_IMPORT_FILE_DOWNLOADED: 'SALES_IMPORT_FILE_DOWNLOADED',
+  // Calendario de operación de los locales (SPRINT-4R-T12): cambio de días
+  // semanales y fecha de inicio (con la configuración anterior), y alta o
+  // retiro de una excepción de cierre (con su fecha y motivo).
+  STORE_OPERATING_CALENDAR_UPDATED: 'STORE_OPERATING_CALENDAR_UPDATED',
+  STORE_CLOSURE_CREATED: 'STORE_CLOSURE_CREATED',
+  STORE_CLOSURE_DELETED: 'STORE_CLOSURE_DELETED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

@@ -47,12 +47,23 @@ describe('Swagger de la operación diaria (SPRINT-4R-T01 y SPRINT-4R-T03)', () =
     {
       method: 'post' as const,
       path: '/daily-operations',
-      statuses: ['200', '201', '400', '401', '403', '404', '409', '413', '415'],
+      statuses: [
+        '200',
+        '201',
+        '400',
+        '401',
+        '403',
+        '404',
+        '409',
+        '413',
+        '415',
+        '422',
+      ],
     },
     {
       method: 'patch' as const,
       path: '/daily-operations/{id}',
-      statuses: ['200', '400', '401', '403', '404', '409', '413', '415'],
+      statuses: ['200', '400', '401', '403', '404', '409', '413', '415', '422'],
     },
     {
       method: 'get' as const,

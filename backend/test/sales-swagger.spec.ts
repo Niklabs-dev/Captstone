@@ -8,8 +8,8 @@ import { createSwaggerDocument } from '../src/swagger.js';
 // operación diaria (SPRINT-4R-T01): las ventas ya no las captura el
 // supervisor ni alimentan una conciliación paralela. Este spec documenta la
 // desactivación: el endpoint y sus esquemas ya no se publican. Los datos
-// históricos de ventas siguen consultables por la consulta consolidada
-// (/sales-dashboard, módulo propio).
+// históricos de ventas siguen consultables como legado en
+// /sales-reports/legacy (SPRINT-4R-T13), separados del panel vigente.
 describe('Ingreso MrComanda retirado (SPRINT-4-T32, SPRINT-4R-T01)', () => {
   let app: INestApplication;
   let document: OpenAPIObject;
@@ -51,6 +51,7 @@ describe('Ingreso MrComanda retirado (SPRINT-4-T32, SPRINT-4R-T01)', () => {
 
   it('mantiene la consulta consolidada y el catálogo de medios publicados', () => {
     expect(document.paths['/sales-dashboard']?.['get']).toBeDefined();
+    expect(document.paths['/sales-reports/legacy']?.['get']).toBeDefined();
     expect(document.paths['/payment-methods']?.['get']).toBeDefined();
     expect(document.paths['/payment-methods']?.['post']).toBeDefined();
     // Las lecturas históricas se conservan.
