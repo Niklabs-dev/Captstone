@@ -16,17 +16,20 @@
 | Ventas y Caja | `payment_methods`, `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries` | **Histórico, modo lectura:** catálogo administrable de medios de pago (se conserva para historial y futura importación Excel), ventas por local (manuales y totales netos MrComanda) y cierre de caja por local, día y turno con conciliación y vouchers. Reemplazado operativamente por la operación diaria |
 | Operación diaria | `daily_operations`, `daily_operation_vouchers`, `daily_operation_participants` | Una operación por local y fecha de negocio (SPRINT-4R-T01): propina tarjeta con voucher fotográfico, propina efectivo, fondo de propinas calculado y diferencia de efectivo con signo y motivo. Fuente operativa de ambos montos de propina y, desde SPRINT-4R-T02, de la selección de participantes del reparto (compartida por tarjeta y efectivo) |
 | Importación de ventas | `store_external_codes`, `payment_method_aliases`, `sales_imports`, `sales_import_lines` | Ventas diarias importadas desde el Excel de MrComanda (SPRINT-4R-T08): equivalencias explícitas de locales y alias de medios de pago, archivo importado con hash SHA-256 y versiones (una vigente por local y fecha) y totales por medio de pago. No guarda propinas ni diferencias de efectivo (vienen de la operación diaria) ni escribe en `sales` |
+| Calendario de operación | `store_operating_schedules`, `store_closures` | Días semanales en que abre cada local, desde cuándo se exigen ventas y cierres por excepción con motivo (SPRINT-4R-T12). El estado diario de ventas (IMPORTADO / PENDIENTE / ATRASADO / CERRADO) se calcula al consultar, sin tablas de alertas |
 | Inventario | `products`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Stock por libro mayor de movimientos y conteos físicos que detectan mermas |
 | Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
 
-**35 tablas y 16 enums**: el modelo base (27 tablas, hasta SPRINT-4-T32) más la
+**37 tablas y 16 enums**: el modelo base (27 tablas, hasta SPRINT-4-T32) más la
 operación diaria de SPRINT-4R-T01 (`daily_operations` y
 `daily_operation_vouchers`), los participantes y fuentes diarias de
 SPRINT-4R-T02 (`daily_operation_participants` y
 `tip_pool_daily_operation_sources`) y la importación de ventas MrComanda de
 SPRINT-4R-T08 (`store_external_codes`, `payment_method_aliases`,
 `sales_imports` y `sales_import_lines`, con los enums `ExternalSystem` y
-`SalesImportStatus`; fuente de verdad física: `prisma/schema.prisma`).
+`SalesImportStatus`) y el calendario de operación de SPRINT-4R-T12
+(`store_operating_schedules` y `store_closures`; fuente de verdad física:
+`prisma/schema.prisma`).
 SPRINT-4R-T02 no agrega enums: añade el valor `EQUAL_SHARES` a
 `TipAgreementRule`. El Portal del Trabajador no agrega
 tablas: es una vista
@@ -539,11 +542,28 @@ los datos del archivo (se suma a la comparación del trigger
 `sales_imports_enforce`). La API que usa este modelo está documentada en el
 README del backend.
 
+## Calendario de operación de los locales (SPRINT-4R-T12)
+
+Migración `20261108030000_calendario_operacion_locales` (con reversa en
+`down.sql`). No toca tablas existentes y es independiente de
+`work_hours_records` (horarios de trabajadores).
+
+| Tabla | Propósito |
+| --- | --- |
+| `store_operating_schedules` | Uno por local (`store_id` único): siete columnas booleanas `opens_monday` … `opens_sunday` (al menos una verdadera, CHECK), `tracking_start_date` (primer día en que se exigen ventas) y quién lo modificó por última vez. |
+| `store_closures` | Cierre por excepción: local, `closure_date`, motivo obligatorio no vacío (CHECK) y quién lo registró. Uno por local y fecha (índice único). Se puede quitar (la API lo audita). |
+
+El estado diario de ventas **no se guarda**: la API lo calcula al consultar a
+partir de este calendario, de los cierres y de las importaciones `ACTIVE`
+(`sales_imports`). Así no hay alertas duplicadas ni que limpiar, y una
+importación tardía resuelve el día sin pasos manuales. Reglas en el README del
+backend.
+
 ## Cómo ver el modelo de forma visual
 
 > Los diagramas Mermaid y DBML de abajo incluyen el módulo de operación
 > diaria (SPRINT-4R-T01 y SPRINT-4R-T02) y la importación de ventas MrComanda
-> (SPRINT-4R-T08); la fuente de verdad física siempre
+> (SPRINT-4R-T08) y el calendario de operación (SPRINT-4R-T12); la fuente de verdad física siempre
 > es `prisma/schema.prisma` y las migraciones.
 
 Hay cuatro opciones; las dos primeras están listas en este archivo:
@@ -630,6 +650,11 @@ erDiagram
   USERS |o--o{ SALES_IMPORTS : "confirma"
   SALES_IMPORTS ||--o{ SALES_IMPORT_LINES : "totales por medio"
   PAYMENT_METHODS ||--o{ SALES_IMPORT_LINES : "resuelve"
+
+  STORES ||--o| STORE_OPERATING_SCHEDULES : "abre según"
+  USERS ||--o{ STORE_OPERATING_SCHEDULES : "configura"
+  STORES ||--o{ STORE_CLOSURES : "cierra por excepción"
+  USERS ||--o{ STORE_CLOSURES : "registra"
 
   STORES ||--o{ PRODUCTS : "almacena (vía movimientos)"
   PRODUCTS ||--o{ INVENTORY_MOVEMENTS : "mueve"
@@ -1287,6 +1312,39 @@ Table sales_import_lines {
   }
 
   Note: 'SPRINT-4R-T08: solo cambian mientras la importación está PENDING'
+}
+
+Table store_operating_schedules {
+  id uuid [pk, default: `gen_random_uuid()`]
+  opens_monday boolean [not null]
+  opens_tuesday boolean [not null]
+  opens_wednesday boolean [not null]
+  opens_thursday boolean [not null]
+  opens_friday boolean [not null]
+  opens_saturday boolean [not null]
+  opens_sunday boolean [not null, note: 'Al menos un día abierto (CHECK)']
+  tracking_start_date date [not null, note: 'Primer día en que se exigen ventas']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+  store_id uuid [not null, unique, ref: - stores.id]
+  updated_by_id uuid [not null, ref: > users.id]
+
+  Note: 'SPRINT-4R-T12: un calendario por local; sin calendario no hay alertas'
+}
+
+Table store_closures {
+  id uuid [pk, default: `gen_random_uuid()`]
+  closure_date date [not null]
+  reason varchar(300) [not null, note: 'Motivo obligatorio no vacío (CHECK)']
+  created_at timestamptz [not null, default: `now()`]
+  store_id uuid [not null, ref: > stores.id]
+  created_by_id uuid [not null, ref: > users.id]
+
+  indexes {
+    (store_id, closure_date) [unique, note: 'Un cierre por local y fecha']
+  }
+
+  Note: 'SPRINT-4R-T12: cierre por excepción; ese día nunca genera alerta'
 }
 
 Table products {

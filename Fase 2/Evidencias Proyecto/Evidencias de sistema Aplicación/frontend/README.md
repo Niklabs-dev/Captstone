@@ -357,3 +357,10 @@ Pruebas: `npm run test:daily-operations` (unitarias), `npm run test:daily-operat
   participantes que ya no son elegibles se avisan y se quitan al guardar. Un
   409 informa que la operación ya alimentó un reparto confirmado o pagado.
 - **Detalle registrado:** muestra cada participante con su monto del día.
+## Detalle del reparto equitativo (SPRINT-4R-T06)
+
+`/propinas/repartos` muestra cada beneficiario con la columna destacada **Monto a pagar**, además de fondo total, beneficiarios, suma individual y regla aplicada. La conciliación compara suma individual, fondo y fuentes (operaciones diarias o registros históricos); si no coincide, avisa que los montos no deben usarse y bloquea la validación. Los repartos equitativos no muestran horas ni pacto; los proporcionales históricos los conservan. En «Mis propinas», una constancia equitativa indica que las horas no aplican.
+
+Si una operación diaria se corrige después del cálculo, el borrador sigue visible como **desactualizado**, con el monto calculado y el actual, y no se puede validar hasta recalcularlo. El **SUPERVISOR** consulta en solo lectura los repartos de su local, sin acciones, alertas ni constancias de otras personas.
+
+Pruebas: `npm run test:tip-pools`, `npm run test:my-tip-receipts` y `TEST_REAL_DISPOSABLE=true npx playwright test --config playwright.tip-pools.config.ts equal-pools`.

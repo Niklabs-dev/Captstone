@@ -211,6 +211,87 @@ Una operación registrada no se puede modificar ni eliminar (criterio 2 de E1-H2
 
 Los triggers solo se omiten con `session_replication_role = replica`, que exige superusuario (mantenimiento de la base de datos). Los tests de integración que ejercitan la API por HTTP lo usan para purgar sus propios registros (`test/helpers/audit-cleanup.ts`), por lo que `TEST_DATABASE_URL` debe conectarse con un superusuario, como el `postgres` de docker compose.
 
+## Seguridad de cargas de archivos y dependencias (SPRINT-4R-T18)
+
+### Reglas comunes de las cargas
+
+El sistema recibe archivos en cuatro puntos. Todos validan el archivo **por
+su contenido** (nunca por el nombre ni por el tipo que declara el navegador),
+lo guardan en el volumen privado `DOCUMENTS_STORAGE_PATH` con un nombre
+físico aleatorio y calculan su SHA-256. Ninguno se sirve por una URL directa:
+solo se descargan por su endpoint autorizado, que verifica el hash.
+
+| Carga | Rol | Tipos | Tamaño máximo |
+| --- | --- | --- | --- |
+| `POST /documents` (documento laboral) | ADMINISTRADOR | PDF, PNG, JPEG | `DOCUMENTS_MAX_SIZE_MB` (25 por defecto) |
+| `POST /payroll` (liquidación) | CONTADOR | PDF | `DOCUMENTS_MAX_SIZE_MB` |
+| `POST/PATCH /daily-operations` (voucher) | SUPERVISOR (corrección: también ADMINISTRADOR) | JPEG, PNG, WebP | 5 MiB |
+| `POST /sales-imports/preview` (Excel) | ADMINISTRADOR | .xlsx | 5 MB (y 25 MB descomprimido, máximo 100 archivos internos) |
+
+Respuestas ante un archivo inválido, sin guardar nada en disco:
+
+| Código | Cuándo |
+| --- | --- |
+| 400 | Sin archivo, archivo vacío o más de un archivo en la solicitud (Multer acepta uno solo por solicitud en las cuatro cargas). |
+| 413 | Supera el tamaño máximo: Multer corta la subida antes de cargarla completa en memoria. |
+| 415 | El contenido no es de un tipo permitido o no coincide con el tipo declarado (por ejemplo, un ejecutable o una imagen renombrados como `.pdf`). |
+| 422 | Es del tipo correcto pero está **cortado o dañado**. |
+
+El chequeo de archivos cortados (`src/storage/utils/file-structure.util.ts`)
+revisa, además de los primeros bytes, la marca de cierre de cada formato: PDF
+con `%%EOF` en los últimos 1.024 bytes, JPEG recorriendo sus segmentos por
+su largo hasta el inicio de la imagen principal (SOS, `FF DA`) y exigiendo
+después su marcador de fin `FF D9` (así la miniatura EXIF, que trae su propio
+`FF D9`, no hace pasar una foto cortada; se toleran datos extra después del
+fin, como en las fotos «en movimiento» de algunos celulares), PNG con el
+bloque `IEND` y WebP del tamaño que declara su encabezado. El Excel se valida
+con el lector de SPRINT-4R-T09, precedido por
+`src/sales-imports/parser/xlsx-zip-guard.ts`: descomprime cada entrada del
+ZIP con un tope real de 25 MB en total (una «bomba zip» de 302 KB que se
+expandía a 300 MB usaba ~400 MB de memoria y ~1 minuto; ahora se rechaza con
+413 en milisegundos), admite hasta 100 archivos internos y exige que las
+entradas del directorio central cubran el archivo de corrido, sin entradas
+escondidas. Es un chequeo
+liviano: un archivo dañado por dentro con su cierre intacto pasa, y su
+integridad posterior la protege el SHA-256. Ninguna respuesta de éxito o de
+error expone la ruta física ni la carpeta del volumen.
+
+La regresión `test/upload-hardening.integration.spec.ts` recorre las cuatro
+cargas con los mismos casos (válido, 413, 415, 422, dos archivos, 401/403,
+acceso directo a la carpeta y descarga de un archivo ausente).
+
+### Dependencias
+
+`npm audit --omit=dev` (lo que llega a la imagen de producción) quedó **sin
+vulnerabilidades**. SPRINT-4R-T18 actualizó, eligiendo versiones con más de
+diez días publicadas:
+
+| Paquete | Antes | Después | Corrige |
+| --- | --- | --- | --- |
+| `@nestjs/core`, `common`, `platform-express`, `testing` | 12.0.4 | 12.3.0 | `multer` 2.4.0 → 2.5.0 (DoS en la carga de archivos) |
+| `prisma`, `@prisma/client`, `@prisma/adapter-pg` | 7.10.0 | 7.10.1 | `deepmerge-ts`, `@prisma/config` y `mysql2` |
+| `body-parser`, `express`, `qs`, `fast-uri`, `source-map-js` | — | dentro de sus rangos | DoS y suplantación de esquemas en URLs |
+
+Se descartó `@nestjs/platform-express` 12.4.0 (dos días publicada) porque la
+12.3.0 ya trae el `multer` corregido.
+
+**Residuales documentadas (solo desarrollo).** `npm audit` completo reporta
+20 vulnerabilidades (3 altas, 15 moderadas, 2 bajas) **únicamente en
+herramientas de desarrollo**, que no llegan al servidor: la etapa de
+compilación del `Dockerfile` ejecuta `npm prune --omit=dev` antes de armar la
+imagen final.
+
+| Origen | Severidad | Paquete afectado |
+| --- | --- | --- |
+| `@nestjs/mau` (telemetría opcional del CLI) | alta | `tmp`, `undici` |
+| `vitest` y `vite-tsconfig-paths` (pruebas) | alta / moderada | `vite`, `@vitest/mocker` |
+| `eslint`, `typescript-eslint`, `@nestjs/cli` | moderada | `minimatch` |
+| `inquirer` (CLI) | baja | `external-editor`, `tmp` |
+
+Corregirlas exige subir versiones de las herramientas de pruebas y lint de
+todo el equipo; queda como seguimiento de la auditoría de dependencias
+(SPRINT-4R-T23).
+
 ## Conservación de documentos laborales
 
 Los documentos laborales deben conservarse 5 años (art. 9 bis del Código del
@@ -432,7 +513,7 @@ forma normalizada (`normalizeExternalLabel`, misma regla que la función SQL
 `normalize_external_label`). Admite cualquier cantidad de medios.
 
 **Rechazos** (`MrComandaReportError` con `code`, fila y mensaje en español que
-dice qué revisar): archivo vacío, mayor a 5 MB, `.xls` antiguo, contenido que
+dice qué revisar): archivo vacío, mayor a 5 MB o a 25 MB descomprimido, `.xls` antiguo, contenido que
 no es .xlsx o dañado; sin informe o con varios informes; período ausente,
 ilegible, de varios días o que contradice el título; horario ausente o
 inválido; local ausente, combinado o ambiguo; total o montos que no son pesos
@@ -485,7 +566,7 @@ ventas).
 | `UNRESOLVED` | 200 | El Excel es válido, pero el local o algún medio no tiene equivalencia (`issues`); no se guarda nada. Se configura la equivalencia y se vuelve a subir. |
 
 Los problemas del archivo responden con `code`, `row` y un mensaje accionable,
-sin guardar nada: 400 (sin archivo o vacío), 413 (más de 5 MB), 415 (`.xls` o
+sin guardar nada: 400 (sin archivo o vacío), 413 (más de 5 MB, o más de 25 MB descomprimido), 415 (`.xls` o
 algo que no es .xlsx) y 422 (dañado o estructura inválida: período de varios
 días, local combinado, total que no cuadra, etc.).
 
@@ -510,6 +591,43 @@ crean en la misma transacción y, si falla, el archivo guardado se elimina.
 la versión reemplazada), `SALES_IMPORT_DISCARDED` y
 `SALES_IMPORT_FILE_DOWNLOADED`, con actor, local, fecha de negocio, hash,
 versión y total.
+
+## Días de operación y ventas sin importar (SPRINT-4R-T12)
+
+No todos los días exigen ventas: cada local tiene días semanales de operación
+y excepciones de cierre con motivo. Con eso la API calcula el estado de ventas
+de cada local y día de negocio (hora de Chile), **al consultar y sin guardar
+alertas**: cada local y fecha aparece una sola vez y una importación tardía lo
+resuelve sola. El aviso vive solo en el panel administrativo (sin correos,
+push ni recordatorios). Es independiente de los horarios de los trabajadores.
+Todos los endpoints exigen JWT de **ADMINISTRADOR**.
+
+| Método y ruta | Qué hace |
+| --- | --- |
+| `GET /stores/:storeId/operating-calendar` | Calendario del local (`configured`, `weekdays`, `trackingStartDate`) y sus cierres. |
+| `PUT /stores/:storeId/operating-calendar` | `{ "weekdays": [1,2,3,4,5,6], "trackingStartDate": "2026-11-01" }` (ISO: 1 = lunes … 7 = domingo; al menos uno). Crea o reemplaza el calendario de un local activo. |
+| `POST /stores/:storeId/closures` | `{ "date": "2026-12-25", "reason": "Feriado" }`: cierre por excepción, uno por local y fecha (409 con `existingClosureId` si ya existe). |
+| `DELETE /stores/:storeId/closures/:closureId` | Quita un cierre registrado por error; el día vuelve a evaluarse. |
+| `GET /sales-days` | Estado por local y día. Filtros `from`, `to` (YYYY-MM-DD), `storeId` y `status`. Por defecto los últimos 30 días hasta hoy; máximo 366 días; `to` nunca pasa de hoy. Incluye `summary` por estado. |
+
+**Cómo se calcula el estado**, en este orden:
+
+| Estado | Cuándo |
+| --- | --- |
+| `IMPORTADO` | Hay una importación vigente (`ACTIVE`) para ese local y día, aunque el día estuviera cerrado. |
+| `CERRADO` | El local no abre ese día de la semana o tiene un cierre por excepción. Nunca es alerta. |
+| `PENDIENTE` | Es hoy, el local abre y aún no hay Excel: informativo. |
+| `ATRASADO` | Día abierto ya pasado sin importación vigente: alerta. |
+
+No se informan los días futuros, los anteriores a `trackingStartDate`, los
+locales inactivos ni los locales **sin calendario** (salvo sus días ya
+importados): así un local recién creado no genera avisos hasta que el
+administrador lo configure. Una importación `PENDING` (sin confirmar) no
+resuelve el día; se informa como `pendingImportId`.
+
+**Auditoría:** `STORE_OPERATING_CALENDAR_UPDATED` (días y fecha de inicio
+nuevos y anteriores), `STORE_CLOSURE_CREATED` y `STORE_CLOSURE_DELETED` (fecha
+y motivo).
 
 ## Registro diario de propinas (flujo anterior — histórico, modo lectura)
 

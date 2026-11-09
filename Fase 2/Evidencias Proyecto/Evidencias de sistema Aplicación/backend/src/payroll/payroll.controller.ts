@@ -29,6 +29,7 @@ import {
   ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
+  ApiUnprocessableEntityResponse,
   ApiUnsupportedMediaTypeResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -255,6 +256,10 @@ export class PayrollController {
   @ApiUnsupportedMediaTypeResponse({
     description:
       'El archivo no es PDF o su contenido no coincide con el tipo declarado.',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'El archivo es del tipo correcto pero está dañado o incompleto (por ejemplo, un PDF cortado sin su cierre).',
   })
   async upload(
     @Body() dto: UploadPayslipDto,

@@ -3,9 +3,11 @@ import {
   Injectable,
   NotFoundException,
   PayloadTooLargeException,
+  UnprocessableEntityException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { hasCompleteStructure } from '../storage/utils/file-structure.util.js';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -80,6 +82,12 @@ export class DailyVoucherStorageService {
     ) {
       throw new UnsupportedMediaTypeException(
         'El tipo declarado del voucher no coincide con su contenido',
+      );
+    }
+    // Imagen del tipo correcto pero cortada o dañada (SPRINT-4R-T18).
+    if (!hasCompleteStructure(content, mimeType)) {
+      throw new UnprocessableEntityException(
+        'La foto del voucher está dañada o incompleta; vuelve a tomarla y súbela de nuevo',
       );
     }
 

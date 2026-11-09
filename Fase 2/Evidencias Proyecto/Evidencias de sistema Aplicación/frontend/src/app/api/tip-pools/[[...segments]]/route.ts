@@ -66,7 +66,7 @@ async function handle(request: Request, context: Context): Promise<Response> {
   const session = await getSession();
   if (!session.ok) return fail(session.status);
   if (
-    !['CONTADOR', 'ADMINISTRADOR'].includes(session.data.role) ||
+    !['CONTADOR', 'ADMINISTRADOR', 'SUPERVISOR'].includes(session.data.role) ||
     (mutation && session.data.role !== 'CONTADOR')
   )
     return fail(403);
@@ -117,6 +117,9 @@ async function handle(request: Request, context: Context): Promise<Response> {
     input = parsePoolAction(await body(request), segments[1] as PoolAction);
     path = '/tip-pools/' + segments.join('/');
   } else return fail(404);
+  // El supervisor solo lee el reparto; alertas y constancias no son de su rol.
+  if (session.data.role === 'SUPERVISOR' && !['pool', 'list'].includes(kind))
+    return fail(403);
   if ((mutation && !input) || (kind !== 'list' && query.size)) return fail(400);
   const upstream = await callBackend(path, {
     method: request.method,
