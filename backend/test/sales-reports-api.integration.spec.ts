@@ -743,6 +743,16 @@ describe.skipIf(!databaseUrl)(
             mercadoPagoTipAmount: 5_000,
             voucherDifference: 5_000,
             cashDifference: -100,
+            balanceStatus: 'NO_CUADRADO',
+            lineDifferences: [
+              {
+                paymentMethod: f.methods.cash.code,
+                paymentMethodName: 'Efectivo T13',
+                expectedAmount: 1_000,
+                countedAmount: 900,
+                difference: -100,
+              },
+            ],
             differenceReason: null,
             closedAt: null,
           },
@@ -767,6 +777,92 @@ describe.skipIf(!databaseUrl)(
           f.admin,
         ).expect(200);
         expect(other.body).toMatchObject({ closings: [], sales: [] });
+      });
+    });
+
+    it('el legado marca NO_CUADRADO un cierre con líneas que se compensan', async () => {
+      await withinRollback(async (f) => {
+        // Turno 1: -500 en efectivo y +500 en tarjeta (la suma neta es 0).
+        // Turno 2: todo cuadra.
+        const line = (
+          paymentMethodId: string,
+          expectedAmount: number,
+          countedAmount: number,
+        ): {
+          paymentMethodId: string;
+          expectedAmount: number;
+          countedAmount: number;
+          difference: number;
+        } => ({
+          paymentMethodId,
+          expectedAmount,
+          countedAmount,
+          difference: countedAmount - expectedAmount,
+        });
+        const closing = (
+          shift: number,
+          lines: ReturnType<typeof line>[],
+        ): Promise<{ id: string }> =>
+          f.tx.cashClosing.create({
+            data: {
+              storeId: f.storeA.id,
+              businessDate: dbDate(D3()),
+              shift,
+              openingCash: 10_000,
+              mrcomandaNetSales: 100_000,
+              mercadoPagoGrossAmount: 105_000,
+              mercadoPagoTipAmount: 5_000,
+              reconciliationDifference: 0,
+              responsibleId: f.supervisor.id,
+              lines: { create: lines },
+            },
+            select: { id: true },
+          });
+        const offset = await closing(1, [
+          line(f.methods.cash.id, 20_000, 19_500),
+          line(f.methods.card.id, 80_000, 80_500),
+        ]);
+        const balanced = await closing(2, [
+          line(f.methods.cash.id, 20_000, 20_000),
+        ]);
+
+        const response = await get(
+          `/sales-reports/legacy?from=${D3()}&to=${D3()}&storeId=${f.storeA.id}`,
+          f.admin,
+        ).expect(200);
+        const legacy = response.body as LegacySalesReport;
+        const byId = new Map(
+          legacy.closings.map((item) => [item.closingId, item]),
+        );
+
+        // La suma neta no oculta el descuadre: el estado y las líneas lo
+        // muestran, ordenadas según el catálogo (tarjeta antes que efectivo).
+        expect(byId.get(offset.id)).toMatchObject({
+          cashDifference: 0,
+          voucherDifference: 0,
+          balanceStatus: 'NO_CUADRADO',
+          lineDifferences: [
+            {
+              paymentMethod: f.methods.card.code,
+              paymentMethodName: 'Tarjeta T13',
+              expectedAmount: 80_000,
+              countedAmount: 80_500,
+              difference: 500,
+            },
+            {
+              paymentMethod: f.methods.cash.code,
+              paymentMethodName: 'Efectivo T13',
+              expectedAmount: 20_000,
+              countedAmount: 19_500,
+              difference: -500,
+            },
+          ],
+        });
+        expect(byId.get(balanced.id)).toMatchObject({
+          cashDifference: 0,
+          balanceStatus: 'CUADRADO',
+          lineDifferences: [],
+        });
       });
     });
 

@@ -16,7 +16,10 @@ import {
   type ImportedSales,
   type ImportStatusInfo,
   type ImportStatusSummary,
+  LEGACY_BALANCE_STATUSES,
+  type LegacyBalanceStatus,
   type LegacyClosing,
+  type LegacyClosingLineDifference,
   type LegacySales,
   type LegacySalesReport,
   type PaymentMethodAmount,
@@ -532,6 +535,39 @@ export class SalesReportDto implements SalesReport {
 
 // --- Legado ---
 
+export class LegacyClosingLineDifferenceDto implements LegacyClosingLineDifference {
+  @ApiProperty({
+    description: 'Código del medio de pago de la línea.',
+    example: 'CASH',
+  })
+  paymentMethod: string;
+
+  @ApiProperty({
+    description: 'Nombre vigente del medio de pago.',
+    example: 'Efectivo',
+  })
+  paymentMethodName: string;
+
+  @ApiProperty({
+    description: 'Monto esperado de la línea (legado).',
+    example: 20000,
+  })
+  expectedAmount: number;
+
+  @ApiProperty({
+    description: 'Monto contado de la línea (legado).',
+    example: 19500,
+  })
+  countedAmount: number;
+
+  @ApiProperty({
+    description:
+      'Diferencia con signo (contado - esperado). Nunca se compensa con otras líneas.',
+    example: -500,
+  })
+  difference: number;
+}
+
 export class LegacyClosingDto implements LegacyClosing {
   @ApiProperty({
     description: 'ID del cierre de caja histórico.',
@@ -584,10 +620,42 @@ export class LegacyClosingDto implements LegacyClosing {
   voucherDifference: number;
 
   @ApiProperty({
-    description: 'Suma de las diferencias por línea del cierre (legado).',
-    example: -500,
+    description:
+      'Suma neta de las diferencias por línea del cierre (legado). Puede ser 0 aunque haya líneas descuadradas: ver balanceStatus y lineDifferences.',
+    example: 0,
   })
   cashDifference: number;
+
+  @ApiProperty({
+    description:
+      'NO_CUADRADO si alguna línea tiene diferencia (aunque otra la compense) o si hay descuadre de vouchers; CUADRADO en otro caso.',
+    enum: LEGACY_BALANCE_STATUSES,
+    example: 'NO_CUADRADO',
+  })
+  balanceStatus: LegacyBalanceStatus;
+
+  @ApiProperty({
+    description:
+      'Líneas del cierre con diferencia distinta de cero, sin compensar, en el orden del catálogo.',
+    type: [LegacyClosingLineDifferenceDto],
+    example: [
+      {
+        paymentMethod: 'DEBIT_CARD',
+        paymentMethodName: 'Tarjeta de débito',
+        expectedAmount: 80000,
+        countedAmount: 80500,
+        difference: 500,
+      },
+      {
+        paymentMethod: 'CASH',
+        paymentMethodName: 'Efectivo',
+        expectedAmount: 20000,
+        countedAmount: 19500,
+        difference: -500,
+      },
+    ],
+  })
+  lineDifferences: LegacyClosingLineDifferenceDto[];
 
   @ApiProperty({
     description: 'Motivo de la diferencia registrado en el cierre.',
