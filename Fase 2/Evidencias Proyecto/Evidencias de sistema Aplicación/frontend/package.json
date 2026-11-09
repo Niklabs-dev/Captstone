@@ -38,6 +38,8 @@
     "test:daily-operations:real": "playwright test --config playwright.daily-operations.config.ts",
     "test:tip-pools": "tsc -p tsconfig.test.json && node --test .test-build/tip-pools.test.js .test-build/navigation.test.js",
     "test:tip-pools:real": "playwright test --config playwright.tip-pools.config.ts",
+    "test:sales-imports": "tsc -p tsconfig.test.json && node --test .test-build/sales-imports.test.js .test-build/navigation.test.js .test-build/mobile-navigation.test.js",
+    "test:sales-imports:real": "playwright test --config playwright.sales-imports.config.ts",
     "test:my-tip-receipts": "tsc -p tsconfig.test.json && node --test .test-build/my-tip-receipts.test.js .test-build/navigation.test.js",
     "test:my-tip-receipts:real": "playwright test --config playwright.my-tip-receipts.config.ts",
     "test:mobile-design": "playwright test --config playwright.mobile-design.config.ts",
@@ -62,6 +64,7 @@
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.8",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "write-excel-file": "4.1.1"
   }
 }

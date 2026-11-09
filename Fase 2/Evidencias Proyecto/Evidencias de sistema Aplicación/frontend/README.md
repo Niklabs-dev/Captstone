@@ -364,3 +364,15 @@ Pruebas: `npm run test:daily-operations` (unitarias), `npm run test:daily-operat
 Si una operación diaria se corrige después del cálculo, el borrador sigue visible como **desactualizado**, con el monto calculado y el actual, y no se puede validar hasta recalcularlo. El **SUPERVISOR** consulta en solo lectura los repartos de su local, sin acciones, alertas ni constancias de otras personas.
 
 Pruebas: `npm run test:tip-pools`, `npm run test:my-tip-receipts` y `TEST_REAL_DISPOSABLE=true npx playwright test --config playwright.tip-pools.config.ts equal-pools`.
+
+## Importación diaria de ventas (SPRINT-4R-T11)
+
+`/admin/importacion-ventas`, solo para ADMINISTRADOR, carga el Informe de Ventas Diario de MrComanda (.xlsx, máximo 5 MB). La vista previa muestra local, fecha de negocio, emisión, medios de pago y total antes de confirmar; las ventas solo se registran al confirmar.
+
+- Si la fecha del nombre del archivo difiere de la del contenido se avisa y se usa la del contenido.
+- Un local o medio sin equivalencia, o un total que no cuadra, impide confirmar y explica qué revisar; no se guarda nada.
+- Un archivo idéntico informa que ya estaba importado, sin duplicar.
+- Una corrección muestra las diferencias por medio de pago contra la versión vigente y exige aceptar el reemplazo.
+- El detalle indica versión, archivo, responsable y fecha de carga, y permite descargar el Excel original.
+
+Pruebas: `npm run test:sales-imports` y `TEST_REAL_DISPOSABLE=true npm run test:sales-imports:real` (API y PostgreSQL reales; requiere `COMPOSE_PROJECT_NAME` del stack de pruebas, porque las equivalencias de locales se crean en la base).
