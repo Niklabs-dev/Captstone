@@ -179,7 +179,7 @@ export class SalesReportsService {
     const storeFilter =
       range.storeId === undefined ? {} : { storeId: range.storeId };
 
-    const [stores, paymentMethods, imports, operations, salesDays] =
+    const [stores, paymentMethods, imports, pending, operations, salesDays] =
       await Promise.all([
         tx.store.findMany({
           where: range.storeId === undefined ? {} : { id: range.storeId },
@@ -215,6 +215,16 @@ export class SalesReportsService {
               select: { paymentMethodId: true, amount: true },
               orderBy: { lineNumber: 'asc' },
             },
+          },
+        }),
+        // Versiones cargadas sin confirmar: solo se informan como pendientes.
+        tx.salesImport.findMany({
+          where: { ...storeFilter, businessDate: dates, status: 'PENDING' },
+          select: {
+            id: true,
+            storeId: true,
+            businessDate: true,
+            version: true,
           },
         }),
         tx.dailyOperation.findMany({
@@ -278,6 +288,12 @@ export class SalesReportsService {
         activeImportId: item.activeImportId,
         pendingImportId: item.pendingImportId,
         closure: item.closure,
+      })),
+      pendingImports: pending.map((item) => ({
+        importId: item.id,
+        storeId: item.storeId,
+        businessDate: formatDbDate(item.businessDate),
+        version: item.version,
       })),
     });
   }
