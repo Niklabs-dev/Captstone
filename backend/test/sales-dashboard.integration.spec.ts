@@ -700,7 +700,14 @@ describe.skipIf(!databaseUrl)(
       await withinRollback(async (f) => {
         await get('?date=2026-02-30', f.admin).expect(400);
         await get('?date=10-03-2026', f.admin).expect(400);
-        await get(`?date=${businessDaysAgo(-1)}`, f.admin).expect(400);
+        const future = await get(
+          `?date=${businessDaysAgo(-1)}`,
+          f.admin,
+        ).expect(400);
+        // El error nombra el parámetro del panel, no el `to` de los reportes.
+        expect((future.body as { message: string }).message).toBe(
+          `date no puede ser posterior a hoy (${businessToday()}, hora de Chile)`,
+        );
         await get(`?date=${DAY()}&storeId=x`, f.admin).expect(400);
       });
     });
