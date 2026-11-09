@@ -232,7 +232,7 @@ export class ImportStatusInfoDto implements ImportStatusInfo {
 
   @ApiProperty({
     description:
-      'Importación cargada pero sin confirmar (no cuenta como importada).',
+      'Última versión cargada pero sin confirmar (no cuenta como importada). Se informa también en locales inactivos o sin calendario.',
     example: null,
     type: String,
     nullable: true,
@@ -444,7 +444,7 @@ export class StoreReportDto implements StoreReport {
 
   @ApiProperty({
     description:
-      'Detalle diario (orden ascendente): días con importación, operación diaria o estado informado.',
+      'Detalle diario (orden ascendente): días con importación vigente o pendiente, operación diaria o estado informado.',
     type: [ReportDayDto],
   })
   days: ReportDayDto[];

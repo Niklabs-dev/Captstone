@@ -446,6 +446,38 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
+    it('informa la importación pendiente de un local inactivo con datos del día', async () => {
+      await withinRollback(async (f) => {
+        const inactive = await createTestStore(
+          f.tx,
+          'Panel pendiente',
+          'Calera',
+          false,
+        );
+        await createDailyOperation(f.tx, {
+          storeId: inactive.id,
+          responsibleId: f.supervisor.id,
+          businessDate: DAY(),
+        });
+        const pending = await createTestImport(f.tx, {
+          store: inactive,
+          businessDate: DAY(),
+          lines: [{ method: f.cash, amount: 50_000 }],
+          status: 'PENDING',
+          confirmedById: f.admin.id,
+        });
+
+        const store = storeOf(await dashboard(f), inactive.id);
+        expect(store.importStatus).toEqual({
+          status: null,
+          activeImportId: null,
+          pendingImportId: pending,
+          closure: null,
+        });
+        expect(store.sales).toBeNull();
+      });
+    });
+
     it('no cuenta como faltantes los días CERRADO ni los anteriores al seguimiento', async () => {
       await withinRollback(async (f) => {
         const calendar = (

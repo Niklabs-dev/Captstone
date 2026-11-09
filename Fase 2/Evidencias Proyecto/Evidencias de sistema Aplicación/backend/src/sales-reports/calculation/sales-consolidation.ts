@@ -60,6 +60,15 @@ export interface OperationInput {
   differenceReason: string | null;
 }
 
+// Importación cargada sin confirmar (PENDING): nunca es venta, solo se
+// informa como pendiente.
+export interface PendingImportInput {
+  importId: string;
+  storeId: string;
+  businessDate: string;
+  version: number;
+}
+
 // Estado diario calculado por GET /sales-days (SPRINT-4R-T12).
 export interface SalesDayStatusInput {
   storeId: string;
@@ -76,6 +85,9 @@ export interface ConsolidationInput {
   imports: ImportInput[];
   operations: OperationInput[];
   salesDays: SalesDayStatusInput[];
+  // Todas las versiones pendientes del período: /sales-days solo las informa
+  // para locales activos con el día informado.
+  pendingImports: PendingImportInput[];
 }
 
 export interface Consolidation {
@@ -258,6 +270,7 @@ function sumSummaries(
 function importStatusOf(
   salesDay: SalesDayStatusInput | undefined,
   item: ImportInput | undefined,
+  pending: PendingImportInput | undefined,
 ): ImportStatusInfo {
   if (salesDay) {
     return {
@@ -267,12 +280,13 @@ function importStatusOf(
       closure: salesDay.closure,
     };
   }
-  // /sales-days no informa locales inactivos: si aun así hay importación
-  // vigente, el día está importado (misma regla 2 de sales-day-status).
+  // /sales-days no informa locales inactivos ni días sin calendario: si aun
+  // así hay importación vigente, el día está importado (misma regla 2 de
+  // sales-day-status), y la versión pendiente se informa igual.
   return {
     status: item ? 'IMPORTADO' : null,
     activeImportId: item?.importId ?? null,
-    pendingImportId: null,
+    pendingImportId: pending?.importId ?? null,
     closure: null,
   };
 }
@@ -292,6 +306,15 @@ export function consolidateSales(input: ConsolidationInput): Consolidation {
   const salesDayByDay = new Map(
     input.salesDays.map((item) => [key(item.storeId, item.businessDate), item]),
   );
+  // La última versión pendiente prevalece, como en /sales-days.
+  const pendingByDay = new Map<string, PendingImportInput>();
+  for (const item of input.pendingImports) {
+    const dayKey = key(item.storeId, item.businessDate);
+    const current = pendingByDay.get(dayKey);
+    if (!current || item.version > current.version) {
+      pendingByDay.set(dayKey, item);
+    }
+  }
 
   const stores = [...input.stores].sort(
     (left, right) =>
@@ -302,7 +325,12 @@ export function consolidateSales(input: ConsolidationInput): Consolidation {
 
   const storeReports = stores.map((store): StoreReport => {
     const dates = new Set<string>();
-    for (const source of [input.imports, input.operations, input.salesDays]) {
+    for (const source of [
+      input.imports,
+      input.operations,
+      input.salesDays,
+      input.pendingImports,
+    ]) {
       for (const item of source) {
         if (item.storeId === store.id) dates.add(item.businessDate);
       }
@@ -318,7 +346,11 @@ export function consolidateSales(input: ConsolidationInput): Consolidation {
       const dayKey = key(store.id, date);
       const imported = importByDay.get(dayKey);
       const operation = operationByDay.get(dayKey);
-      const status = importStatusOf(salesDayByDay.get(dayKey), imported);
+      const status = importStatusOf(
+        salesDayByDay.get(dayKey),
+        imported,
+        pendingByDay.get(dayKey),
+      );
       if (status.status !== null) {
         importStatus = {
           ...importStatus,

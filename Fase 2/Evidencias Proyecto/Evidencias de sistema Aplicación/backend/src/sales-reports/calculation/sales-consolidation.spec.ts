@@ -93,6 +93,7 @@ function input(overrides: Partial<ConsolidationInput>): ConsolidationInput {
     imports: [],
     operations: [],
     salesDays: [],
+    pendingImports: [],
     ...overrides,
   };
 }
@@ -296,6 +297,84 @@ describe('consolidateSales (SPRINT-4R-T13)', () => {
       ATRASADO: 1,
       CERRADO: 1,
     });
+  });
+
+  it('informa la importación pendiente aunque /sales-days no informe el día', () => {
+    // Local inactivo (o sin calendario): /sales-days no lo informa, pero la
+    // versión pendiente existe y no debe perderse. Prevalece la última
+    // versión pendiente, como en /sales-days.
+    const inactive = {
+      id: 'c',
+      name: 'Local cerrado',
+      city: 'Melipilla',
+      isActive: false,
+    };
+    const result = consolidateSales(
+      input({
+        stores: [inactive],
+        imports: [importOf('c', '2026-11-05', [['m-cash', 10]])],
+        operations: [operationOf('c', '2026-11-04', 0)],
+        pendingImports: [
+          {
+            importId: 'pend-v3',
+            storeId: 'c',
+            businessDate: '2026-11-04',
+            version: 3,
+          },
+          {
+            importId: 'pend-v2',
+            storeId: 'c',
+            businessDate: '2026-11-04',
+            version: 2,
+          },
+          {
+            importId: 'pend-new',
+            storeId: 'c',
+            businessDate: '2026-11-05',
+            version: 2,
+          },
+          {
+            importId: 'pend-only',
+            storeId: 'c',
+            businessDate: '2026-11-06',
+            version: 1,
+          },
+        ],
+      }),
+    );
+    const days = result.stores[0]?.days ?? [];
+    expect(days.map((d) => [d.businessDate, d.importStatus])).toEqual([
+      [
+        '2026-11-04',
+        {
+          status: null,
+          activeImportId: null,
+          pendingImportId: 'pend-v3',
+          closure: null,
+        },
+      ],
+      [
+        '2026-11-05',
+        {
+          status: 'IMPORTADO',
+          activeImportId: 'imp-c-2026-11-05',
+          pendingImportId: 'pend-new',
+          closure: null,
+        },
+      ],
+      [
+        '2026-11-06',
+        {
+          status: null,
+          activeImportId: null,
+          pendingImportId: 'pend-only',
+          closure: null,
+        },
+      ],
+    ]);
+    // Una versión pendiente nunca es venta.
+    expect(days[2]?.sales).toBeNull();
+    expect(result.totals.sales.totalAmount).toBe(10);
   });
 
   it('ordena locales por nombre y días en forma ascendente', () => {
