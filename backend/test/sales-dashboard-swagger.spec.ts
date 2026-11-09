@@ -179,6 +179,53 @@ describe('Swagger del panel y los reportes de ventas (SPRINT-4R-T13)', () => {
     expect(store['dailyOperation']?.nullable).toBe(true);
   });
 
+  it('declara description y example en cada campo de los DTO de respuesta', () => {
+    // Todas las clases de sales-reports-response.dto.ts y
+    // sales-dashboard-response.dto.ts, incluidos los objetos anidados.
+    const dtos = [
+      'AlertCountsDto',
+      'StoreAlertsSummaryDto',
+      'StoreDashboardDto',
+      'SalesDashboardTotalsDto',
+      'SalesDashboardDto',
+      'ReportStoreDto',
+      'ReportStoreRefDto',
+      'PaymentMethodColumnDto',
+      'PaymentMethodAmountDto',
+      'ImportedSalesDto',
+      'CashDifferenceDto',
+      'DailyOperationFiguresDto',
+      'ImportClosureDto',
+      'ImportStatusInfoDto',
+      'ReportDayDto',
+      'CashDifferenceLineDto',
+      'ImportStatusSummaryDto',
+      'SalesTotalsDto',
+      'TipsTotalsDto',
+      'CashDifferenceTotalsDto',
+      'StoreReportDto',
+      'SalesReportTotalsDto',
+      'SalesReportDto',
+      'LegacyClosingLineDifferenceDto',
+      'LegacyClosingDto',
+      'LegacySalesDto',
+      'LegacySalesReportDto',
+    ];
+    const missing: string[] = [];
+    for (const name of dtos) {
+      const properties = schemas()[name]?.properties;
+      expect(properties, name).toBeDefined();
+      for (const [field, property] of Object.entries(properties ?? {})) {
+        if (!('example' in property))
+          missing.push(`${name}.${field} sin example`);
+        if (!('description' in property)) {
+          missing.push(`${name}.${field} sin description`);
+        }
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
   it('elimina del contrato vigente los campos del flujo antiguo y los deja en el legado', () => {
     const legacyFields = [
       'mercadoPagoGrossAmount',

@@ -33,6 +33,29 @@ import {
   type StoreReport,
   type TipsTotals,
 } from '../types/sales-reports.types.js';
+import {
+  EXAMPLE_CASH_DIFFERENCE,
+  EXAMPLE_CASH_DIFFERENCE_LINE,
+  EXAMPLE_CLOSURE,
+  EXAMPLE_DAILY_OPERATION,
+  EXAMPLE_DAY_AMOUNTS,
+  EXAMPLE_IMPORT_STATUS,
+  EXAMPLE_IMPORTED_SALES,
+  EXAMPLE_LEGACY_CLOSING,
+  EXAMPLE_LEGACY_LINE_DIFFERENCES,
+  EXAMPLE_LEGACY_SALES,
+  EXAMPLE_PAYMENT_METHODS,
+  EXAMPLE_PERIOD_AMOUNTS,
+  EXAMPLE_PERIOD_CASH_DIFFERENCES,
+  EXAMPLE_PERIOD_IMPORT_STATUS,
+  EXAMPLE_PERIOD_SALES,
+  EXAMPLE_PERIOD_TIPS,
+  EXAMPLE_REPORT_DAY,
+  EXAMPLE_REPORT_TOTALS,
+  EXAMPLE_STORE,
+  EXAMPLE_STORE_REF,
+  EXAMPLE_STORE_REPORT,
+} from './sales-reports-examples.js';
 
 // Documentación Swagger de los reportes de ventas y diferencias por período y
 // local (SPRINT-4R-T13). Montos en CLP enteros. Varias clases se reutilizan en
@@ -137,6 +160,7 @@ export class ImportedSalesDto implements ImportedSales {
     description:
       'Desglose por medio de pago, con las mismas columnas del reporte (activos más inactivos con historial).',
     type: [PaymentMethodAmountDto],
+    example: EXAMPLE_DAY_AMOUNTS,
   })
   byPaymentMethod: PaymentMethodAmountDto[];
 }
@@ -194,6 +218,7 @@ export class DailyOperationFiguresDto implements DailyOperationFigures {
   @ApiProperty({
     description: 'Diferencia de efectivo declarada, con signo y motivo.',
     type: CashDifferenceDto,
+    example: EXAMPLE_CASH_DIFFERENCE,
   })
   cashDifference: CashDifferenceDto;
 }
@@ -243,6 +268,7 @@ export class ImportStatusInfoDto implements ImportStatusInfo {
     description: 'Excepción de cierre del día, si la hay.',
     type: ImportClosureDto,
     nullable: true,
+    example: EXAMPLE_CLOSURE,
   })
   closure: ImportClosureDto | null;
 }
@@ -257,6 +283,7 @@ export class ReportDayDto implements ReportDay {
   @ApiProperty({
     description: 'Estado de la importación diaria del Excel.',
     type: ImportStatusInfoDto,
+    example: EXAMPLE_IMPORT_STATUS,
   })
   importStatus: ImportStatusInfoDto;
 
@@ -265,6 +292,7 @@ export class ReportDayDto implements ReportDay {
       'Ventas de la importación vigente; null si no hay Excel vigente (ausencia de datos, no venta cero).',
     type: ImportedSalesDto,
     nullable: true,
+    example: EXAMPLE_IMPORTED_SALES,
   })
   sales: ImportedSalesDto | null;
 
@@ -273,12 +301,17 @@ export class ReportDayDto implements ReportDay {
       'Propinas y diferencia de efectivo de la operación diaria; null si el supervisor no la registró.',
     type: DailyOperationFiguresDto,
     nullable: true,
+    example: EXAMPLE_DAILY_OPERATION,
   })
   dailyOperation: DailyOperationFiguresDto | null;
 }
 
 export class CashDifferenceLineDto implements CashDifferenceLine {
-  @ApiProperty({ description: 'Local.', type: ReportStoreRefDto })
+  @ApiProperty({
+    description: 'Local.',
+    type: ReportStoreRefDto,
+    example: EXAMPLE_STORE_REF,
+  })
   store: ReportStoreRefDto;
 
   @ApiProperty({
@@ -357,6 +390,7 @@ export class SalesTotalsDto implements SalesTotals {
     description:
       'Ventas importadas por medio de pago (columnas dinámicas del catálogo).',
     type: [PaymentMethodAmountDto],
+    example: EXAMPLE_PERIOD_AMOUNTS,
   })
   byPaymentMethod: PaymentMethodAmountDto[];
 }
@@ -415,30 +449,38 @@ export class CashDifferenceTotalsDto implements CashDifferenceTotals {
 }
 
 export class StoreReportDto implements StoreReport {
-  @ApiProperty({ description: 'Local.', type: ReportStoreDto })
+  @ApiProperty({
+    description: 'Local.',
+    type: ReportStoreDto,
+    example: EXAMPLE_STORE,
+  })
   store: ReportStoreDto;
 
   @ApiProperty({
     description: 'Ventas importadas del local en el período.',
     type: SalesTotalsDto,
+    example: EXAMPLE_PERIOD_SALES,
   })
   sales: SalesTotalsDto;
 
   @ApiProperty({
     description: 'Propinas de la operación diaria (concepto separado).',
     type: TipsTotalsDto,
+    example: EXAMPLE_PERIOD_TIPS,
   })
   tips: TipsTotalsDto;
 
   @ApiProperty({
     description: 'Diferencias de efectivo declaradas (concepto separado).',
     type: CashDifferenceTotalsDto,
+    example: EXAMPLE_PERIOD_CASH_DIFFERENCES,
   })
   cashDifferences: CashDifferenceTotalsDto;
 
   @ApiProperty({
     description: 'Días del período por estado de importación.',
     type: ImportStatusSummaryDto,
+    example: EXAMPLE_PERIOD_IMPORT_STATUS,
   })
   importStatus: ImportStatusSummaryDto;
 
@@ -446,6 +488,7 @@ export class StoreReportDto implements StoreReport {
     description:
       'Detalle diario (orden ascendente): días con importación vigente o pendiente, operación diaria o estado informado.',
     type: [ReportDayDto],
+    example: [EXAMPLE_REPORT_DAY],
   })
   days: ReportDayDto[];
 }
@@ -454,24 +497,28 @@ export class SalesReportTotalsDto implements SalesReportTotals {
   @ApiProperty({
     description: 'Ventas importadas de todos los locales del reporte.',
     type: SalesTotalsDto,
+    example: EXAMPLE_PERIOD_SALES,
   })
   sales: SalesTotalsDto;
 
   @ApiProperty({
     description: 'Propinas de todos los locales del reporte.',
     type: TipsTotalsDto,
+    example: EXAMPLE_PERIOD_TIPS,
   })
   tips: TipsTotalsDto;
 
   @ApiProperty({
     description: 'Diferencias de efectivo de todos los locales del reporte.',
     type: CashDifferenceTotalsDto,
+    example: EXAMPLE_PERIOD_CASH_DIFFERENCES,
   })
   cashDifferences: CashDifferenceTotalsDto;
 
   @ApiProperty({
     description: 'Días por estado de importación de todos los locales.',
     type: ImportStatusSummaryDto,
+    example: EXAMPLE_PERIOD_IMPORT_STATUS,
   })
   importStatus: ImportStatusSummaryDto;
 }
@@ -513,22 +560,29 @@ export class SalesReportDto implements SalesReport {
     description:
       'Medios de pago del reporte: activos del catálogo más inactivos con ventas importadas en el período, en el orden del catálogo.',
     type: [PaymentMethodColumnDto],
+    example: EXAMPLE_PAYMENT_METHODS,
   })
   paymentMethods: PaymentMethodColumnDto[];
 
-  @ApiProperty({ description: 'Detalle por local.', type: [StoreReportDto] })
+  @ApiProperty({
+    description: 'Detalle por local.',
+    type: [StoreReportDto],
+    example: [EXAMPLE_STORE_REPORT],
+  })
   stores: StoreReportDto[];
 
   @ApiProperty({
     description:
       'Todas las diferencias de efectivo distintas de cero del período, con signo y motivo, sin compensar ni ocultar líneas.',
     type: [CashDifferenceLineDto],
+    example: [EXAMPLE_CASH_DIFFERENCE_LINE],
   })
   cashDifferences: CashDifferenceLineDto[];
 
   @ApiProperty({
     description: 'Totales del reporte, por concepto.',
     type: SalesReportTotalsDto,
+    example: EXAMPLE_REPORT_TOTALS,
   })
   totals: SalesReportTotalsDto;
 }
@@ -575,7 +629,11 @@ export class LegacyClosingDto implements LegacyClosing {
   })
   closingId: string;
 
-  @ApiProperty({ description: 'Local.', type: ReportStoreRefDto })
+  @ApiProperty({
+    description: 'Local.',
+    type: ReportStoreRefDto,
+    example: EXAMPLE_STORE_REF,
+  })
   store: ReportStoreRefDto;
 
   @ApiProperty({
@@ -638,22 +696,7 @@ export class LegacyClosingDto implements LegacyClosing {
     description:
       'Líneas del cierre con diferencia distinta de cero, sin compensar, en el orden del catálogo.',
     type: [LegacyClosingLineDifferenceDto],
-    example: [
-      {
-        paymentMethod: 'DEBIT_CARD',
-        paymentMethodName: 'Tarjeta de débito',
-        expectedAmount: 80000,
-        countedAmount: 80500,
-        difference: 500,
-      },
-      {
-        paymentMethod: 'CASH',
-        paymentMethodName: 'Efectivo',
-        expectedAmount: 20000,
-        countedAmount: 19500,
-        difference: -500,
-      },
-    ],
+    example: EXAMPLE_LEGACY_LINE_DIFFERENCES,
   })
   lineDifferences: LegacyClosingLineDifferenceDto[];
 
@@ -676,7 +719,11 @@ export class LegacyClosingDto implements LegacyClosing {
 }
 
 export class LegacySalesDto implements LegacySales {
-  @ApiProperty({ description: 'Local.', type: ReportStoreRefDto })
+  @ApiProperty({
+    description: 'Local.',
+    type: ReportStoreRefDto,
+    example: EXAMPLE_STORE_REF,
+  })
   store: ReportStoreRefDto;
 
   @ApiProperty({
@@ -739,6 +786,7 @@ export class LegacySalesReportDto implements LegacySalesReport {
   @ApiProperty({
     description: 'Cierres de caja por turno históricos del período.',
     type: [LegacyClosingDto],
+    example: [EXAMPLE_LEGACY_CLOSING],
   })
   closings: LegacyClosingDto[];
 
@@ -746,6 +794,7 @@ export class LegacySalesReportDto implements LegacySalesReport {
     description:
       'Ventas históricas de la tabla sales (manuales o agregadas MrComanda previas), por local, medio y origen.',
     type: [LegacySalesDto],
+    example: [EXAMPLE_LEGACY_SALES],
   })
   sales: LegacySalesDto[];
 }
