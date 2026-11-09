@@ -1,290 +1,26 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { CashClosingStatus } from '../../generated/prisma/client.js';
 import {
-  CLOSING_BALANCE_STATUSES,
-  type AlertCounts,
-  type ClosingLineDifference,
-  type PendingClosingDifference,
-  type SalesDashboard,
-  type SalesDashboardStore,
-  type SalesDashboardTotals,
-  type StoreAlertsSummary,
-  type StoreCardTipsSummary,
-  type StoreClosingsSummary,
-  type StoreDashboard,
-  type StoreSalesSummary,
+  CashDifferenceLineDto,
+  CashDifferenceTotalsDto,
+  DailyOperationFiguresDto,
+  ImportedSalesDto,
+  ImportStatusInfoDto,
+  ImportStatusSummaryDto,
+  PaymentMethodColumnDto,
+  ReportStoreDto,
+  SalesTotalsDto,
+  TipsTotalsDto,
+} from '../../sales-reports/dto/sales-reports-response.dto.js';
+import type {
+  AlertCounts,
+  SalesDashboard,
+  SalesDashboardTotals,
+  StoreAlertsSummary,
+  StoreDashboard,
 } from '../types/sales-dashboard.types.js';
 
-// Documentación Swagger de la consulta consolidada (SPRINT-4-T13, medios de
-// pago dinámicos en SPRINT-4-T32). Montos en CLP enteros.
-
-class SalesDashboardStoreDto implements SalesDashboardStore {
-  @ApiProperty({
-    description: 'ID del local (UUID).',
-    example: '1010021e-9bab-42d5-851c-417e9e2503bf',
-  })
-  id: string;
-
-  @ApiProperty({ description: 'Nombre del local.', example: 'Santa María' })
-  name: string;
-
-  @ApiProperty({ description: 'Ciudad del local.', example: 'Melipilla' })
-  city: string;
-
-  @ApiProperty({
-    description: 'Indica si el local está activo.',
-    example: true,
-  })
-  isActive: boolean;
-}
-
-class PaymentMethodSalesDto {
-  @ApiProperty({
-    description: 'Código del medio de pago del catálogo.',
-    example: 'DEBIT_CARD',
-  })
-  paymentMethod: string;
-
-  @ApiProperty({
-    description:
-      'Nombre del medio de pago según el catálogo; se resuelve aunque el medio esté desactivado.',
-    example: 'Tarjeta de débito',
-  })
-  paymentMethodName: string;
-
-  @ApiProperty({ description: 'Cantidad de ventas del medio.', example: 42 })
-  salesCount: number;
-
-  @ApiProperty({
-    description: 'Venta neta del medio (bruto menos propina).',
-    example: 511730,
-  })
-  netAmount: number;
-}
-
-class StoreSalesSummaryDto implements StoreSalesSummary {
-  @ApiProperty({
-    description: 'Cantidad de ventas del día en hora de Chile.',
-    example: 96,
-  })
-  salesCount: number;
-
-  @ApiProperty({
-    description:
-      'Venta neta del día: suma de gross_amount menos tip_amount. Nunca incluye propinas.',
-    example: 675530,
-  })
-  netAmount: number;
-
-  @ApiProperty({
-    description: 'Ventas del día ya conciliadas en un cierre de caja.',
-    example: 90,
-  })
-  closedSalesCount: number;
-
-  @ApiProperty({
-    description: 'Venta neta del día ya conciliada en un cierre de caja.',
-    example: 655530,
-  })
-  closedNetAmount: number;
-
-  @ApiProperty({
-    description: 'Ventas del día que aún no pertenecen a ningún cierre.',
-    example: 6,
-  })
-  unclosedSalesCount: number;
-
-  @ApiProperty({
-    description: 'Venta neta del día que aún no pertenece a ningún cierre.',
-    example: 20000,
-  })
-  unclosedNetAmount: number;
-
-  @ApiProperty({
-    description:
-      'Desglose dinámico por medio de pago: incluye los medios activos del catálogo y los históricos (inactivos) con ventas del día, ordenados por sortOrder/código del catálogo.',
-    type: [PaymentMethodSalesDto],
-  })
-  byPaymentMethod: PaymentMethodSalesDto[];
-}
-
-class StoreCardTipsSummaryDto implements StoreCardTipsSummary {
-  @ApiProperty({
-    description:
-      'Propina con medio conciliable con tarjeta del registro diario de propinas (fuente de los repartos).',
-    example: 31602,
-  })
-  registeredAmount: number;
-
-  @ApiProperty({
-    description:
-      'Propina informada por los vouchers de Mercado Pago de los cierres del día.',
-    example: 31602,
-  })
-  closingsAmount: number;
-}
-
-class StoreClosingsSummaryDto implements StoreClosingsSummary {
-  @ApiProperty({
-    description: 'Cantidad de cierres de caja del día.',
-    example: 2,
-  })
-  count: number;
-
-  @ApiProperty({
-    description: 'Turnos con cierre registrado, en orden.',
-    type: [Number],
-    example: [1, 2],
-  })
-  shifts: number[];
-
-  @ApiProperty({
-    description:
-      'Venta neta conciliada por los cierres: lo esperado sin el fondo de caja.',
-    example: 655530,
-  })
-  netSalesAmount: number;
-
-  @ApiProperty({
-    description: 'Total declarado por los supervisores en los cierres.',
-    example: 704530,
-  })
-  countedAmount: number;
-
-  @ApiProperty({
-    description:
-      'Diferencia de caja (contado menos esperado) sumada en los cierres del día. Cifra informativa: no decide el cuadre, pues un faltante y un sobrante pueden compensarse a 0.',
-    example: -1000,
-  })
-  cashDifference: number;
-
-  @ApiProperty({
-    description:
-      'Descuadre de vouchers: Mercado Pago neto menos MrComanda, sumado en los cierres del día.',
-    example: 1600,
-  })
-  voucherDifference: number;
-
-  @ApiProperty({
-    description: 'Venta neta informada por MrComanda en los cierres.',
-    example: 555530,
-  })
-  mrcomandaNetSales: number;
-
-  @ApiProperty({
-    description: 'Cobro de Mercado Pago sin propinas en los cierres.',
-    example: 557130,
-  })
-  mercadoPagoNetSales: number;
-}
-
-class ClosingLineDifferenceDto implements ClosingLineDifference {
-  @ApiProperty({
-    description: 'Código del medio de pago de la línea.',
-    example: 'CASH',
-  })
-  paymentMethod: string;
-
-  @ApiProperty({
-    description:
-      'Nombre del medio de pago según el catálogo; se resuelve aunque el medio esté desactivado.',
-    example: 'Efectivo',
-  })
-  paymentMethodName: string;
-
-  @ApiProperty({
-    description: 'Monto esperado según el sistema (ventas, más fondo en CASH).',
-    example: 150000,
-  })
-  expectedAmount: number;
-
-  @ApiProperty({
-    description: 'Monto contado declarado por el supervisor.',
-    example: 149000,
-  })
-  countedAmount: number;
-
-  @ApiProperty({
-    description: 'Diferencia de la línea (contado menos esperado).',
-    example: -1000,
-  })
-  difference: number;
-}
-
-class PendingClosingDifferenceDto implements PendingClosingDifference {
-  @ApiProperty({
-    description: 'ID del cierre de caja (UUID), consultable en /cash-closings.',
-    example: 'c1000000-0000-4000-8000-000000000001',
-  })
-  closingId: string;
-
-  @ApiProperty({ description: 'Número de turno.', example: 1 })
-  shift: number;
-
-  @ApiProperty({
-    description: 'Estado del cierre.',
-    enum: CashClosingStatus,
-    example: CashClosingStatus.CLOSED,
-  })
-  status: CashClosingStatus;
-
-  @ApiProperty({
-    description:
-      'Diferencia de caja del cierre (contado menos esperado), suma de sus líneas. Cifra informativa.',
-    example: -1000,
-  })
-  cashDifference: number;
-
-  @ApiProperty({
-    description: 'Descuadre de vouchers del cierre.',
-    example: 1600,
-  })
-  voucherDifference: number;
-
-  @ApiProperty({
-    description:
-      'Líneas del cierre con diferencia distinta de cero, con medio y montos; vacío si el descuadre viene solo de los vouchers.',
-    type: [ClosingLineDifferenceDto],
-  })
-  lineDifferences: ClosingLineDifferenceDto[];
-
-  @ApiProperty({
-    description:
-      'true si alguna línea o la conciliación de vouchers está descuadrada; una compensación a 0 en cashDifference no cuadra el cierre.',
-    example: true,
-  })
-  hasDifferences: boolean;
-
-  @ApiProperty({
-    description: 'Negado de hasDifferences.',
-    example: false,
-  })
-  isBalanced: boolean;
-
-  @ApiProperty({
-    description:
-      'CUADRADO sin diferencias en líneas ni vouchers; NO_CUADRADO con cualquiera de ellas, aunque el total compense.',
-    enum: CLOSING_BALANCE_STATUSES,
-    example: 'NO_CUADRADO',
-  })
-  balanceStatus: 'CUADRADO' | 'NO_CUADRADO';
-
-  @ApiProperty({
-    description: 'Motivo declarado por el supervisor.',
-    example: 'Faltante de efectivo',
-    nullable: true,
-    type: String,
-  })
-  differenceReason: string | null;
-
-  @ApiProperty({
-    description: 'Instante en que se confirmó el cierre.',
-    example: '2026-03-10T19:00:00.000Z',
-    nullable: true,
-    type: Date,
-  })
-  closedAt: Date | null;
-}
+// Documentación Swagger del panel consolidado (SPRINT-4R-T13). Montos en CLP
+// enteros; los conceptos se documentan en /sales-reports.
 
 class AlertCountsDto implements AlertCounts {
   @ApiProperty({ description: 'Alertas vencidas.', example: 1 })
@@ -297,50 +33,47 @@ class AlertCountsDto implements AlertCounts {
 class StoreAlertsSummaryDto implements StoreAlertsSummary {
   @ApiProperty({
     description:
-      'Documentos laborales pendientes de registrar en la DT (vigentes al consultar).',
+      'Documentos laborales pendientes de registrar en la DT (art. 9 bis).',
     type: AlertCountsDto,
   })
   dtRegistration: AlertCountsDto;
 
   @ApiProperty({
-    description:
-      'Propinas con tarjeta pendientes de entrega (vigentes al consultar).',
+    description: 'Propinas con tarjeta pendientes de entregar (art. 64).',
     type: AlertCountsDto,
   })
   tipPayment: AlertCountsDto;
 }
 
 class StoreDashboardDto implements StoreDashboard {
-  @ApiProperty({ description: 'Local.', type: SalesDashboardStoreDto })
-  store: SalesDashboardStoreDto;
-
-  @ApiProperty({
-    description: 'Ventas netas del día.',
-    type: StoreSalesSummaryDto,
-  })
-  sales: StoreSalesSummaryDto;
-
-  @ApiProperty({
-    description: 'Propina con tarjeta, separada de las ventas.',
-    type: StoreCardTipsSummaryDto,
-  })
-  cardTips: StoreCardTipsSummaryDto;
-
-  @ApiProperty({
-    description: 'Cifras de los cierres de caja del día.',
-    type: StoreClosingsSummaryDto,
-  })
-  closings: StoreClosingsSummaryDto;
+  @ApiProperty({ description: 'Local.', type: ReportStoreDto })
+  store: ReportStoreDto;
 
   @ApiProperty({
     description:
-      'Cierres del día con alguna línea descuadrada o descuadre de vouchers, con su detalle y estado de cuadre.',
-    type: [PendingClosingDifferenceDto],
+      'Estado de la importación diaria del Excel (mismo cálculo de GET /sales-days).',
+    type: ImportStatusInfoDto,
   })
-  pendingDifferences: PendingClosingDifferenceDto[];
+  importStatus: ImportStatusInfoDto;
 
   @ApiProperty({
-    description: 'Alertas DT y de propinas del local.',
+    description:
+      'Ventas de la versión vigente del Excel; null si el día no tiene importación vigente (ausencia de datos, no venta cero).',
+    type: ImportedSalesDto,
+    nullable: true,
+  })
+  sales: ImportedSalesDto | null;
+
+  @ApiProperty({
+    description:
+      'Propinas de tarjeta/efectivo y diferencia de efectivo de la operación diaria; null si no se registró.',
+    type: DailyOperationFiguresDto,
+    nullable: true,
+  })
+  dailyOperation: DailyOperationFiguresDto | null;
+
+  @ApiProperty({
+    description: 'Alertas legales vigentes del local.',
     type: StoreAlertsSummaryDto,
   })
   alerts: StoreAlertsSummaryDto;
@@ -348,59 +81,41 @@ class StoreDashboardDto implements StoreDashboard {
 
 class SalesDashboardTotalsDto implements SalesDashboardTotals {
   @ApiProperty({
-    description: 'Ventas del día en todos los locales.',
-    example: 250,
+    description: 'Ventas importadas del día de todos los locales.',
+    type: SalesTotalsDto,
   })
-  salesCount: number;
+  sales: SalesTotalsDto;
 
   @ApiProperty({
-    description: 'Venta neta del día en todos los locales.',
-    example: 1850000,
+    description: 'Locales del panel sin importación vigente para el día.',
+    example: 1,
   })
-  netAmount: number;
+  storesWithoutImport: number;
 
   @ApiProperty({
-    description: 'Venta neta ya conciliada en cierres.',
-    example: 1800000,
+    description: 'Propinas del día de todos los locales (concepto separado).',
+    type: TipsTotalsDto,
   })
-  closedNetAmount: number;
+  tips: TipsTotalsDto;
 
   @ApiProperty({
-    description: 'Venta neta sin cierre.',
-    example: 50000,
+    description: 'Locales del panel sin operación diaria registrada.',
+    example: 0,
   })
-  unclosedNetAmount: number;
-
-  @ApiProperty({
-    description: 'Propina con tarjeta del registro diario.',
-    example: 85000,
-  })
-  cardTipsRegisteredAmount: number;
-
-  @ApiProperty({
-    description: 'Propina con tarjeta de los vouchers de los cierres.',
-    example: 85000,
-  })
-  cardTipsClosingsAmount: number;
-
-  @ApiProperty({ description: 'Cierres de caja del día.', example: 5 })
-  closingsCount: number;
+  storesWithoutDailyOperation: number;
 
   @ApiProperty({
     description:
-      'Diferencia de caja total (informativa; nunca criterio de cuadre).',
-    example: -1000,
+      'Diferencias de efectivo del día: sobrantes y faltantes por separado, sin compensar.',
+    type: CashDifferenceTotalsDto,
   })
-  cashDifference: number;
-
-  @ApiProperty({ description: 'Descuadre de vouchers total.', example: 1600 })
-  voucherDifference: number;
+  cashDifferences: CashDifferenceTotalsDto;
 
   @ApiProperty({
-    description: 'Cierres con diferencias pendientes de revisión.',
-    example: 1,
+    description: 'Locales por estado de importación del día.',
+    type: ImportStatusSummaryDto,
   })
-  pendingDifferencesCount: number;
+  importStatus: ImportStatusSummaryDto;
 
   @ApiProperty({
     description: 'Alertas de registro en la DT de todos los locales.',
@@ -417,44 +132,52 @@ class SalesDashboardTotalsDto implements SalesDashboardTotals {
 
 export class SalesDashboardDto implements SalesDashboard {
   @ApiProperty({
-    description: 'Día de negocio consultado (YYYY-MM-DD).',
-    example: '2026-03-10',
+    description: 'Día de negocio consultado (YYYY-MM-DD, hora de Chile).',
+    example: '2026-11-07',
   })
   businessDate: string;
 
   @ApiProperty({
-    description: 'Zona horaria usada para el día de negocio.',
+    description: 'Día de negocio actual en Chile al calcular (YYYY-MM-DD).',
+    example: '2026-11-08',
+  })
+  today: string;
+
+  @ApiProperty({
+    description: 'Zona horaria de los días de negocio.',
     example: 'America/Santiago',
   })
   timeZone: string;
 
   @ApiProperty({
-    description: 'Primer instante del día en hora de Chile (inclusive).',
-    example: '2026-03-10T03:00:00.000Z',
-  })
-  periodStart: Date;
-
-  @ApiProperty({
-    description:
-      'Primer instante del día siguiente en hora de Chile (exclusivo).',
-    example: '2026-03-11T03:00:00.000Z',
-  })
-  periodEnd: Date;
-
-  @ApiProperty({
-    description: 'Instante en que se calculó el resumen y las alertas.',
-    example: '2026-03-10T23:15:00.000Z',
+    description: 'Instante del cálculo.',
+    example: '2026-11-08T12:00:00.000Z',
   })
   calculatedAt: Date;
 
   @ApiProperty({
-    description: 'Resumen de cada local, ordenado por nombre.',
+    description:
+      'Medios de pago del panel: activos del catálogo más inactivos con ventas importadas el día, en el orden del catálogo.',
+    type: [PaymentMethodColumnDto],
+  })
+  paymentMethods: PaymentMethodColumnDto[];
+
+  @ApiProperty({
+    description:
+      'Un elemento por local activo (y por local inactivo con datos del día), ordenados por nombre.',
     type: [StoreDashboardDto],
   })
   stores: StoreDashboardDto[];
 
   @ApiProperty({
-    description: 'Totales de todos los locales.',
+    description:
+      'Diferencias de efectivo distintas de cero del día, con signo y motivo, sin compensar ni ocultar líneas.',
+    type: [CashDifferenceLineDto],
+  })
+  cashDifferences: CashDifferenceLineDto[];
+
+  @ApiProperty({
+    description: 'Totales del día, por concepto.',
     type: SalesDashboardTotalsDto,
   })
   totals: SalesDashboardTotalsDto;

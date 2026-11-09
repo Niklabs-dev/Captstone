@@ -28,16 +28,17 @@ export class SalesDashboardController {
   @Get()
   @ApiOperation({
     summary:
-      'Consulta consolidada de ventas, alertas y diferencias de caja por local',
+      'Panel consolidado de ventas importadas, alertas y diferencias por local',
     description:
-      'Agrupa por local las ventas netas del día en hora de Chile (sin propina) con desglose dinámico por medio de pago del catálogo (activos más históricos con movimientos, con código y nombre), la propina con tarjeta como concepto separado, las cifras de los cierres de caja del día, los cierres con diferencias pendientes (líneas descuadradas o descuadre de vouchers: cualquiera de ellas deja el cierre NO_CUADRADO, aunque la diferencia de caja total compense a 0) y las alertas vigentes de registro en la DT y de entrega de propinas.',
+      'Un día de negocio en hora de Chile (America/Santiago) agrupado por local: ventas de la versión vigente del Excel MrComanda con desglose dinámico por medio de pago del catálogo (activos más inactivos con historial), estado de la importación diaria (mismo cálculo de GET /sales-days), propinas de tarjeta y de efectivo y diferencia de efectivo declaradas en la operación diaria (con signo y motivo, sin compensar) y alertas legales vigentes de registro en la DT y de entrega de propinas. Cada concepto es independiente: la propina nunca se suma a las ventas y no se infiere descuadre del Excel. Sin Excel vigente o sin operación diaria el dato es null (ausencia de datos). Ya no expone cierres por turno, bruto Mercado Pago, neto conciliable ni descuadre de vouchers: ese histórico se consulta en GET /sales-reports/legacy.',
   })
   @ApiOkResponse({
-    description: 'Resumen por local y totales generales del día.',
+    description: 'Resumen por local y totales del día por concepto.',
     type: SalesDashboardDto,
   })
   @ApiBadRequestResponse({
-    description: 'La fecha no es válida o no tiene el formato YYYY-MM-DD.',
+    description:
+      'La fecha no es válida, no tiene el formato YYYY-MM-DD o es posterior a hoy en Chile.',
   })
   @ApiForbiddenResponse({
     description: 'Solo el administrador puede consultar el consolidado.',
