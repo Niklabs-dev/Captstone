@@ -301,9 +301,12 @@ export class OperatingDaysService {
   }
 
   // Estado de ventas por local y día en un rango (nunca después de hoy).
+  // `client` permite leer dentro de una transacción en curso (los reportes de
+  // SPRINT-4R-T13 lo leen en la misma foto que sus ventas y operaciones).
   async listSalesDays(
     query: ListSalesDaysQueryDto,
     now: Date = new Date(),
+    client: Prisma.TransactionClient = this.prisma,
   ): Promise<SalesDaysResponse> {
     const today = formatDbDate(toDbDate(businessDateOf(now)));
     const to = query.to !== undefined && query.to < today ? query.to : today;
@@ -319,7 +322,7 @@ export class OperatingDaysService {
       );
     }
     if (query.storeId !== undefined) {
-      const exists = await this.prisma.store.findUnique({
+      const exists = await client.store.findUnique({
         where: { id: query.storeId },
         select: { id: true },
       });
@@ -327,7 +330,7 @@ export class OperatingDaysService {
     }
 
     // Solo locales activos: uno inactivo no genera alertas.
-    const stores = await this.prisma.store.findMany({
+    const stores = await client.store.findMany({
       where: { isActive: true, id: query.storeId },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
@@ -335,15 +338,15 @@ export class OperatingDaysService {
     const storeIds = stores.map((store) => store.id);
     const range = { gte: dbDate(from), lte: dbDate(to) };
     const [schedules, closures, imports] = await Promise.all([
-      this.prisma.storeOperatingSchedule.findMany({
+      client.storeOperatingSchedule.findMany({
         where: { storeId: { in: storeIds } },
         select: SCHEDULE_SELECT,
       }),
-      this.prisma.storeClosure.findMany({
+      client.storeClosure.findMany({
         where: { storeId: { in: storeIds }, closureDate: range },
         select: { id: true, storeId: true, closureDate: true, reason: true },
       }),
-      this.prisma.salesImport.findMany({
+      client.salesImport.findMany({
         where: {
           storeId: { in: storeIds },
           businessDate: range,
