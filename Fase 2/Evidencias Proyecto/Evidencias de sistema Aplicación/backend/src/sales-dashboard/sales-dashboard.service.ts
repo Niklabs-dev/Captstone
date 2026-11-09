@@ -1,5 +1,8 @@
-import { Injectable } from '@nestjs/common';
-import { BUSINESS_TIME_ZONE } from '../audit/utils/business-day.util.js';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BUSINESS_TIME_ZONE,
+  parseCalendarDate,
+} from '../audit/utils/business-day.util.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import {
   businessDateOf,
@@ -69,10 +72,20 @@ export class SalesDashboardService {
     now: Date = new Date(),
   ): Promise<SalesDashboard> {
     // Sin fecha se consulta el día actual en Chile: pasadas las 21:00 en
-    // invierno ya es el día siguiente en UTC. Una fecha futura la rechaza la
-    // validación del rango (400).
-    const businessDate =
-      query.date ?? formatDbDate(toDbDate(businessDateOf(now)));
+    // invierno ya es el día siguiente en UTC. La fecha se valida antes de
+    // consultar nada, y el error nombra el parámetro `date` del endpoint.
+    const today = formatDbDate(toDbDate(businessDateOf(now)));
+    const businessDate = query.date ?? today;
+    if (parseCalendarDate(businessDate) === null) {
+      throw new BadRequestException(
+        'date debe ser una fecha válida con formato YYYY-MM-DD',
+      );
+    }
+    if (businessDate > today) {
+      throw new BadRequestException(
+        `date no puede ser posterior a hoy (${today}, hora de Chile)`,
+      );
+    }
     const [dtAlerts, tipAlerts] = await Promise.all([
       this.dtAlerts.list(currentUser),
       this.tipPaymentAlerts.list(currentUser),
