@@ -20,6 +20,10 @@ export interface TestDailyOperationSpec {
   businessDate: string;
   cardTipAmount?: number;
   cashTipAmount?: number;
+  // Diferencia de efectivo declarada con signo y su motivo (SPRINT-4R-T13);
+  // por defecto 0 sin motivo.
+  cashDifference?: number;
+  differenceReason?: string | null;
   participantIds?: readonly string[];
 }
 
@@ -50,7 +54,8 @@ export async function createDailyOperation(
       cardTipAmount: BigInt(cardTipAmount),
       cashTipAmount: BigInt(cashTipAmount),
       tipFundAmount: BigInt(cardTipAmount + cashTipAmount),
-      cashDifference: BigInt(0),
+      cashDifference: BigInt(spec.cashDifference ?? 0),
+      differenceReason: spec.differenceReason ?? null,
       voucherId: voucher?.id ?? null,
     },
     select: { id: true },
