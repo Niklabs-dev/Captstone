@@ -323,18 +323,23 @@ export function consolidateSales(input: ConsolidationInput): Consolidation {
   const grandSales = new Map<string, number>();
   const cashDifferences: CashDifferenceLine[] = [];
 
-  const storeReports = stores.map((store): StoreReport => {
-    const dates = new Set<string>();
-    for (const source of [
-      input.imports,
-      input.operations,
-      input.salesDays,
-      input.pendingImports,
-    ]) {
-      for (const item of source) {
-        if (item.storeId === store.id) dates.add(item.businessDate);
-      }
+  // Fechas de cada local en una sola pasada por las fuentes.
+  const datesByStore = new Map<string, Set<string>>();
+  for (const source of [
+    input.imports,
+    input.operations,
+    input.salesDays,
+    input.pendingImports,
+  ]) {
+    for (const item of source) {
+      const dates = datesByStore.get(item.storeId) ?? new Set<string>();
+      dates.add(item.businessDate);
+      datesByStore.set(item.storeId, dates);
     }
+  }
+
+  const storeReports = stores.map((store): StoreReport => {
+    const dates = datesByStore.get(store.id) ?? new Set<string>();
     const storeSales = new Map<string, number>();
     let importedDays = 0;
     let totalAmount = 0;
