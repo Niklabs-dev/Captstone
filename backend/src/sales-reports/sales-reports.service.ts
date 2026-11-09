@@ -11,6 +11,7 @@ import {
 } from '../audit/utils/business-day.util.js';
 import {
   businessDateOf,
+  daysBetween,
   formatDbDate,
   toDbDate,
 } from '../documents/utils/document-dates.util.js';
@@ -44,8 +45,6 @@ import type {
 export const LEGACY_NOTICE =
   'Histórico previo a SPRINT-4R-T01 (solo lectura): cierres por turno con conciliación de vouchers y ventas de la tabla sales. No se mezcla con las ventas importadas ni con la diferencia de efectivo de la operación diaria.';
 
-const MS_PER_DAY = 86_400_000;
-
 export interface ReportRange {
   from: string;
   to: string;
@@ -54,10 +53,6 @@ export interface ReportRange {
 
 export interface ConsolidatedRange extends Consolidation {
   today: string;
-}
-
-function dbDate(isoDate: string): Date {
-  return new Date(`${isoDate}T00:00:00.000Z`);
 }
 
 function calendarDate(isoDate: string): CalendarDate {
@@ -175,7 +170,10 @@ export class SalesReportsService {
     includeStoreIds: readonly string[],
   ): Promise<Consolidation> {
     await this.assertStoreExists(range.storeId, tx);
-    const dates = { gte: dbDate(range.from), lte: dbDate(range.to) };
+    const dates = {
+      gte: toDbDate(calendarDate(range.from)),
+      lte: toDbDate(calendarDate(range.to)),
+    };
     const storeFilter =
       range.storeId === undefined ? {} : { storeId: range.storeId };
 
@@ -325,7 +323,10 @@ export class SalesReportsService {
       tx.cashClosing.findMany({
         where: {
           ...storeFilter,
-          businessDate: { gte: dbDate(query.from), lte: dbDate(query.to) },
+          businessDate: {
+            gte: toDbDate(calendarDate(query.from)),
+            lte: toDbDate(calendarDate(query.to)),
+          },
         },
         select: {
           id: true,
@@ -432,8 +433,8 @@ export class SalesReportsService {
 
   // Valida el rango de días de negocio en hora de Chile y devuelve «hoy».
   private validateRange(range: ReportRange, now: Date): string {
-    calendarDate(range.from);
-    calendarDate(range.to);
+    const from = calendarDate(range.from);
+    const to = calendarDate(range.to);
     const today = formatDbDate(toDbDate(businessDateOf(now)));
     if (range.from > range.to) {
       throw new BadRequestException('from no puede ser posterior a to');
@@ -443,12 +444,7 @@ export class SalesReportsService {
         `to no puede ser posterior a hoy (${today}, hora de Chile)`,
       );
     }
-    const days =
-      Math.round(
-        (dbDate(range.to).getTime() - dbDate(range.from).getTime()) /
-          MS_PER_DAY,
-      ) + 1;
-    if (days > MAX_SALES_DAYS_RANGE) {
+    if (daysBetween(from, to) + 1 > MAX_SALES_DAYS_RANGE) {
       throw new BadRequestException(
         `El rango no puede superar ${MAX_SALES_DAYS_RANGE} días`,
       );
