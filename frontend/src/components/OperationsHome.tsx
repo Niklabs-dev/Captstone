@@ -51,6 +51,9 @@ const actionLabels: Partial<Record<NavigationItem['href'], string>> = {
   '/admin/documentos': 'Gestionar documentos',
   '/admin/alertas-dt': 'Abrir alertas DT',
   '/admin/medios-pago': 'Gestionar medios de pago',
+  '/admin/panel-ventas': 'Abrir panel de ventas',
+  '/admin/reportes-ventas': 'Consultar reportes de ventas',
+  '/admin/calendario-locales': 'Gestionar calendario de locales',
   '/liquidaciones': 'Abrir liquidaciones',
 };
 

@@ -42,6 +42,9 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
     { href: '/admin/alertas-dt', label: 'Alertas DT' },
     { href: '/admin/medios-pago', label: 'Medios de pago' },
     { href: '/admin/importacion-ventas', label: 'Importar ventas' },
+    { href: '/admin/panel-ventas', label: 'Panel de ventas' },
+    { href: '/admin/reportes-ventas', label: 'Reportes de ventas' },
+    { href: '/admin/calendario-locales', label: 'Calendario de locales' },
     { href: '/liquidaciones', label: 'Liquidaciones' },
     { href: '/propinas/repartos', label: 'Reparto de propinas' },
   ]);
@@ -158,6 +161,38 @@ test('La importación de ventas es exclusiva del administrador (SPRINT-4R-T11)',
       allowed,
     );
   }
+});
+
+test('Panel, reportes y calendario de ventas son exclusivos del administrador (SPRINT-4R-T14)', () => {
+  const pages = [
+    ['/admin/panel-ventas', 'Panel de ventas'],
+    ['/admin/reportes-ventas', 'Reportes de ventas'],
+    ['/admin/calendario-locales', 'Calendario de locales'],
+  ] as const;
+  for (const [href, title] of pages) {
+    assert.deepEqual(getNavigationView(href), { href, title });
+    for (const role of ROLES) {
+      const allowed = role === 'ADMINISTRADOR';
+      assert.equal(
+        getNavigationItems(role).some((item) => item.href === href),
+        allowed,
+      );
+      assert.equal(getPageRedirect(role, href) === null, allowed);
+    }
+  }
+  // El detalle de una operación diaria hereda el panel y su protección.
+  const detail =
+    '/admin/panel-ventas/operaciones/3f2e1d0c-9b8a-4765-8432-10fedcba9876';
+  assert.equal(getNavigationView(detail).title, 'Panel de ventas');
+  assert.equal(getPageRedirect('ADMINISTRADOR', detail), null);
+  assert.equal(
+    getPageRedirect('SUPERVISOR', detail),
+    '/dashboard?reason=forbidden',
+  );
+  assert.equal(
+    getPageRedirect('TRABAJADOR', detail),
+    '/portal?reason=forbidden',
+  );
 });
 
 test('Solo el administrador entra a las páginas administrativas', () => {
