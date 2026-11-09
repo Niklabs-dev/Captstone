@@ -219,12 +219,13 @@ sin esperar a que termine el registro.
 - Los 401 (sin sesión) y 400 (validación) no se registran como acceso denegado.
 
 Las rutas exclusivas del administrador se declaran en
-`src/auth/constants/admin-only-routes.constants.ts`: hoy el panel consolidado
-(`sales-dashboard`) y la importación de ventas (`sales-imports`, incluida la
-descarga directa del Excel). El calendario de operación (SPRINT-4R-T12) y los
-reportes (SPRINT-4R-T13) agregan ahí la ruta de su controlador, y
-`test/admin-only-routes.spec.ts` falla si algún endpoint de esas rutas admite
-otro rol o es público.
+`src/auth/constants/admin-only-routes.constants.ts`: el panel consolidado
+(`sales-dashboard`), la importación de ventas (`sales-imports`, incluida la
+descarga directa del Excel), el estado diario de ventas (`sales-days`), el
+calendario de operación por local (`stores/:storeId`) y los reportes
+(`sales-reports`, incluido `legacy`). `test/admin-only-routes.spec.ts` falla si
+algún endpoint de esas rutas admite otro rol o es público, y una ruta nueva de
+este tipo se agrega a esa lista.
 
 ### Inmutabilidad del registro
 
