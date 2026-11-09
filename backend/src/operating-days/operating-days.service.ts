@@ -4,11 +4,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { parseCalendarDate } from '../audit/utils/business-day.util.js';
+import {
+  type CalendarDate,
+  parseCalendarDate,
+} from '../audit/utils/business-day.util.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import {
   addDays,
   businessDateOf,
+  daysBetween,
   formatDbDate,
   toDbDate,
 } from '../documents/utils/document-dates.util.js';
@@ -88,8 +92,6 @@ const WEEKDAY_FIELDS = [
 
 type WeekdayFlags = Record<(typeof WEEKDAY_FIELDS)[number][0], boolean>;
 
-const MS_PER_DAY = 86_400_000;
-
 function personName(person: { firstName: string; lastName: string }): string {
   return `${person.firstName} ${person.lastName}`.trim();
 }
@@ -125,16 +127,14 @@ function dbDate(isoDate: string): Date {
   return new Date(`${isoDate}T00:00:00.000Z`);
 }
 
-function shiftDays(isoDate: string, days: number): string {
+function calendarOf(isoDate: string): CalendarDate {
   const date = parseCalendarDate(isoDate);
   if (!date) throw new Error(`Fecha inválida: ${isoDate}`);
-  return formatDbDate(toDbDate(addDays(date, days)));
+  return date;
 }
 
-function daysBetween(from: string, to: string): number {
-  return Math.round(
-    (dbDate(to).getTime() - dbDate(from).getTime()) / MS_PER_DAY,
-  );
+function shiftDays(isoDate: string, days: number): string {
+  return formatDbDate(toDbDate(addDays(calendarOf(isoDate), days)));
 }
 
 function emptySummary(): Record<SalesDayStatus, number> {
@@ -301,9 +301,12 @@ export class OperatingDaysService {
   }
 
   // Estado de ventas por local y día en un rango (nunca después de hoy).
+  // `client` permite leer dentro de una transacción en curso (los reportes de
+  // SPRINT-4R-T13 lo leen en la misma foto que sus ventas y operaciones).
   async listSalesDays(
     query: ListSalesDaysQueryDto,
     now: Date = new Date(),
+    client: Prisma.TransactionClient = this.prisma,
   ): Promise<SalesDaysResponse> {
     const today = formatDbDate(toDbDate(businessDateOf(now)));
     const to = query.to !== undefined && query.to < today ? query.to : today;
@@ -313,13 +316,16 @@ export class OperatingDaysService {
         'from no puede ser posterior a to ni al día de hoy',
       );
     }
-    if (daysBetween(from, to) + 1 > MAX_SALES_DAYS_RANGE) {
+    if (
+      daysBetween(calendarOf(from), calendarOf(to)) + 1 >
+      MAX_SALES_DAYS_RANGE
+    ) {
       throw new BadRequestException(
         `El rango no puede superar ${MAX_SALES_DAYS_RANGE} días`,
       );
     }
     if (query.storeId !== undefined) {
-      const exists = await this.prisma.store.findUnique({
+      const exists = await client.store.findUnique({
         where: { id: query.storeId },
         select: { id: true },
       });
@@ -327,7 +333,7 @@ export class OperatingDaysService {
     }
 
     // Solo locales activos: uno inactivo no genera alertas.
-    const stores = await this.prisma.store.findMany({
+    const stores = await client.store.findMany({
       where: { isActive: true, id: query.storeId },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
@@ -335,15 +341,15 @@ export class OperatingDaysService {
     const storeIds = stores.map((store) => store.id);
     const range = { gte: dbDate(from), lte: dbDate(to) };
     const [schedules, closures, imports] = await Promise.all([
-      this.prisma.storeOperatingSchedule.findMany({
+      client.storeOperatingSchedule.findMany({
         where: { storeId: { in: storeIds } },
         select: SCHEDULE_SELECT,
       }),
-      this.prisma.storeClosure.findMany({
+      client.storeClosure.findMany({
         where: { storeId: { in: storeIds }, closureDate: range },
         select: { id: true, storeId: true, closureDate: true, reason: true },
       }),
-      this.prisma.salesImport.findMany({
+      client.salesImport.findMany({
         where: {
           storeId: { in: storeIds },
           businessDate: range,

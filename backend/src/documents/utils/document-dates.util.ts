@@ -48,6 +48,17 @@ export function toDbDate({ year, month, day }: CalendarDate): Date {
   return new Date(Date.UTC(year, month - 1, day));
 }
 
+const MS_PER_DAY = 86_400_000;
+
+// Días corridos de from a to (negativo si to es anterior). Lo usan los
+// rangos de días de negocio del calendario (SPRINT-4R-T12) y de los reportes
+// (SPRINT-4R-T13).
+export function daysBetween(from: CalendarDate, to: CalendarDate): number {
+  return Math.round(
+    (toDbDate(to).getTime() - toDbDate(from).getTime()) / MS_PER_DAY,
+  );
+}
+
 // Columna date leída de la base como texto YYYY-MM-DD.
 export function formatDbDate(date: Date): string {
   return date.toISOString().slice(0, 10);
