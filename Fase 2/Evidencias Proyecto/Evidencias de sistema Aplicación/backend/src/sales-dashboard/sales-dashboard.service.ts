@@ -43,6 +43,15 @@ function countAlerts(alerts: StoreAlert[], storeId: string): AlertCounts {
   };
 }
 
+// Día en que el local debía entregar Excel y operación diaria: abrió según
+// su calendario o igual tiene Excel vigente. Los días CERRADO y los que no se
+// informan (sin calendario o antes del inicio del seguimiento, SPRINT-4R-T12)
+// nunca cuentan como faltantes.
+function isExpectedDay(store: StoreDashboard): boolean {
+  const { status } = store.importStatus;
+  return status !== null && status !== 'CERRADO';
+}
+
 function sumCounts(left: AlertCounts, right: AlertCounts): AlertCounts {
   return {
     overdue: left.overdue + right.overdue,
@@ -93,6 +102,7 @@ export class SalesDashboardService {
       };
     });
     const none: AlertCounts = { overdue: 0, upcoming: 0 };
+    const expected = stores.filter(isExpectedDay);
 
     return {
       businessDate,
@@ -104,10 +114,10 @@ export class SalesDashboardService {
       cashDifferences: consolidated.cashDifferences,
       totals: {
         sales: consolidated.totals.sales,
-        storesWithoutImport: stores.filter((store) => store.sales === null)
+        storesWithoutImport: expected.filter((store) => store.sales === null)
           .length,
         tips: consolidated.totals.tips,
-        storesWithoutDailyOperation: stores.filter(
+        storesWithoutDailyOperation: expected.filter(
           (store) => store.dailyOperation === null,
         ).length,
         cashDifferences: consolidated.totals.cashDifferences,

@@ -87,7 +87,8 @@ class SalesDashboardTotalsDto implements SalesDashboardTotals {
   sales: SalesTotalsDto;
 
   @ApiProperty({
-    description: 'Locales del panel sin importación vigente para el día.',
+    description:
+      'Locales del panel sin importación vigente en un día que debían informarla (PENDIENTE o ATRASADO). No cuenta los días CERRADO ni los no informados (sin calendario o anteriores al inicio del seguimiento).',
     example: 1,
   })
   storesWithoutImport: number;
@@ -99,7 +100,8 @@ class SalesDashboardTotalsDto implements SalesDashboardTotals {
   tips: TipsTotalsDto;
 
   @ApiProperty({
-    description: 'Locales del panel sin operación diaria registrada.',
+    description:
+      'Locales del panel sin operación diaria registrada en un día que debían operar (IMPORTADO, PENDIENTE o ATRASADO). No cuenta los días CERRADO ni los no informados.',
     example: 0,
   })
   storesWithoutDailyOperation: number;

@@ -71,6 +71,13 @@ function storeOf(body: SalesDashboard, storeId: string): StoreDashboard {
   return store;
 }
 
+// Día en que se espera Excel y operación diaria: ni CERRADO ni sin informar
+// (sin calendario o antes del inicio del seguimiento).
+function isExpectedDay(store: StoreDashboard): boolean {
+  const { status } = store.importStatus;
+  return status !== null && status !== 'CERRADO';
+}
+
 describe.skipIf(!databaseUrl)(
   'Panel consolidado con ventas importadas (SPRINT-4R-T13)',
   { timeout: 60_000 },
@@ -437,6 +444,64 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
+    it('no cuenta como faltantes los días CERRADO ni los anteriores al seguimiento', async () => {
+      await withinRollback(async (f) => {
+        const calendar = (
+          storeId: string,
+          trackingStartDate: string,
+        ): Promise<unknown> =>
+          f.tx.storeOperatingSchedule.create({
+            data: {
+              storeId,
+              opensMonday: true,
+              opensTuesday: true,
+              opensWednesday: true,
+              opensThursday: true,
+              opensFriday: true,
+              opensSaturday: true,
+              opensSunday: true,
+              trackingStartDate: dbDate(trackingStartDate),
+              updatedById: f.admin.id,
+            },
+          });
+        // A: abre todos los días, con excepción de cierre el día consultado.
+        // B: su seguimiento empieza después del día consultado.
+        // C: abre ese día y no tiene Excel ni operación (sí es faltante).
+        const storeC = await createTestStore(f.tx, 'Panel C', 'Melipilla');
+        await calendar(f.storeA.id, businessDaysAgo(10));
+        await f.tx.storeClosure.create({
+          data: {
+            storeId: f.storeA.id,
+            closureDate: dbDate(DAY()),
+            reason: 'Feriado',
+            createdById: f.admin.id,
+          },
+        });
+        await calendar(f.storeB.id, businessDaysAgo(1));
+        await calendar(storeC.id, businessDaysAgo(10));
+
+        const body = await dashboard(f);
+        expect(storeOf(body, f.storeA.id).importStatus.status).toBe('CERRADO');
+        expect(storeOf(body, f.storeB.id).importStatus.status).toBeNull();
+        expect(storeOf(body, storeC.id).importStatus.status).toBe('ATRASADO');
+
+        const expected = body.stores.filter(isExpectedDay);
+        expect(expected.map((s) => s.store.id)).toContain(storeC.id);
+        expect(expected.map((s) => s.store.id)).not.toEqual(
+          expect.arrayContaining([f.storeA.id]),
+        );
+        expect(expected.map((s) => s.store.id)).not.toEqual(
+          expect.arrayContaining([f.storeB.id]),
+        );
+        expect(body.totals.storesWithoutImport).toBe(
+          expected.filter((s) => s.sales === null).length,
+        );
+        expect(body.totals.storesWithoutDailyOperation).toBe(
+          expected.filter((s) => s.dailyOperation === null).length,
+        );
+      });
+    });
+
     it('cuenta las alertas DT y de propinas vigentes de cada local', async () => {
       await withinRollback(async (f) => {
         const today = businessToday();
@@ -496,11 +561,12 @@ describe.skipIf(!databaseUrl)(
         expect(totals.sales.importedDays).toBe(
           body.stores.filter((s) => s.sales !== null).length,
         );
+        const expected = body.stores.filter(isExpectedDay);
         expect(totals.storesWithoutImport).toBe(
-          body.stores.filter((s) => s.sales === null).length,
+          expected.filter((s) => s.sales === null).length,
         );
         expect(totals.storesWithoutDailyOperation).toBe(
-          body.stores.filter((s) => s.dailyOperation === null).length,
+          expected.filter((s) => s.dailyOperation === null).length,
         );
         expect(
           totals.sales.byPaymentMethod.reduce((acc, m) => acc + m.amount, 0),
