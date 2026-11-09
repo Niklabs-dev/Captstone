@@ -362,18 +362,63 @@ export function salesImportDifferences(
 
 // Códigos del parser cuyo mensaje explica qué revisar (SPRINT-4R-T09). Solo
 // se reenvían estos: nunca un texto arbitrario del servidor.
-const REPORT_ERROR_CODE =
-  /^(FILE|REPORT|MULTIPLE|PAYMENT|PERIOD|SCHEDULE|STORE|ISSUED|LINE|TOTAL)_[A-Z_]+$|^PAYMENTS_[A-Z_]+$|^MULTIPLE_REPORTS$/;
+const REPORT_ERROR_CODES: ReadonlySet<string> = new Set([
+  'FILE_EMPTY',
+  'FILE_TOO_LARGE',
+  'FILE_XLS_NOT_SUPPORTED',
+  'FILE_NOT_XLSX',
+  'FILE_CORRUPT',
+  'REPORT_NOT_FOUND',
+  'MULTIPLE_REPORTS',
+  'PAYMENTS_SECTION_AMBIGUOUS',
+  'PERIOD_MISSING',
+  'PERIOD_AMBIGUOUS',
+  'PERIOD_INVALID',
+  'PERIOD_MULTIPLE_DAYS',
+  'PERIOD_INCONSISTENT',
+  'SCHEDULE_MISSING',
+  'SCHEDULE_AMBIGUOUS',
+  'SCHEDULE_INVALID',
+  'STORE_MISSING',
+  'STORE_AMBIGUOUS',
+  'STORE_COMBINED',
+  'STORE_INVALID',
+  'ISSUED_AT_AMBIGUOUS',
+  'ISSUED_AT_INVALID',
+  'PAYMENTS_TOTAL_INVALID',
+  'PAYMENT_LINES_MISSING',
+  'LINE_LABEL_INVALID',
+  'LINE_AMOUNT_INVALID',
+  'LINE_PERCENTAGE_INVALID',
+  'LINE_DUPLICATED',
+  'TOTAL_MISMATCH',
+]);
 export function reportErrorMessage(value: unknown): string | null {
   if (
     !isRecord(value) ||
     typeof value.code !== 'string' ||
-    !REPORT_ERROR_CODE.test(value.code) ||
+    !REPORT_ERROR_CODES.has(value.code) ||
     !text(value.message) ||
     value.message.length > 400
   )
     return null;
   return value.message;
+}
+
+// El 409 de la carga no es de versiones: cambió una equivalencia mientras se
+// procesaba el archivo y todavía no existe una vista previa.
+export const SALES_PREVIEW_CONFLICT =
+  'Una equivalencia de local o medio de pago cambió durante la carga. Vuelve a subir el archivo.';
+
+// Las cargas más recientes: la API ordena por fecha de negocio y una corrección
+// de un día antiguo debe aparecer igual al comienzo del historial.
+export function latestSalesImports<T extends { createdAt: string }>(
+  items: readonly T[],
+  limit = 20,
+): T[] {
+  return [...items]
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, limit);
 }
 
 export function salesImportError(status: number): string {

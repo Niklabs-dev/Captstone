@@ -80,6 +80,23 @@ export function confirmSalesImport(
     parseSalesImportDetail,
   );
 }
+// Descarga autenticada: expone la integridad que informa el servidor, que un
+// enlace directo perdería.
+export async function downloadSalesImportFile(
+  id: string,
+): Promise<{ blob: Blob; altered: boolean }> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/sales-imports/${id}/file`);
+  } catch {
+    throw new SalesImportRequestError(503);
+  }
+  if (!response.ok) throw new SalesImportRequestError(response.status);
+  return {
+    blob: await response.blob(),
+    altered: response.headers.get('X-File-Integrity') === 'ALTERED',
+  };
+}
 export function discardSalesImport(id: string): Promise<true> {
   return request('/' + id, { method: 'DELETE' }, () => true as const);
 }

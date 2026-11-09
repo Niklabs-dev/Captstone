@@ -272,6 +272,14 @@ test('Administrador: inválidos, sin resolver, confirmación, duplicado y correc
   await expect(detail).toContainText('ventas-14-03-2026.xlsx');
   await expect(detail).toContainText('Reemplazada');
   await noOverflow(page);
+  const downloadEvent = page.waitForEvent('download');
+  await detail
+    .getByRole('button', { name: 'Descargar Excel original' })
+    .click();
+  expect((await downloadEvent).suggestedFilename()).toBe(
+    'ventas-14-03-2026.xlsx',
+  );
+  await expect(main.getByText('no coincide con el registrado')).toHaveCount(0);
   const folder = 'output/playwright/sales-imports/' + info.project.name;
   await mkdir(folder, { recursive: true });
   await page.screenshot({
@@ -285,8 +293,26 @@ test('Administrador: inválidos, sin resolver, confirmación, duplicado y correc
   await expect(
     page.getByRole('button', { name: 'Confirmar corrección' }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Descartar' }).click();
+  await expect(page.getByLabel('Archivo Excel')).toBeDisabled();
+  await page.getByRole('button', { name: 'Descartar', exact: true }).click();
   await expect(main.getByText('No se registraron ventas')).toBeVisible();
+  await expect(page.getByLabel('Archivo Excel')).toBeEnabled();
+
+  // Una vista previa abandonada al recargar se descarta desde el historial.
+  await upload(page, 'ventas-14-03-2026.xlsx', await report({ cash: 180_000 }));
+  await expect(
+    page.getByRole('button', { name: 'Confirmar corrección' }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Consultando importaciones…')).toHaveCount(0);
+  const abandoned = page
+    .getByRole('listitem')
+    .filter({ hasText: storeName })
+    .filter({ hasText: 'Pendiente' });
+  await expect(abandoned).toHaveCount(1);
+  await abandoned.getByRole('button', { name: /^Descartar/ }).click();
+  await expect(main.getByText('No se registraron ventas')).toBeVisible();
+  await expect(abandoned).toHaveCount(0);
 });
 
 test('Otros roles: sin enlace, ruta directa redirigida y BFF con 403', async ({
