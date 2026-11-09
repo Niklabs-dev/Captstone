@@ -380,3 +380,15 @@ Pruebas: `npm run test:tip-pools`, `npm run test:my-tip-receipts` y `TEST_REAL_D
 - El detalle indica versión, archivo, responsable y fecha de carga, y permite descargar el Excel original.
 
 Pruebas: `npm run test:sales-imports` y `TEST_REAL_DISPOSABLE=true npm run test:sales-imports:real` (API y PostgreSQL reales; requiere `COMPOSE_PROJECT_NAME` del stack de pruebas, porque las equivalencias de locales se crean en la base).
+
+## Panel, reportes y calendario de ventas (SPRINT-4R-T14)
+
+Tres vistas nuevas, solo para ADMINISTRADOR, registradas en `navigation.ts` (menú lateral y «Más» en móvil). Consumen los contratos de SPRINT-4R-T12 y T13 en el servidor: el token no llega al navegador.
+
+- **`/admin/panel-ventas`** (`GET /sales-dashboard` y `GET /sales-days`): por local y día, ventas del Excel vigente, estado de importación, propinas de tarjeta y efectivo, diferencia de efectivo con signo y motivo, y alertas DT y de propinas vigentes hoy (`alertsAsOf`). «Ventas sin importar» lista los días ATRASADO y PENDIENTE de los últimos 30 días. Los días CERRADO no cuentan como faltantes y una carga tardía resuelve la alerta. En escritorio usa tablas; en móvil, fichas.
+- **`/admin/reportes-ventas`** (`GET /sales-reports`): rango de hasta 366 días, de un local o de todos. Columnas dinámicas por medio de pago del catálogo; propinas y diferencias aparecen aparte; incluye detalle por día y lista de diferencias. No muestra conciliación Mercado Pago ni el histórico `/sales-reports/legacy`. Las fechas inválidas, futuras, invertidas o con un rango mayor a 366 días se explican sin consultar cifras.
+- **`/admin/calendario-locales`** (BFF `/api/operating-calendars/[[...path]]`): revisa y guarda los días en que abre cada local y desde cuándo se exigen ventas; registra un cierre por excepción con fecha y motivo, o lo quita. No gestiona horarios de trabajadores.
+
+Un dato ausente (`null`) se muestra como «Sin dato», nunca como $0. Cada fila enlaza su fuente por separado: la importación abre `/admin/importacion-ventas?importacion=<id>` con el detalle del Excel, y la operación diaria abre `/admin/panel-ventas/operaciones/<id>` en solo lectura.
+
+Pruebas: `npm run test:sales-overview` y `TEST_REAL_DISPOSABLE=true npm run test:sales-overview:real`. Corren contra la API y PostgreSQL reales en 1440, 360, 390 y 768 px; como en T11, necesitan `COMPOSE_PROJECT_NAME` del stack de pruebas.
