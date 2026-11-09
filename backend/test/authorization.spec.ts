@@ -35,6 +35,8 @@ const prismaStub = {
   onModuleDestroy: vi.fn(),
   $connect: vi.fn(),
   $disconnect: vi.fn(),
+  // El filtro de accesos denegados (SPRINT-4R-T15) audita cada 403.
+  auditLog: { create: vi.fn().mockResolvedValue({}) },
 };
 
 @Controller('authz-test')

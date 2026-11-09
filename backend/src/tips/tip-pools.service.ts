@@ -414,7 +414,8 @@ export class TipPoolsService {
     user: AuthUser,
   ): Promise<TipPoolResponse[]> {
     const period = this.parsePeriod(dto);
-    if (!canAccessStore(user, dto.storeId)) throw new ForbiddenException();
+    if (!canAccessStore(user, dto.storeId))
+      throw new ForbiddenException(STORE_FORBIDDEN_MESSAGE);
     const pools = await this.prisma.tipPool.findMany({
       where: {
         storeId: dto.storeId,

@@ -325,6 +325,96 @@ describe.skipIf(!databaseUrl)(
       });
     }, 60_000);
 
+    // Calendario y estado diario (SPRINT-4R-T12) y reportes (SPRINT-4R-T13).
+    const REPORT_RANGE = 'from=2026-11-01&to=2026-11-02';
+    function calendarRequests(f: Fixture, user: UserFixture) {
+      const auth = { Authorization: `Bearer ${user.token}` };
+      const server = app.getHttpServer();
+      return [
+        {
+          route: '/sales-reports',
+          send: () =>
+            request(server).get(`/sales-reports?${REPORT_RANGE}`).set(auth),
+        },
+        {
+          route: '/sales-reports/legacy',
+          send: () =>
+            request(server)
+              .get(`/sales-reports/legacy?${REPORT_RANGE}`)
+              .set(auth),
+        },
+        {
+          route: '/sales-days',
+          send: () => request(server).get('/sales-days').set(auth),
+        },
+        {
+          route: '/stores/:storeId/operating-calendar',
+          send: () =>
+            request(server)
+              .get(`/stores/${f.storeA}/operating-calendar`)
+              .set(auth),
+        },
+        {
+          route: '/stores/:storeId/operating-calendar',
+          send: () =>
+            request(server)
+              .put(`/stores/${f.storeA}/operating-calendar`)
+              .set(auth)
+              .send({}),
+        },
+        {
+          route: '/stores/:storeId/closures',
+          send: () =>
+            request(server)
+              .post(`/stores/${f.storeA}/closures`)
+              .set(auth)
+              .send({}),
+        },
+      ];
+    }
+
+    it.each([
+      ['SUPERVISOR', (f: Fixture) => f.supervisorA],
+      ['CONTADOR', (f: Fixture) => f.contador],
+      ['TRABAJADOR', (f: Fixture) => f.trabajadorA],
+    ])(
+      '%s no usa reportes, estado diario ni calendario y queda auditado',
+      async (role, userOf) => {
+        await withinRollback(async (f) => {
+          const user = userOf(f);
+          const calls = calendarRequests(f, user);
+          for (const [index, call] of calls.entries()) {
+            expect((await call.send()).status, call.route).toBe(403);
+            await waitForDeniedLogs(f, user.id, index + 1);
+          }
+          const logs = await deniedLogsOf(f, user.id);
+          expect(
+            logs.map((log) => (log.detail as { route: string }).route),
+          ).toEqual(calls.map((call) => call.route));
+          for (const log of logs) {
+            expect(log.detail).toMatchObject({ role, reason: 'ROLE' });
+          }
+          // El calendario pide un local en la ruta: queda como local pedido.
+          for (const log of logs.slice(3)) {
+            expect(log.detail).toMatchObject({ requestedStoreId: f.storeA });
+          }
+        });
+      },
+      60_000,
+    );
+
+    it('el administrador pasa la autorización de reportes, estado diario y calendario', async () => {
+      await withinRollback(async (f) => {
+        for (const call of calendarRequests(f, f.admin).slice(0, 4)) {
+          const response = await call.send();
+          expect(response.status, call.route).not.toBe(403);
+          expect(response.status, call.route).toBeLessThan(500);
+        }
+        await settle();
+        expect(await deniedLogsOf(f, f.admin.id)).toHaveLength(0);
+      });
+    }, 60_000);
+
     it('el supervisor que pide otro local recibe 403 auditado por local', async () => {
       await withinRollback(async (f) => {
         const response = await get(
