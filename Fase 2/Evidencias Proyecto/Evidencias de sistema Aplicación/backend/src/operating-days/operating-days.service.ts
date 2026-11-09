@@ -4,11 +4,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { parseCalendarDate } from '../audit/utils/business-day.util.js';
+import {
+  type CalendarDate,
+  parseCalendarDate,
+} from '../audit/utils/business-day.util.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import {
   addDays,
   businessDateOf,
+  daysBetween,
   formatDbDate,
   toDbDate,
 } from '../documents/utils/document-dates.util.js';
@@ -88,8 +92,6 @@ const WEEKDAY_FIELDS = [
 
 type WeekdayFlags = Record<(typeof WEEKDAY_FIELDS)[number][0], boolean>;
 
-const MS_PER_DAY = 86_400_000;
-
 function personName(person: { firstName: string; lastName: string }): string {
   return `${person.firstName} ${person.lastName}`.trim();
 }
@@ -125,16 +127,14 @@ function dbDate(isoDate: string): Date {
   return new Date(`${isoDate}T00:00:00.000Z`);
 }
 
-function shiftDays(isoDate: string, days: number): string {
+function calendarOf(isoDate: string): CalendarDate {
   const date = parseCalendarDate(isoDate);
   if (!date) throw new Error(`Fecha inválida: ${isoDate}`);
-  return formatDbDate(toDbDate(addDays(date, days)));
+  return date;
 }
 
-function daysBetween(from: string, to: string): number {
-  return Math.round(
-    (dbDate(to).getTime() - dbDate(from).getTime()) / MS_PER_DAY,
-  );
+function shiftDays(isoDate: string, days: number): string {
+  return formatDbDate(toDbDate(addDays(calendarOf(isoDate), days)));
 }
 
 function emptySummary(): Record<SalesDayStatus, number> {
@@ -316,7 +316,10 @@ export class OperatingDaysService {
         'from no puede ser posterior a to ni al día de hoy',
       );
     }
-    if (daysBetween(from, to) + 1 > MAX_SALES_DAYS_RANGE) {
+    if (
+      daysBetween(calendarOf(from), calendarOf(to)) + 1 >
+      MAX_SALES_DAYS_RANGE
+    ) {
       throw new BadRequestException(
         `El rango no puede superar ${MAX_SALES_DAYS_RANGE} días`,
       );
