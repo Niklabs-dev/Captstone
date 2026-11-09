@@ -123,6 +123,9 @@ export class SalesDashboardService {
     return {
       businessDate,
       today: consolidated.today,
+      // Las alertas legales no son históricas: siempre son las vigentes hoy,
+      // aunque businessDate sea un día pasado.
+      alertsAsOf: today,
       timeZone: BUSINESS_TIME_ZONE,
       calculatedAt: now,
       paymentMethods: consolidated.paymentMethods,

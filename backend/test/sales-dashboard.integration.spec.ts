@@ -687,6 +687,16 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
+    it('en una fecha pasada indica que las alertas son las vigentes de hoy', async () => {
+      await withinRollback(async (f) => {
+        const past = await dashboard(f);
+        expect(past.businessDate).toBe(DAY());
+        expect(past.alertsAsOf).toBe(businessToday());
+        const current = await dashboard(f, businessToday());
+        expect(current.alertsAsOf).toBe(current.businessDate);
+      });
+    });
+
     it('sin fecha consulta el día actual en hora de Chile', async () => {
       await withinRollback(async (f) => {
         const response = await get('', f.admin).expect(200);

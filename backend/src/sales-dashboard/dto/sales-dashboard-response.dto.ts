@@ -73,7 +73,8 @@ class StoreDashboardDto implements StoreDashboard {
   dailyOperation: DailyOperationFiguresDto | null;
 
   @ApiProperty({
-    description: 'Alertas legales vigentes del local.',
+    description:
+      'Alertas legales vigentes hoy del local (ver alertsAsOf), aunque se consulte un día pasado.',
     type: StoreAlertsSummaryDto,
   })
   alerts: StoreAlertsSummaryDto;
@@ -146,6 +147,13 @@ export class SalesDashboardDto implements SalesDashboard {
     example: '2026-11-08',
   })
   today: string;
+
+  @ApiProperty({
+    description:
+      'Día de negocio (YYYY-MM-DD, hora de Chile) al que corresponden las alertas legales DT y de propinas: siempre hoy. Son las alertas vigentes al consultar, no las de businessDate; si businessDate es un día pasado, las cifras del día y las alertas son de fechas distintas.',
+    example: '2026-11-08',
+  })
+  alertsAsOf: string;
 
   @ApiProperty({
     description: 'Zona horaria de los días de negocio.',

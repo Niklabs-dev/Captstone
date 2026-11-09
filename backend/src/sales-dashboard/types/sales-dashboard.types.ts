@@ -29,7 +29,8 @@ export interface AlertCounts {
   upcoming: number;
 }
 
-// Alertas vigentes al momento de la consulta (no dependen de la fecha).
+// Alertas vigentes al momento de la consulta (no dependen de la fecha
+// consultada: ver SalesDashboard.alertsAsOf).
 export interface StoreAlertsSummary {
   dtRegistration: AlertCounts;
   tipPayment: AlertCounts;
@@ -60,6 +61,9 @@ export interface SalesDashboard {
   businessDate: string;
   // Día de negocio actual en Chile.
   today: string;
+  // Día al que corresponden las alertas legales: siempre hoy (son las
+  // vigentes al consultar, no las de businessDate).
+  alertsAsOf: string;
   timeZone: string;
   calculatedAt: Date;
   paymentMethods: PaymentMethodColumn[];

@@ -117,6 +117,7 @@ describe('Swagger del panel y los reportes de ventas (SPRINT-4R-T13)', () => {
     expect(keys('SalesDashboardDto')).toEqual([
       'businessDate',
       'today',
+      'alertsAsOf',
       'timeZone',
       'calculatedAt',
       'paymentMethods',
