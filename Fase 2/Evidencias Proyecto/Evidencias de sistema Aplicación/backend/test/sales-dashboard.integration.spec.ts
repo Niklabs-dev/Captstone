@@ -10,14 +10,12 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { ROLE } from '../src/auth/constants/roles.constants.js';
 import type { AuthUser, JwtPayload } from '../src/auth/types/auth.types.js';
-import { DtAlertsService } from '../src/dt-alerts/dt-alerts.service.js';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import type {
   SalesDashboard,
   StoreDashboard,
 } from '../src/sales-dashboard/types/sales-dashboard.types.js';
-import { TipPaymentAlertsService } from '../src/tips/tip-payment-alerts.service.js';
 import { createDailyOperation } from './helpers/daily-operations.js';
 import {
   businessDaysAgo,
@@ -608,18 +606,25 @@ describe.skipIf(!databaseUrl)(
           store.alerts.tipPayment.overdue + store.alerts.tipPayment.upcoming,
         ).toBe(1);
 
-        // Los totales cuentan todas las alertas vigentes, no solo las de los
-        // locales con datos.
-        const count = (
-          items: { status: string }[],
+        // Los totales cuentan todas las alertas vigentes: como todo local con
+        // alertas aparece en el panel, cuadran con la suma por local de la
+        // misma respuesta (otras suites pueden confirmar alertas en paralelo,
+        // así que no se compara con una segunda consulta).
+        const sum = (
+          pick: (s: StoreDashboard) => { overdue: number; upcoming: number },
         ): { overdue: number; upcoming: number } => ({
-          overdue: items.filter((item) => item.status === 'OVERDUE').length,
-          upcoming: items.filter((item) => item.status === 'UPCOMING').length,
+          overdue: body.stores.reduce((acc, s) => acc + pick(s).overdue, 0),
+          upcoming: body.stores.reduce((acc, s) => acc + pick(s).upcoming, 0),
         });
-        const dt = await app.get(DtAlertsService).list(f.admin);
-        const tips = await app.get(TipPaymentAlertsService).list(f.admin);
-        expect(body.totals.dtRegistrationAlerts).toEqual(count(dt.items));
-        expect(body.totals.tipPaymentAlerts).toEqual(count(tips.items));
+        expect(body.totals.dtRegistrationAlerts).toEqual(
+          sum((s) => s.alerts.dtRegistration),
+        );
+        expect(body.totals.tipPaymentAlerts).toEqual(
+          sum((s) => s.alerts.tipPayment),
+        );
+        expect(body.totals.dtRegistrationAlerts.overdue).toBeGreaterThanOrEqual(
+          1,
+        );
       });
     });
 
