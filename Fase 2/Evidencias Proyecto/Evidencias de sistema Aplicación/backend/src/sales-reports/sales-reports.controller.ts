@@ -58,7 +58,7 @@ export class SalesReportsController {
   @ApiOperation({
     summary: 'Consulta histórica de cierres por turno y ventas anteriores',
     description:
-      'Legado de solo lectura previo a SPRINT-4R-T01: cierres de caja por turno con bruto Mercado Pago, neto MrComanda conciliado y descuadre de vouchers, más las ventas de la tabla sales. Se consulta aparte y no se mezcla con el reporte vigente ni con la diferencia de efectivo de la operación diaria. Mismos filtros y validaciones que GET /sales-reports.',
+      'Legado de solo lectura previo a SPRINT-4R-T01: cierres de caja por turno con bruto Mercado Pago, neto MrComanda conciliado y descuadre de vouchers (cada cierre informa CUADRADO/NO_CUADRADO y sus líneas descuadradas sin compensar), más las ventas de la tabla sales. Se consulta aparte y no se mezcla con el reporte vigente ni con la diferencia de efectivo de la operación diaria. Mismos filtros y validaciones que GET /sales-reports.',
   })
   @ApiOkResponse({
     description: 'Históricos del período.',

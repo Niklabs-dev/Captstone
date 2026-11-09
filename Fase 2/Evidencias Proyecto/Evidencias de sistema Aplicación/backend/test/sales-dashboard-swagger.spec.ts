@@ -226,6 +226,12 @@ describe('Swagger del panel y los reportes de ventas (SPRINT-4R-T13)', () => {
         'voucherDifference',
       ]),
     );
+    expect(keys('LegacyClosingDto')).toEqual(
+      expect.arrayContaining(['balanceStatus', 'lineDifferences']),
+    );
+    expect(
+      schemas()['LegacyClosingDto']?.properties?.['balanceStatus']?.enum,
+    ).toEqual(['CUADRADO', 'NO_CUADRADO']);
     expect(keys('LegacySalesReportDto')).toEqual([
       'from',
       'to',

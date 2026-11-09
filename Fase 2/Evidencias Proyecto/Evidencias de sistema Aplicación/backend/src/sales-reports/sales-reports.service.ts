@@ -22,7 +22,10 @@ import {
   type Consolidation,
 } from './calculation/sales-consolidation.js';
 import type { SalesReportQueryDto } from './dto/sales-reports-query.dto.js';
+import type { Prisma } from '../generated/prisma/client.js';
 import type {
+  LegacyBalanceStatus,
+  LegacyClosingLineDifference,
   LegacySales,
   LegacySalesReport,
   SalesReport,
@@ -70,6 +73,57 @@ function calendarDate(isoDate: string): CalendarDate {
 // Montos BIGINT de CLP enteros: caben de sobra en un número seguro de JS.
 function toAmount(value: bigint): number {
   return Number(value);
+}
+
+interface LegacyLine {
+  paymentMethodId: string;
+  expectedAmount: Prisma.Decimal;
+  countedAmount: Prisma.Decimal;
+  difference: Prisma.Decimal;
+}
+
+interface LegacyMethod {
+  code: string;
+  name: string;
+  sortOrder: number;
+}
+
+// Estado y líneas descuadradas de un cierre histórico, como los calculaba el
+// consolidado antiguo: la suma neta de las líneas puede ser 0 (-500 y +500)
+// sin que el cierre cuadre, así que cada línea se evalúa por separado.
+function legacyBalanceOf(
+  lines: LegacyLine[],
+  voucherDifference: Prisma.Decimal,
+  methodById: ReadonlyMap<string, LegacyMethod>,
+): {
+  balanceStatus: LegacyBalanceStatus;
+  lineDifferences: LegacyClosingLineDifference[];
+} {
+  const methodOf = (line: LegacyLine): LegacyMethod => {
+    const method = methodById.get(line.paymentMethodId);
+    if (!method) throw new Error('Cierre histórico sin medio de pago');
+    return method;
+  };
+  const lineDifferences = lines
+    .filter((line) => !line.difference.isZero())
+    .map((line) => ({ line, method: methodOf(line) }))
+    .sort(
+      (left, right) =>
+        left.method.sortOrder - right.method.sortOrder ||
+        left.method.code.localeCompare(right.method.code),
+    )
+    .map(({ line, method }): LegacyClosingLineDifference => ({
+      paymentMethod: method.code,
+      paymentMethodName: method.name,
+      expectedAmount: line.expectedAmount.toNumber(),
+      countedAmount: line.countedAmount.toNumber(),
+      difference: line.difference.toNumber(),
+    }));
+  const balanced = lineDifferences.length === 0 && voucherDifference.isZero();
+  return {
+    balanceStatus: balanced ? 'CUADRADO' : 'NO_CUADRADO',
+    lineDifferences,
+  };
 }
 
 @Injectable()
@@ -250,7 +304,14 @@ export class SalesReportsService {
           differenceReason: true,
           closedAt: true,
           store: { select: { id: true, name: true } },
-          lines: { select: { difference: true } },
+          lines: {
+            select: {
+              paymentMethodId: true,
+              expectedAmount: true,
+              countedAmount: true,
+              difference: true,
+            },
+          },
         },
         orderBy: [{ businessDate: 'asc' }, { shift: 'asc' }, { id: 'asc' }],
       }),
@@ -316,9 +377,16 @@ export class SalesReportsService {
         mercadoPagoGrossAmount: closing.mercadoPagoGrossAmount.toNumber(),
         mercadoPagoTipAmount: closing.mercadoPagoTipAmount.toNumber(),
         voucherDifference: closing.reconciliationDifference.toNumber(),
-        cashDifference: closing.lines.reduce(
-          (sum, line) => sum + line.difference.toNumber(),
-          0,
+        // + 0 evita «-0» cuando las líneas se compensan.
+        cashDifference:
+          closing.lines.reduce(
+            (sum, line) => sum + line.difference.toNumber(),
+            0,
+          ) + 0,
+        ...legacyBalanceOf(
+          closing.lines,
+          closing.reconciliationDifference,
+          methodById,
         ),
         differenceReason: closing.differenceReason,
         closedAt: closing.closedAt,

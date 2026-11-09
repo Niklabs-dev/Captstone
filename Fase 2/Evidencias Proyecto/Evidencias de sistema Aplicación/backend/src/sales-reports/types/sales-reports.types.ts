@@ -170,6 +170,22 @@ export interface SalesReport {
 
 // --- Legado (flujo previo a SPRINT-4R-T01, solo lectura) ---
 
+// Misma regla que exigía motivo al cerrar (SPRINT-4-T09): cualquier línea
+// descuadrada, aunque otra la compense, o un descuadre de vouchers deja el
+// cierre NO_CUADRADO.
+export const LEGACY_BALANCE_STATUSES = ['CUADRADO', 'NO_CUADRADO'] as const;
+export type LegacyBalanceStatus = (typeof LEGACY_BALANCE_STATUSES)[number];
+
+// Línea del cierre con diferencia distinta de cero, por medio de pago.
+export interface LegacyClosingLineDifference {
+  paymentMethod: string;
+  paymentMethodName: string;
+  expectedAmount: number;
+  countedAmount: number;
+  // Con signo: contado - esperado.
+  difference: number;
+}
+
 export interface LegacyClosing {
   closingId: string;
   store: StoreRef;
@@ -181,8 +197,12 @@ export interface LegacyClosing {
   mercadoPagoTipAmount: number;
   // Descuadre de conciliación de vouchers (reconciliation_difference).
   voucherDifference: number;
-  // Suma de las diferencias por línea del cierre.
+  // Suma neta de las diferencias por línea del cierre: puede ser 0 aunque
+  // haya líneas descuadradas (ver balanceStatus y lineDifferences).
   cashDifference: number;
+  balanceStatus: LegacyBalanceStatus;
+  // Líneas descuadradas, sin compensar, en el orden del catálogo.
+  lineDifferences: LegacyClosingLineDifference[];
   differenceReason: string | null;
   closedAt: Date | null;
 }
