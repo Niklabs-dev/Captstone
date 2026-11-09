@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { hasTrustedOrigin } from '@/lib/auth';
 import { callBackend } from '@/lib/auth-backend';
-import { isProxyUuid, readProxyForm } from '@/lib/backend-proxy';
+import { isProxyUuid, readProxyForm, readProxyJson } from '@/lib/backend-proxy';
 import {
   MAX_SALES_FILE_BYTES,
   parseConfirmBody,
@@ -10,6 +10,7 @@ import {
   parseSalesImportPreview,
   parseSalesImportSummary,
   reportErrorMessage,
+  SALES_PREVIEW_CONFLICT,
   salesImportError,
 } from '@/lib/sales-imports';
 import { getUsersSession } from '@/lib/users-session';
@@ -122,7 +123,12 @@ async function preview(request: Request, token: string): Promise<Response> {
   if (!upstream) return failure(503);
   if (!upstream.ok) {
     const error: unknown = await upstream.json().catch(() => null);
-    return failure(upstream.status, reportErrorMessage(error) ?? undefined);
+    return failure(
+      upstream.status,
+      upstream.status === 409
+        ? SALES_PREVIEW_CONFLICT
+        : (reportErrorMessage(error) ?? undefined),
+    );
   }
   const parsed = parseSalesImportPreview(
     await upstream.json().catch(() => null),
@@ -135,7 +141,7 @@ async function confirm(
   token: string,
   id: string,
 ): Promise<Response> {
-  const input = parseConfirmBody(await request.json().catch(() => null));
+  const input = parseConfirmBody(await readProxyJson(request, 1024));
   if (!input) return failure(400);
   const upstream = await callBackend(`/sales-imports/${id}/confirm`, {
     method: 'POST',

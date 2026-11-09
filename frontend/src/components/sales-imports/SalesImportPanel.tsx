@@ -8,6 +8,7 @@ import {
   type ReactElement,
 } from 'react';
 import {
+  alertClass,
   badgeClass,
   buttonClass,
   filterPanelClass,
@@ -15,6 +16,7 @@ import {
   labelClass,
   panelTitleClass,
   primaryButtonClass,
+  scrollRegionClass as regionClass,
   tableCellClass,
   tableClass,
   tableDescriptionClass,
@@ -28,6 +30,7 @@ import { formatCalendarDate, formatChileDate } from '@/lib/display-date';
 import {
   fileDateDiffers,
   fileNameDate,
+  latestSalesImports,
   salesFileError,
   salesImportDifferences,
   salesImportError,
@@ -42,6 +45,7 @@ import {
 import {
   confirmSalesImport,
   discardSalesImport,
+  downloadSalesImportFile,
   loadSalesImport,
   loadSalesImports,
   previewSalesImport,
@@ -49,13 +53,9 @@ import {
 } from '@/lib/sales-imports-client';
 import { formatClp } from '@/lib/tips';
 
-const alertClass =
-  'rounded-lg border border-crit/20 bg-crit-bg px-3.5 py-3 text-sm text-crit';
 const noticeClass =
   'rounded-lg border border-line2 bg-tint2 px-3.5 py-3 text-sm text-ink2';
 const warningClass = 'rounded-lg bg-warn-bg px-3.5 py-3 text-sm text-warn';
-const regionClass =
-  'overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink';
 
 type HistoryState =
   | { status: 'loading' }
@@ -140,7 +140,15 @@ function LinesTable({
   );
 }
 
-function DetailCard({ detail }: { detail: SalesImportDetail }): ReactElement {
+function DetailCard({
+  detail,
+  downloading,
+  onDownload,
+}: {
+  detail: SalesImportDetail;
+  downloading: boolean;
+  onDownload: () => undefined;
+}): ReactElement {
   return (
     <div className="space-y-4 p-5">
       <dl className="grid min-w-0 grid-cols-1 gap-4 text-sm sm:grid-cols-2 xl:grid-cols-3">
@@ -194,12 +202,14 @@ function DetailCard({ detail }: { detail: SalesImportDetail }): ReactElement {
           </ul>
         </div>
       )}
-      <a
-        href={`/api/sales-imports/${detail.id}/file`}
-        className={`${buttonClass} inline-flex`}
+      <button
+        type="button"
+        disabled={downloading}
+        onClick={onDownload}
+        className={buttonClass}
       >
-        Descargar Excel original
-      </a>
+        {downloading ? 'Descargando…' : 'Descargar Excel original'}
+      </button>
     </div>
   );
 }
@@ -274,6 +284,9 @@ export function SalesImportPanel(): ReactElement {
   const [history, setHistory] = useState<HistoryState>({ status: 'loading' });
   const [historyRevision, setHistoryRevision] = useState(0);
   const [selectedId, setSelectedId] = useState('');
+  const [downloading, setDownloading] = useState(false);
+  const inFlight = useRef(false);
+  const detailTitle = useRef<HTMLHeadingElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const previewTitle = useRef<HTMLHeadingElement>(null);
 
@@ -282,7 +295,7 @@ export function SalesImportPanel(): ReactElement {
     loadSalesImports(controller.signal).then(
       (items) => {
         if (!controller.signal.aborted)
-          setHistory({ status: 'ready', items: items.slice(0, 20) });
+          setHistory({ status: 'ready', items: latestSalesImports(items) });
       },
       (cause: unknown) => {
         if (!controller.signal.aborted)
@@ -319,7 +332,7 @@ export function SalesImportPanel(): ReactElement {
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<undefined> {
     event.preventDefault();
-    if (busy) return;
+    if (inFlight.current) return;
     if (!file) {
       setFileError('Selecciona el Excel de MrComanda.');
       fileInput.current?.focus();
@@ -334,6 +347,7 @@ export function SalesImportPanel(): ReactElement {
     clearOutcome();
     setNotice('');
     setResult(null);
+    inFlight.current = true;
     setBusy('preview');
     try {
       const next = await previewSalesImport(file);
@@ -351,12 +365,14 @@ export function SalesImportPanel(): ReactElement {
     } catch (cause) {
       setFailure(errorText(cause));
     } finally {
+      inFlight.current = false;
       setBusy('');
     }
   }
 
   async function confirm(): Promise<undefined> {
-    if (busy || !preview?.import) return;
+    if (inFlight.current || !preview?.import) return;
+    inFlight.current = true;
     setFailure('');
     setBusy('confirm');
     try {
@@ -366,7 +382,7 @@ export function SalesImportPanel(): ReactElement {
       );
       setResult(saved);
       setNotice(
-        saved.version > 1
+        preview.activeImport
           ? `Corrección confirmada. La versión ${saved.version} quedó vigente.`
           : 'Importación confirmada. Las ventas del día quedaron vigentes.',
       );
@@ -378,12 +394,14 @@ export function SalesImportPanel(): ReactElement {
       if (cause instanceof SalesImportRequestError && cause.status === 409)
         setStalePreview(true);
     } finally {
+      inFlight.current = false;
       setBusy('');
     }
   }
 
   async function discard(): Promise<undefined> {
-    if (busy || !preview?.import) return;
+    if (inFlight.current || !preview?.import) return;
+    inFlight.current = true;
     setFailure('');
     setBusy('discard');
     try {
@@ -395,7 +413,49 @@ export function SalesImportPanel(): ReactElement {
     } catch (cause) {
       setFailure(errorText(cause));
     } finally {
+      inFlight.current = false;
       setBusy('');
+    }
+  }
+
+  // Una vista previa abandonada (recarga de página) se limpia desde el historial.
+  async function discardPending(id: string): Promise<undefined> {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setFailure('');
+    setBusy('discard');
+    try {
+      await discardSalesImport(id);
+      setNotice('Vista previa descartada. No se registraron ventas.');
+      setResult((current) => (current?.id === id ? null : current));
+      refreshHistory();
+    } catch (cause) {
+      setFailure(errorText(cause));
+    } finally {
+      inFlight.current = false;
+      setBusy('');
+    }
+  }
+
+  async function download(detail: SalesImportDetail): Promise<undefined> {
+    setDownloading(true);
+    setFailure('');
+    try {
+      const { blob, altered } = await downloadSalesImportFile(detail.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = detail.fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+      if (altered)
+        setFailure(
+          'El Excel descargado no coincide con el registrado: el archivo fue modificado. No lo uses como respaldo y avisa al responsable del sistema.',
+        );
+    } catch (cause) {
+      setFailure(errorText(cause));
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -405,6 +465,8 @@ export function SalesImportPanel(): ReactElement {
     try {
       setResult(await loadSalesImport(id));
       setNotice('');
+      // El detalle se pinta sobre el historial: el foco lo lleva a la vista.
+      window.setTimeout(() => detailTitle.current?.focus(), 0);
     } catch (cause) {
       setFailure(errorText(cause));
     } finally {
@@ -427,6 +489,9 @@ export function SalesImportPanel(): ReactElement {
   const superseded =
     preview?.outcome === 'EXISTING' && preview.import?.status === 'SUPERSEDED';
   const nameDate = uploadedName ? fileNameDate(uploadedName) : null;
+  // Con una vista previa por decidir no se elige otro archivo: quedaría
+  // pendiente sin que nadie la confirme ni la descarte.
+  const decisionPending = Boolean(preview?.canConfirm);
 
   return (
     <div className="min-w-0 space-y-5">
@@ -454,7 +519,7 @@ export function SalesImportPanel(): ReactElement {
               name="file"
               type="file"
               accept={SALES_FILE_ACCEPT}
-              disabled={busy !== ''}
+              disabled={busy !== '' || decisionPending}
               onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
               className={`${inputClass} mt-2 file:mr-3 file:rounded-lg file:border-0 file:bg-tint2 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-salmon-ink hover:file:bg-tint3`}
               aria-invalid={Boolean(fileError)}
@@ -469,9 +534,14 @@ export function SalesImportPanel(): ReactElement {
           >
             {fileError}
           </p>
+          {decisionPending && (
+            <p className="text-sm text-ink2">
+              Confirma o descarta la vista previa para subir otro archivo.
+            </p>
+          )}
           <button
             type="submit"
-            disabled={busy !== ''}
+            disabled={busy !== '' || decisionPending}
             className={primaryButtonClass}
           >
             {busy === 'preview' ? 'Analizando archivo…' : 'Ver vista previa'}
@@ -667,8 +737,14 @@ export function SalesImportPanel(): ReactElement {
           className={`${tablePanelClass} min-w-0`}
         >
           <header className={tableHeaderClass}>
-            <h2 id="sales-detail-title" className={panelTitleClass}>
-              Detalle de la importación
+            <h2
+              id="sales-detail-title"
+              ref={detailTitle}
+              tabIndex={-1}
+              className={`${panelTitleClass} outline-none`}
+            >
+              Detalle de la importación · Versión{' '}
+              {(result ?? preview?.import)?.version}
             </h2>
             <span
               className={statusBadge(
@@ -684,6 +760,11 @@ export function SalesImportPanel(): ReactElement {
           </header>
           <DetailCard
             detail={(result ?? preview?.import) as SalesImportDetail}
+            downloading={downloading}
+            onDownload={() => {
+              void download((result ?? preview?.import) as SalesImportDetail);
+              return undefined;
+            }}
           />
         </section>
       )}
@@ -754,6 +835,18 @@ export function SalesImportPanel(): ReactElement {
                   >
                     Ver detalle
                   </button>
+                  {item.status === 'PENDING' &&
+                    item.id !== preview?.import?.id && (
+                      <button
+                        type="button"
+                        disabled={busy !== ''}
+                        onClick={() => void discardPending(item.id)}
+                        className={buttonClass}
+                        aria-label={`Descartar vista previa pendiente de ${item.fileName}`}
+                      >
+                        Descartar
+                      </button>
+                    )}
                 </div>
               </li>
             ))}

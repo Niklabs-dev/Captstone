@@ -4,6 +4,7 @@ import {
   MAX_SALES_FILE_BYTES,
   fileDateDiffers,
   fileNameDate,
+  latestSalesImports,
   parseConfirmBody,
   parseSalesImportDetail,
   parseSalesImportPreview,
@@ -13,6 +14,7 @@ import {
   salesImportError,
   type SalesImportLine,
 } from './sales-imports';
+import { downloadSalesImportFile } from './sales-imports-client';
 
 const id = 'a9000000-0000-4000-8000-000000000001';
 const other = 'a9000000-0000-4000-8000-000000000002';
@@ -175,6 +177,7 @@ test('Solo reenvía mensajes con códigos conocidos del parser', () => {
   );
   for (const bad of [
     { code: 'P2002', message: 'prisma' },
+    { code: 'FILE_INTERNAL_PATH', message: '/ruta/privada' },
     { message: 'sin código' },
     { code: 'TOTAL_MISMATCH', message: 'x'.repeat(401) },
     null,
@@ -185,4 +188,40 @@ test('Solo reenvía mensajes con códigos conocidos del parser', () => {
 test('Los estados desconocidos usan un mensaje seguro', () => {
   assert.match(salesImportError(409), /Vuelve a subir/);
   assert.equal(salesImportError(500), salesImportError(502));
+});
+
+test('El historial prioriza la carga más reciente, no la fecha de negocio', () => {
+  const load = (name: string, createdAt: string) => ({ name, createdAt });
+  assert.deepEqual(
+    latestSalesImports(
+      [
+        load('negocio-nuevo', '2026-03-10T10:00:00Z'),
+        load('correccion-antigua', '2026-03-12T10:00:00Z'),
+        load('intermedia', '2026-03-11T10:00:00Z'),
+      ],
+      2,
+    ).map((item) => item.name),
+    ['correccion-antigua', 'intermedia'],
+  );
+});
+
+test('La descarga informa un archivo alterado', async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const [integrity, altered] of [
+      ['VALID', false],
+      ['ALTERED', true],
+    ] as const) {
+      globalThis.fetch = () =>
+        Promise.resolve(
+          new Response('xlsx', { headers: { 'X-File-Integrity': integrity } }),
+        );
+      assert.equal((await downloadSalesImportFile(id)).altered, altered);
+    }
+    globalThis.fetch = () =>
+      Promise.resolve(new Response('{}', { status: 404 }));
+    await assert.rejects(downloadSalesImportFile(id));
+  } finally {
+    globalThis.fetch = original;
+  }
 });
