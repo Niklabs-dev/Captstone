@@ -45,6 +45,7 @@ export interface StoreDashboard {
 
 export interface SalesDashboardTotals {
   sales: SalesTotals;
+  // Solo días esperados (ni CERRADO ni sin informar en GET /sales-days).
   storesWithoutImport: number;
   tips: TipsTotals;
   storesWithoutDailyOperation: number;
