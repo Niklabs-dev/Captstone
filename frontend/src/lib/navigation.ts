@@ -12,6 +12,7 @@ export interface NavigationItem {
     | '/admin/documentos'
     | '/admin/alertas-dt'
     | '/admin/medios-pago'
+    | '/admin/importacion-ventas'
     | '/liquidaciones'
     | '/propinas/diarias'
     | '/propinas/repartos'
@@ -32,6 +33,7 @@ export function getNavigationView(pathname: string): {
     { href: '/admin/documentos', title: 'Gestor documental' },
     { href: '/admin/alertas-dt', title: 'Alertas de registro en la DT' },
     { href: '/admin/medios-pago', title: 'Medios de pago' },
+    { href: '/admin/importacion-ventas', title: 'Importar ventas' },
     { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
     { href: '/propinas/repartos', title: 'Reparto de propinas' },
     { href: '/propinas/diarias', title: 'Operación diaria' },
@@ -84,6 +86,7 @@ export function getNavigationItems(
         { href: '/admin/documentos', label: 'Documentos' },
         { href: '/admin/alertas-dt', label: 'Alertas DT' },
         { href: '/admin/medios-pago', label: 'Medios de pago' },
+        { href: '/admin/importacion-ventas', label: 'Importar ventas' },
         { href: '/liquidaciones', label: 'Liquidaciones' },
         { href: '/propinas/repartos', label: 'Reparto de propinas' },
       ]

@@ -20,6 +20,11 @@ export const tableDescriptionClass = 'mt-1 text-xs text-muted';
 export const badgeClass =
   'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold';
 
+export const alertClass =
+  'rounded-lg border border-crit/20 bg-crit-bg px-3.5 py-3 text-sm text-crit';
+export const scrollRegionClass =
+  'overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink';
+
 export const tableClass = 'w-full border-collapse text-left text-[13px]';
 export const tableHeadClass =
   'border-b border-line bg-tint font-mono text-[10px] font-semibold uppercase tracking-wider text-ink2';

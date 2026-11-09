@@ -31,6 +31,8 @@ import {
   panelTitleClass,
   tablePanelClass,
   tableHeaderClass,
+  alertClass,
+  scrollRegionClass as regionClass,
   tableClass,
   tableHeadClass,
   tableHeadingClass,
@@ -47,10 +49,6 @@ const clp = (n: number) =>
     maximumFractionDigits: 0,
   }).format(n);
 const date = formatCalendarDate;
-const alertClass =
-  'rounded-lg border border-crit/20 bg-crit-bg px-3.5 py-3 text-sm text-crit';
-const regionClass =
-  'overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink';
 class RequestError extends Error {
   constructor(
     public status: number,
