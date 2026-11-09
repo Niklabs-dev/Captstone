@@ -337,3 +337,46 @@ la descarga privada. La consulta histórica de propinas por medio, ventas y
 cierres por turno sigue disponible en modo lectura.
 
 Pruebas: `npm run test:daily-operations` (unitarias), `npm run test:daily-operations:integration` (BFF con backend simulado) y `TEST_REAL_DISPOSABLE=true npm run test:daily-operations:real` (recorrido real con base exclusiva, con las variables `TEST_REAL_*` de `.env.example`).
+
+### Participantes, vista previa y corrección (SPRINT-4R-T05)
+
+- **Selección de participantes:** contador «N de M seleccionados» y botón
+  «Seleccionar todos / Quitar selección» (controles de al menos 44 px). Con
+  fondo 0 la selección se conserva en pantalla pero no se envía, porque el
+  backend exige la selección vacía.
+- **Vista previa antes de guardar:** fondo, cantidad de participantes, monto del
+  día por trabajador y tratamiento del residuo en CLP. Replica la regla del
+  backend (SPRINT-4R-T04): `floor(fondo / n)` para cada uno y los pesos
+  sobrantes de a $1, rotando según la fecha (`previewEqualShares` en
+  `src/lib/daily-operations.ts`, probada con los mismos casos que el backend).
+- **Foco al primer error** según el orden visual del formulario
+  (`DAILY_FIELD_ORDER`); en participantes, la primera casilla.
+- **Corrección:** «Corregir operación» precarga montos, motivo y selección y
+  guarda con `PATCH /daily-operations/:id` (mismo ID, sin duplicar). La fecha no
+  cambia y el voucher registrado se conserva salvo que se adjunte otro. Los
+  participantes que ya no son elegibles se avisan y se quitan al guardar. Un
+  409 informa que la operación ya alimentó un reparto confirmado o pagado.
+- **Detalle registrado:** muestra cada participante con su monto del día.
+## Detalle del reparto equitativo (SPRINT-4R-T06)
+
+`/propinas/repartos` muestra cada beneficiario con la columna destacada **Monto a pagar**, además de fondo total, beneficiarios, suma individual y regla aplicada. La conciliación compara suma individual, fondo y fuentes (operaciones diarias o registros históricos); si no coincide, avisa que los montos no deben usarse y bloquea la validación. Los repartos equitativos no muestran horas ni pacto; los proporcionales históricos los conservan. En «Mis propinas», una constancia equitativa indica que las horas no aplican.
+
+Si una operación diaria se corrige después del cálculo, el borrador sigue visible como **desactualizado**, con el monto calculado y el actual, y no se puede validar hasta recalcularlo. El **SUPERVISOR** consulta en solo lectura los repartos de su local, sin acciones, alertas ni constancias de otras personas.
+
+Pruebas: `npm run test:tip-pools`, `npm run test:my-tip-receipts` y `TEST_REAL_DISPOSABLE=true npx playwright test --config playwright.tip-pools.config.ts equal-pools`.
+
+## Verificación end-to-end del flujo diario y el reparto (SPRINT-4R-T07)
+
+`TEST_REAL_DISPOSABLE=true npm run test:daily-flow:real` recorre con API y base reales, en cuatro anchos, el flujo completo: el supervisor registra los días desde el formulario, el contador calcula, valida y entrega el reparto, y cada trabajador ve su monto en el portal; además comprueba que ya no existe cierre por turno ni captura de ventas o Mercado Pago. El equivalente por HTTP está en `backend/test/daily-flow-equal-pool.integration.spec.ts`. Trazabilidad con la DoD, comandos, conteos y hallazgos: [SPRINT-4R-T07](docs/SPRINT-4R-T07.md).
+
+## Importación diaria de ventas (SPRINT-4R-T11)
+
+`/admin/importacion-ventas`, solo para ADMINISTRADOR, carga el Informe de Ventas Diario de MrComanda (.xlsx, máximo 5 MB). La vista previa muestra local, fecha de negocio, emisión, medios de pago y total antes de confirmar; las ventas solo se registran al confirmar.
+
+- Si la fecha del nombre del archivo difiere de la del contenido se avisa y se usa la del contenido.
+- Un local o medio sin equivalencia, o un total que no cuadra, impide confirmar y explica qué revisar; no se guarda nada.
+- Un archivo idéntico informa que ya estaba importado, sin duplicar.
+- Una corrección muestra las diferencias por medio de pago contra la versión vigente y exige aceptar el reemplazo.
+- El detalle indica versión, archivo, responsable y fecha de carga, y permite descargar el Excel original.
+
+Pruebas: `npm run test:sales-imports` y `TEST_REAL_DISPOSABLE=true npm run test:sales-imports:real` (API y PostgreSQL reales; requiere `COMPOSE_PROJECT_NAME` del stack de pruebas, porque las equivalencias de locales se crean en la base).

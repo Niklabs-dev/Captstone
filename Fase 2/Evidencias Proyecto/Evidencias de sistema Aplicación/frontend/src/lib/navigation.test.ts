@@ -41,6 +41,7 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
     { href: '/admin/documentos', label: 'Documentos' },
     { href: '/admin/alertas-dt', label: 'Alertas DT' },
     { href: '/admin/medios-pago', label: 'Medios de pago' },
+    { href: '/admin/importacion-ventas', label: 'Importar ventas' },
     { href: '/liquidaciones', label: 'Liquidaciones' },
     { href: '/propinas/repartos', label: 'Reparto de propinas' },
   ]);
@@ -128,6 +129,35 @@ test('Mis propinas solo se enlaza y permite a trabajador y supervisor (SPRINT-4-
     getPageRedirect('CONTADOR', '/portal/propinas-falsas'),
     '/dashboard?reason=forbidden',
   );
+});
+
+test('El supervisor consulta los repartos; el trabajador no (SPRINT-4R-T06)', () => {
+  assert.equal(getPageRedirect('SUPERVISOR', '/propinas/repartos'), null);
+  assert.ok(
+    getNavigationItems('SUPERVISOR').some(
+      (item) => item.href === '/propinas/repartos',
+    ),
+  );
+  assert.equal(
+    getPageRedirect('TRABAJADOR', '/propinas/repartos'),
+    '/portal?reason=forbidden',
+  );
+});
+
+test('La importación de ventas es exclusiva del administrador (SPRINT-4R-T11)', () => {
+  for (const role of ROLES) {
+    const allowed = role === 'ADMINISTRADOR';
+    assert.equal(
+      getNavigationItems(role).some(
+        (item) => item.href === '/admin/importacion-ventas',
+      ),
+      allowed,
+    );
+    assert.equal(
+      getPageRedirect(role, '/admin/importacion-ventas') === null,
+      allowed,
+    );
+  }
 });
 
 test('Solo el administrador entra a las páginas administrativas', () => {

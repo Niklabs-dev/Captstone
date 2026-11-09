@@ -176,7 +176,7 @@ describe.skipIf(!databaseUrl)('Consulta de documentos (SPRINT-2-T06)', () => {
     const filePaths: string[] = [];
     for (let number = 1; number <= (options.versions ?? 1); number++) {
       const stored = await storage.save(
-        Buffer.from(`%PDF-1.7\n${randomBytes(16).toString('hex')}`),
+        Buffer.from(`%PDF-1.7\n${randomBytes(16).toString('hex')}\n%%EOF\n`),
       );
       const version = await tx.documentVersion.create({
         data: {

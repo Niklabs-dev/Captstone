@@ -12,10 +12,20 @@ import path from 'node:path';
 import { StorageService } from './storage.service.js';
 
 const PDF = Buffer.from('%PDF-1.7\ncontenido de prueba\n%%EOF');
+// Imágenes mínimas completas: firma + marca de cierre (SPRINT-4R-T18).
 const PNG = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00,
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x49,
+  0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 ]);
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+// JPEG: inicio, APP0 «JFIF» con su largo real, SOS, datos y fin.
+const JPEG = Buffer.concat([
+  Buffer.from(
+    'ffd8ffe000104a46494600010100000100010000ffda0008010100003f00',
+    'hex',
+  ),
+  Buffer.from('datos'),
+  Buffer.from('ffd9', 'hex'),
+]);
 const EXE = Buffer.from('MZ\x90\x00ejecutable');
 
 const PATH_PATTERN =
@@ -110,8 +120,15 @@ describe('StorageService (SPRINT-2-T04)', () => {
       PayloadTooLargeException,
     );
     await expect(limited.save(tooBig)).rejects.toThrow(/1 MB/);
-    // Justo en el límite sí se acepta.
-    const exact = Buffer.concat([PDF, Buffer.alloc(1024 * 1024 - PDF.length)]);
+    // Justo en el límite sí se acepta. El relleno va antes del «%%EOF» para
+    // que siga siendo un PDF completo (SPRINT-4R-T18).
+    const head = Buffer.from('%PDF-1.7\n');
+    const tail = Buffer.from('\n%%EOF');
+    const exact = Buffer.concat([
+      head,
+      Buffer.alloc(1024 * 1024 - head.length - tail.length),
+      tail,
+    ]);
     await expect(limited.save(exact)).resolves.toMatchObject({
       sizeBytes: 1024 * 1024,
     });

@@ -11,11 +11,13 @@
 // - Se fija una versión con más de dos semanas publicada (9.3.12).
 // Antes de entregarle el archivo se valida tamaño y firma: el archivo vacío,
 // el .xls antiguo y cualquier contenido que no sea un ZIP se rechazan con un
-// mensaje claro sin intentar leerlos.
+// mensaje claro sin intentar leerlos. Luego xlsx-zip-guard limita el
+// contenido descomprimido (SPRINT-4R-T18).
 
 import readXlsxFile from 'read-excel-file/node';
 import { MrComandaReportError } from './mrcomanda-report.errors.js';
 import type { ReportCell, ReportSheet } from './mrcomanda-report.types.js';
+import { assertZipWithinLimits } from './xlsx-zip-guard.js';
 
 // El reporte diario pesa unos 10 KB; 5 MB deja margen sin aceptar archivos
 // que no son un informe (la API de T10 aplica además su propio límite).
@@ -65,6 +67,9 @@ export async function readReportWorkbook(
       'El archivo no es una planilla .xlsx. Sube el «Informe de Ventas Diario» exportado desde MrComanda.',
     );
   }
+  // Tope de contenido descomprimido y estructura del ZIP antes de leerlo
+  // (SPRINT-4R-T18): una «bomba zip» se rechaza sin agotar la memoria.
+  assertZipWithinLimits(buffer);
   try {
     const sheets = await readXlsxFile(buffer, { trim: false });
     return sheets.map((sheet) => ({

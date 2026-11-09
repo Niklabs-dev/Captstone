@@ -96,6 +96,36 @@ export function isProxyUuid(value: string): boolean {
   );
 }
 
+// Lee un cuerpo JSON acotado, también sin Content-Length; null si no es válido.
+export async function readProxyJson(
+  request: Request,
+  maxBytes: number,
+): Promise<unknown> {
+  if (!request.body) return null;
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+    return JSON.parse(
+      new TextDecoder().decode(Buffer.concat(chunks)),
+    ) as unknown;
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 // Acota el cuerpo antes de interpretar multipart, también sin Content-Length.
 export async function readProxyForm(
   request: Request,

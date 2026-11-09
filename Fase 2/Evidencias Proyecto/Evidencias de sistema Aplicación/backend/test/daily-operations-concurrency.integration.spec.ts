@@ -14,6 +14,7 @@ import type { AuthUser, JwtPayload } from '../src/auth/types/auth.types.js';
 import type { DailyOperationResponse } from '../src/daily-operations/types/daily-operations.types.js';
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
+import { minimalJpeg } from './helpers/jpeg.js';
 
 type App = Parameters<typeof request>[0];
 
@@ -33,9 +34,7 @@ const STORE_PREFIX = 'Subway Operación Concurrencia';
 const DOMAIN = '@daily-concurrency-test.invalid';
 
 // JPEG mínimo con firma real (mismo contenido = mismo hash en ambas cargas).
-const JPEG = Buffer.from([
-  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46,
-]);
+const JPEG = minimalJpeg();
 
 describe.skipIf(!databaseUrl)(
   'Concurrencia de la operación diaria (SPRINT-4R-T01 y SPRINT-4R-T03)',
@@ -334,10 +333,10 @@ describe.skipIf(!databaseUrl)(
         cashDifference: -1000,
         differenceReason: 'Faltante por vuelto no registrado',
       };
-      const [first, second] = await Promise.all([
-        post(winnerFields, [worker.id, worker2.id]),
-        post(winnerFields, [worker.id]),
-      ]);
+      const selections = [[worker.id, worker2.id], [worker.id]];
+      const [first, second] = await Promise.all(
+        selections.map((selection) => post(winnerFields, selection)),
+      );
 
       const statuses = [first.status, second.status].sort();
       expect(statuses).toEqual([201, 409]);
@@ -353,11 +352,15 @@ describe.skipIf(!databaseUrl)(
       expect(conflict.error).toBe('Conflict');
       expect(conflict.existingOperationId).toBe(created.id);
 
-      // La selección ganadora queda exactamente como se creó: el perdedor no
-      // la modificó ni duplicó filas.
+      // En una carrera real cualquiera de los dos puede ganar: la selección
+      // guardada es exactamente la del ganador y el perdedor no la modificó
+      // ni duplicó filas (SPRINT-4R-T07: antes se asumía que siempre ganaba
+      // la primera petición y el test fallaba de forma intermitente).
+      const winnerSelection =
+        first.status === 201 ? selections[0] : selections[1];
       expect(
         created.participants.map((participant) => participant.id).sort(),
-      ).toEqual([worker.id, worker2.id].sort());
+      ).toEqual([...winnerSelection].sort());
       const raceWhere = {
         storeId,
         businessDate: new Date('2026-03-12T00:00:00.000Z'),
@@ -370,7 +373,7 @@ describe.skipIf(!databaseUrl)(
         await prisma.dailyOperationParticipant.count({
           where: { operationId: operation.id },
         }),
-      ).toBe(2);
+      ).toBe(winnerSelection.length);
       // Tres archivos: uno por operación creada (10-03, 11-03 y 12-03).
       expect(await countStoredFiles()).toBe(3);
     });

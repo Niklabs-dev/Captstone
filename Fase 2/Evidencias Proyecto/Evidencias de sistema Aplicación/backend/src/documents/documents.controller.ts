@@ -28,6 +28,7 @@ import {
   ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
+  ApiUnprocessableEntityResponse,
   ApiUnsupportedMediaTypeResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -125,6 +126,10 @@ export class DocumentsController {
   @ApiUnsupportedMediaTypeResponse({
     description:
       'El archivo no es PDF, PNG ni JPEG, o su contenido no coincide con el tipo declarado.',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'El archivo es del tipo correcto pero está dañado o incompleto (por ejemplo, un PDF cortado sin su cierre).',
   })
   upload(
     @Body() dto: UploadDocumentDto,
