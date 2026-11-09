@@ -338,6 +338,25 @@ cierres por turno sigue disponible en modo lectura.
 
 Pruebas: `npm run test:daily-operations` (unitarias), `npm run test:daily-operations:integration` (BFF con backend simulado) y `TEST_REAL_DISPOSABLE=true npm run test:daily-operations:real` (recorrido real con base exclusiva, con las variables `TEST_REAL_*` de `.env.example`).
 
+### Participantes, vista previa y corrección (SPRINT-4R-T05)
+
+- **Selección de participantes:** contador «N de M seleccionados» y botón
+  «Seleccionar todos / Quitar selección» (controles de al menos 44 px). Con
+  fondo 0 la selección se conserva en pantalla pero no se envía, porque el
+  backend exige la selección vacía.
+- **Vista previa antes de guardar:** fondo, cantidad de participantes, monto del
+  día por trabajador y tratamiento del residuo en CLP. Replica la regla del
+  backend (SPRINT-4R-T04): `floor(fondo / n)` para cada uno y los pesos
+  sobrantes de a $1, rotando según la fecha (`previewEqualShares` en
+  `src/lib/daily-operations.ts`, probada con los mismos casos que el backend).
+- **Foco al primer error** según el orden visual del formulario
+  (`DAILY_FIELD_ORDER`); en participantes, la primera casilla.
+- **Corrección:** «Corregir operación» precarga montos, motivo y selección y
+  guarda con `PATCH /daily-operations/:id` (mismo ID, sin duplicar). La fecha no
+  cambia y el voucher registrado se conserva salvo que se adjunte otro. Los
+  participantes que ya no son elegibles se avisan y se quitan al guardar. Un
+  409 informa que la operación ya alimentó un reparto confirmado o pagado.
+- **Detalle registrado:** muestra cada participante con su monto del día.
 ## Detalle del reparto equitativo (SPRINT-4R-T06)
 
 `/propinas/repartos` muestra cada beneficiario con la columna destacada **Monto a pagar**, además de fondo total, beneficiarios, suma individual y regla aplicada. La conciliación compara suma individual, fondo y fuentes (operaciones diarias o registros históricos); si no coincide, avisa que los montos no deben usarse y bloquea la validación. Los repartos equitativos no muestran horas ni pacto; los proporcionales históricos los conservan. En «Mis propinas», una constancia equitativa indica que las horas no aplican.
