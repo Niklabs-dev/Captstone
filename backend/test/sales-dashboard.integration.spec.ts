@@ -10,12 +10,14 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { ROLE } from '../src/auth/constants/roles.constants.js';
 import type { AuthUser, JwtPayload } from '../src/auth/types/auth.types.js';
+import { DtAlertsService } from '../src/dt-alerts/dt-alerts.service.js';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import type {
   SalesDashboard,
   StoreDashboard,
 } from '../src/sales-dashboard/types/sales-dashboard.types.js';
+import { TipPaymentAlertsService } from '../src/tips/tip-payment-alerts.service.js';
 import { createDailyOperation } from './helpers/daily-operations.js';
 import {
   businessDaysAgo,
@@ -537,6 +539,55 @@ describe.skipIf(!databaseUrl)(
           overdue: 0,
           upcoming: 0,
         });
+      });
+    });
+
+    it('no pierde las alertas de un local inactivo sin datos del día', async () => {
+      await withinRollback(async (f) => {
+        const today = businessToday();
+        const past = `${Number(today.slice(0, 4)) - 1}${today.slice(4)}`;
+        const inactive = await createTestStore(
+          f.tx,
+          'Panel inactivo',
+          'Calera',
+          false,
+        );
+        await seedDtDocument(f, inactive.id, past);
+        await f.tx.tipEntry.create({
+          data: {
+            businessDate: dbDate(DAY()),
+            paymentMethodId: f.card.id,
+            amount: 4_000,
+            storeId: inactive.id,
+            responsibleId: f.supervisor.id,
+          },
+        });
+
+        const body = await dashboard(f);
+        // El local aparece con sus alertas aunque no tenga Excel ni operación.
+        const store = storeOf(body, inactive.id);
+        expect(store).toMatchObject({
+          store: { id: inactive.id, isActive: false },
+          sales: null,
+          dailyOperation: null,
+          alerts: { dtRegistration: { overdue: 1, upcoming: 0 } },
+        });
+        expect(
+          store.alerts.tipPayment.overdue + store.alerts.tipPayment.upcoming,
+        ).toBe(1);
+
+        // Los totales cuentan todas las alertas vigentes, no solo las de los
+        // locales con datos.
+        const count = (
+          items: { status: string }[],
+        ): { overdue: number; upcoming: number } => ({
+          overdue: items.filter((item) => item.status === 'OVERDUE').length,
+          upcoming: items.filter((item) => item.status === 'UPCOMING').length,
+        });
+        const dt = await app.get(DtAlertsService).list(f.admin);
+        const tips = await app.get(TipPaymentAlertsService).list(f.admin);
+        expect(body.totals.dtRegistrationAlerts).toEqual(count(dt.items));
+        expect(body.totals.tipPaymentAlerts).toEqual(count(tips.items));
       });
     });
 

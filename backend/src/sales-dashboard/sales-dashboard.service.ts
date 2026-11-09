@@ -35,12 +35,15 @@ interface StoreAlert {
   status: string;
 }
 
-function countAlerts(alerts: StoreAlert[], storeId: string): AlertCounts {
-  const own = alerts.filter((alert) => alert.store.id === storeId);
+function countAlerts(alerts: StoreAlert[]): AlertCounts {
   return {
-    overdue: own.filter((alert) => alert.status === 'OVERDUE').length,
-    upcoming: own.filter((alert) => alert.status === 'UPCOMING').length,
+    overdue: alerts.filter((alert) => alert.status === 'OVERDUE').length,
+    upcoming: alerts.filter((alert) => alert.status === 'UPCOMING').length,
   };
+}
+
+function ownAlerts(alerts: StoreAlert[], storeId: string): StoreAlert[] {
+  return alerts.filter((alert) => alert.store.id === storeId);
 }
 
 // Día en que el local debía entregar Excel y operación diaria: abrió según
@@ -50,13 +53,6 @@ function countAlerts(alerts: StoreAlert[], storeId: string): AlertCounts {
 function isExpectedDay(store: StoreDashboard): boolean {
   const { status } = store.importStatus;
   return status !== null && status !== 'CERRADO';
-}
-
-function sumCounts(left: AlertCounts, right: AlertCounts): AlertCounts {
-  return {
-    overdue: left.overdue + right.overdue,
-    upcoming: left.upcoming + right.upcoming,
-  };
 }
 
 @Injectable()
@@ -77,14 +73,20 @@ export class SalesDashboardService {
     // validación del rango (400).
     const businessDate =
       query.date ?? formatDbDate(toDbDate(businessDateOf(now)));
-    const [consolidated, dtAlerts, tipAlerts] = await Promise.all([
-      this.salesReports.consolidate(
-        { from: businessDate, to: businessDate },
-        now,
-      ),
+    const [dtAlerts, tipAlerts] = await Promise.all([
       this.dtAlerts.list(currentUser),
       this.tipPaymentAlerts.list(currentUser),
     ]);
+    // Ninguna alerta se pierde: un local con alertas aparece en el panel
+    // aunque esté inactivo y sin datos del día.
+    const alertStoreIds = [...dtAlerts.items, ...tipAlerts.items].map(
+      (alert) => alert.store.id,
+    );
+    const consolidated = await this.salesReports.consolidate(
+      { from: businessDate, to: businessDate },
+      now,
+      alertStoreIds,
+    );
 
     const stores = consolidated.stores.map((report): StoreDashboard => {
       const day = report.days.find(
@@ -96,12 +98,13 @@ export class SalesDashboardService {
         sales: day?.sales ?? null,
         dailyOperation: day?.dailyOperation ?? null,
         alerts: {
-          dtRegistration: countAlerts(dtAlerts.items, report.store.id),
-          tipPayment: countAlerts(tipAlerts.items, report.store.id),
+          dtRegistration: countAlerts(
+            ownAlerts(dtAlerts.items, report.store.id),
+          ),
+          tipPayment: countAlerts(ownAlerts(tipAlerts.items, report.store.id)),
         },
       };
     });
-    const none: AlertCounts = { overdue: 0, upcoming: 0 };
     const expected = stores.filter(isExpectedDay);
 
     return {
@@ -122,12 +125,9 @@ export class SalesDashboardService {
         ).length,
         cashDifferences: consolidated.totals.cashDifferences,
         importStatus: consolidated.totals.importStatus,
-        dtRegistrationAlerts: stores
-          .map((store) => store.alerts.dtRegistration)
-          .reduce(sumCounts, none),
-        tipPaymentAlerts: stores
-          .map((store) => store.alerts.tipPayment)
-          .reduce(sumCounts, none),
+        // Todas las alertas vigentes, no solo las de los locales listados.
+        dtRegistrationAlerts: countAlerts(dtAlerts.items),
+        tipPaymentAlerts: countAlerts(tipAlerts.items),
       },
     };
   }
