@@ -99,10 +99,13 @@ export class SalesReportsService {
   }
 
   // Consolidación de un rango de días de negocio; también la usa el panel
-  // (/sales-dashboard) para un solo día.
+  // (/sales-dashboard) para un solo día. `includeStoreIds` agrega locales que
+  // deben aparecer aunque estén inactivos y sin datos (el panel: los que
+  // tienen alertas legales vigentes).
   async consolidate(
     range: ReportRange,
     now: Date = new Date(),
+    includeStoreIds: readonly string[] = [],
   ): Promise<ConsolidatedRange> {
     const today = this.validateRange(range, now);
     await this.assertStoreExists(range.storeId);
@@ -167,10 +170,12 @@ export class SalesReportsService {
         ),
       ]);
 
-    // Un local inactivo solo aparece si tiene datos en el período.
+    // Un local inactivo solo aparece si tiene datos en el período o si quien
+    // llama lo pide.
     const withData = new Set([
       ...imports.map((item) => item.storeId),
       ...operations.map((item) => item.storeId),
+      ...includeStoreIds,
     ]);
     const consolidation = consolidateSales({
       stores: stores.filter(

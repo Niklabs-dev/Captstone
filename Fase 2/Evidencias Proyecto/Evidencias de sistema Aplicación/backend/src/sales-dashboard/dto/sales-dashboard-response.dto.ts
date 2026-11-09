@@ -120,13 +120,15 @@ class SalesDashboardTotalsDto implements SalesDashboardTotals {
   importStatus: ImportStatusSummaryDto;
 
   @ApiProperty({
-    description: 'Alertas de registro en la DT de todos los locales.',
+    description:
+      'Todas las alertas vigentes de registro en la DT (de cualquier local, activo o inactivo).',
     type: AlertCountsDto,
   })
   dtRegistrationAlerts: AlertCountsDto;
 
   @ApiProperty({
-    description: 'Alertas de entrega de propinas de todos los locales.',
+    description:
+      'Todas las alertas vigentes de entrega de propinas (de cualquier local, activo o inactivo).',
     type: AlertCountsDto,
   })
   tipPaymentAlerts: AlertCountsDto;
@@ -166,7 +168,7 @@ export class SalesDashboardDto implements SalesDashboard {
 
   @ApiProperty({
     description:
-      'Un elemento por local activo (y por local inactivo con datos del día), ordenados por nombre.',
+      'Un elemento por local activo y por local inactivo con datos del día o con alertas legales vigentes (ninguna alerta queda fuera), ordenados por nombre.',
     type: [StoreDashboardDto],
   })
   stores: StoreDashboardDto[];

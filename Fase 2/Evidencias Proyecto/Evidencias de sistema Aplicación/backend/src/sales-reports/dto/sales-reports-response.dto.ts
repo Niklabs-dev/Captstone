@@ -50,7 +50,7 @@ export class ReportStoreDto implements ReportStore {
 
   @ApiProperty({
     description:
-      'Indica si el local está activo. Un local inactivo solo aparece si tiene datos en el período.',
+      'Indica si el local está activo. Un local inactivo solo aparece si tiene datos en el período (en el panel, también si tiene alertas legales vigentes).',
     example: true,
   })
   isActive: boolean;
