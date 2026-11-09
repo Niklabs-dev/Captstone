@@ -266,7 +266,15 @@ function DifferencesTable({
   );
 }
 
-export function SalesImportPanel(): ReactElement {
+// SPRINT-4R-T14: el panel y los reportes de ventas abren aquí el detalle de
+// una importación (?importacion=<id>); la página lo consulta en el servidor.
+export function SalesImportPanel({
+  initialDetail = null,
+  initialError = '',
+}: {
+  initialDetail?: SalesImportDetail | null;
+  initialError?: string;
+}): ReactElement {
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState('');
   const [preview, setPreview] = useState<SalesImportPreview | null>(null);
@@ -277,10 +285,10 @@ export function SalesImportPanel(): ReactElement {
   const [replaceAccepted, setReplaceAccepted] = useState(false);
   const [uploadedName, setUploadedName] = useState('');
   const [busy, setBusy] = useState<'' | 'preview' | 'confirm' | 'discard'>('');
-  const [failure, setFailure] = useState('');
+  const [failure, setFailure] = useState(initialError);
   const [stalePreview, setStalePreview] = useState(false);
   const [notice, setNotice] = useState('');
-  const [result, setResult] = useState<SalesImportDetail | null>(null);
+  const [result, setResult] = useState<SalesImportDetail | null>(initialDetail);
   const [history, setHistory] = useState<HistoryState>({ status: 'loading' });
   const [historyRevision, setHistoryRevision] = useState(0);
   const [selectedId, setSelectedId] = useState('');
