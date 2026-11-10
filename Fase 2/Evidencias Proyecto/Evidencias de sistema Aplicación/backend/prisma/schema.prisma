@@ -62,6 +62,8 @@ model Store {
   salesImports       SalesImport[]
   operatingSchedule  StoreOperatingSchedule?
   closures           StoreClosure[]
+  tipAllocations     DailyTipAllocation[]
+  tipPaymentBatches  TipPaymentBatch[]
 
   @@map("stores")
 }
@@ -130,6 +132,8 @@ model User {
   closedCashClosings         CashClosing[]        @relation("ClosedCashClosings")
   responsibleDailyOperations DailyOperation[]    @relation("ResponsibleDailyOperations")
   dailyOperationParticipations DailyOperationParticipant[]
+  tipAllocations             DailyTipAllocation[] @relation("WorkerTipAllocations")
+  paidTipPaymentBatches      TipPaymentBatch[]    @relation("PaidTipPaymentBatches")
   uploadedSalesImports       SalesImport[]        @relation("UploadedSalesImports")
   confirmedSalesImports      SalesImport[]        @relation("ConfirmedSalesImports")
   updatedOperatingSchedules  StoreOperatingSchedule[] @relation("UpdatedOperatingSchedules")
@@ -465,6 +469,9 @@ model TipPool {
   sources        TipPoolSource[]
   dailyOperationSources TipPoolDailyOperationSource[]
   receipts       TipPoolReceipt[]
+  // Lote histórico que conserva el pago de este reparto en el modelo de
+  // propinas diarias (SPRINT-4A-T02); solo existe para repartos PAID.
+  legacyPaymentBatch TipPaymentBatch?
 
   @@unique([storeId, periodStart, periodEnd])
   @@index([agreementId])
@@ -817,8 +824,9 @@ model DailyOperation {
   voucher       DailyOperationVoucher? @relation(fields: [voucherId], references: [id], onDelete: Restrict)
   voucherId     String?               @unique @map("voucher_id") @db.Uuid
 
-  participants DailyOperationParticipant[]
-  poolSource   TipPoolDailyOperationSource?
+  participants   DailyOperationParticipant[]
+  poolSource     TipPoolDailyOperationSource?
+  tipAllocations DailyTipAllocation[]
 
   @@unique([storeId, businessDate])
   @@map("daily_operations")
@@ -894,6 +902,86 @@ model TipPoolDailyOperationSource {
 
   @@index([poolId])
   @@map("tip_pool_daily_operation_sources")
+}
+
+// -------------------------------------------------------------
+// PROPINA DIARIA POR TRABAJADOR Y LOTES DE PAGO (SPRINT-4A-T02)
+// Decisión del Product Owner (10/11/2026): la unidad de propina es la
+// asignación diaria por trabajador, creada en la misma transacción que la
+// operación diaria (SPRINT-4A-T03), y el pago se registra como lote por local
+// y período. Los repartos por período (tip_pools) quedan como históricos de
+// solo lectura. Las reglas de integridad viven en la migración
+// 20261110040000_propinas_diarias_lotes_pago (CHECK y triggers).
+// -------------------------------------------------------------
+
+/// Estado de pago de la propina diaria de un trabajador: nace UNPAID (No
+/// pagada) y pasa a PAID (Pagada) una sola vez, al quedar en un lote de pago.
+enum TipAllocationStatus {
+  UNPAID
+  PAID
+}
+
+/// Propina de un trabajador en una operación diaria (SPRINT-4A-T02). Una fila
+/// por (operación, trabajador), en CLP entero (BIGINT, >= 0). local y fecha de
+/// negocio copian los de la operación (trigger) para consultar por local/día y
+/// por trabajador/día sin joins. La base garantiza: el trabajador es
+/// participante de la operación; las asignaciones de una operación suman
+/// exactamente su fondo (tarjeta + efectivo) y cubren a todos sus
+/// participantes (constraint trigger diferido, al commit); PAID exige lote y
+/// UNPAID no lo admite (CHECK); una asignación PAID es inmutable y no se
+/// borra; y mientras una operación tenga asignaciones PAID no cambian sus
+/// montos, fecha, local ni participantes.
+model DailyTipAllocation {
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessDate DateTime            @map("business_date") @db.Date
+  amount       BigInt
+  status       TipAllocationStatus @default(UNPAID)
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  operation      DailyOperation   @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operationId    String           @map("operation_id") @db.Uuid
+  store          Store            @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId        String           @map("store_id") @db.Uuid
+  worker         User             @relation("WorkerTipAllocations", fields: [workerId], references: [id], onDelete: Restrict)
+  workerId       String           @map("worker_id") @db.Uuid
+  paymentBatch   TipPaymentBatch? @relation(fields: [paymentBatchId], references: [id], onDelete: Restrict)
+  paymentBatchId String?          @map("payment_batch_id") @db.Uuid
+
+  @@unique([operationId, workerId])
+  @@index([storeId, businessDate])
+  @@index([workerId, businessDate])
+  @@index([paymentBatchId])
+  @@map("daily_tip_allocations")
+}
+
+/// Lote de pago de propinas (SPRINT-4A-T02): un local, un período (desde y
+/// hasta, inclusive), quién pagó y cuándo. Marca como PAID las asignaciones
+/// No pagadas del período (el endpoint de pago es SPRINT-4A-T06). Es
+/// inmutable (trigger) y sus totales cuadran con sus asignaciones (constraint
+/// trigger diferido): total_amount es su suma y allocation_count su cantidad.
+/// legacy_pool_id solo lo usan los lotes históricos que la migración crea
+/// para los repartos tip_pools ya pagados.
+model TipPaymentBatch {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  periodStart     DateTime @map("period_start") @db.Date
+  periodEnd       DateTime @map("period_end") @db.Date
+  totalAmount     BigInt   @map("total_amount")
+  allocationCount Int      @map("allocation_count")
+  paidAt          DateTime @map("paid_at") @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  store        Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId      String               @map("store_id") @db.Uuid
+  paidBy       User                 @relation("PaidTipPaymentBatches", fields: [paidById], references: [id], onDelete: Restrict)
+  paidById     String               @map("paid_by_id") @db.Uuid
+  legacyPool   TipPool?             @relation(fields: [legacyPoolId], references: [id], onDelete: Restrict)
+  legacyPoolId String?              @unique @map("legacy_pool_id") @db.Uuid
+  allocations  DailyTipAllocation[]
+
+  @@index([storeId, periodStart, periodEnd])
+  @@index([paidById])
+  @@map("tip_payment_batches")
 }
 
 // -------------------------------------------------------------
