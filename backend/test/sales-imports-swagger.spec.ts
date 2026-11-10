@@ -65,6 +65,11 @@ describe('Swagger de la importación de ventas (SPRINT-4R-T10)', () => {
     },
     {
       method: 'post' as const,
+      path: '/sales-imports/confirm-with-resolution',
+      statuses: ['200', '400', '401', '403', '409', '413', '415', '422'],
+    },
+    {
+      method: 'post' as const,
       path: '/sales-imports/{id}/confirm',
       statuses: ['200', '400', '401', '403', '404', '409', '422'],
     },
@@ -112,6 +117,63 @@ describe('Swagger de la importación de ventas (SPRINT-4R-T10)', () => {
       type: 'string',
       format: 'binary',
     });
+  });
+
+  // SPRINT-4A-T18: la resolución manual viaja en multipart junto al archivo
+  // y su esquema JSON queda documentado como modelo propio.
+  it('documenta la resolución manual con el archivo y su esquema JSON', () => {
+    const op = operation('post', '/sales-imports/confirm-with-resolution');
+    expect(op.requestBody).toMatchObject({
+      content: {
+        'multipart/form-data': {
+          schema: {
+            $ref: '#/components/schemas/ConfirmResolvedSalesImportFormDto',
+          },
+        },
+      },
+    });
+    const form = schema('ConfirmResolvedSalesImportFormDto');
+    expect(form.properties.file).toMatchObject({
+      type: 'string',
+      format: 'binary',
+    });
+    expect(form.properties.resolution).toMatchObject({ type: 'string' });
+    const resolution = schema('SalesImportResolutionDto');
+    expect(resolution.required).toEqual(
+      expect.arrayContaining(['expectedActiveImportId', 'lines']),
+    );
+    const line = schema('SalesImportLineResolutionDto');
+    expect(Object.keys(line.properties)).toEqual(
+      expect.arrayContaining([
+        'lineNumber',
+        'action',
+        'paymentMethodId',
+        'remember',
+      ]),
+    );
+    for (const name of [
+      'SalesImportResolutionDto',
+      'SalesImportStoreResolutionDto',
+      'SalesImportLineResolutionDto',
+      'SalesImportStoreOptionDto',
+      'SalesImportResolutionOptionsDto',
+      'SalesImportSkippedLineDto',
+    ]) {
+      for (const property of Object.values(schema(name).properties)) {
+        expect(property).toHaveProperty('description');
+      }
+    }
+    expect(Object.keys(schema('SalesImportPreviewDto').properties)).toContain(
+      'resolutionOptions',
+    );
+    expect(Object.keys(schema('SalesImportDetailDto').properties)).toEqual(
+      expect.arrayContaining([
+        'storeResolution',
+        'resolvedBy',
+        'resolvedAt',
+        'skippedLines',
+      ]),
+    );
   });
 
   it('la confirmación exige expectedActiveImportId (UUID o null)', () => {

@@ -10,13 +10,19 @@ import type { AuthUser } from '../auth/types/auth.types.js';
 import { sanitizeFileName } from '../documents/utils/file-name.util.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { AUDIT_ACTION } from '../audit/constants/audit-actions.constants.js';
 import type {
   ConfirmSalesImportDto,
   ListSalesImportsQueryDto,
+  SalesImportResolutionDto,
 } from './dto/sales-import-request.dto.js';
 import { MrComandaReportError } from './parser/mrcomanda-report.errors.js';
 import type { ParsedMrComandaReport } from './parser/mrcomanda-report.types.js';
 import { readMrComandaReport } from './parser/read-mrcomanda-report.js';
+import {
+  type ManualResolutionPlan,
+  planManualResolution,
+} from './resolution/manual-resolution.plan.js';
 import {
   type ResolvedPaymentMethod,
   type ResolvedSalesReport,
@@ -27,12 +33,16 @@ import {
   XLSX_MIME_TYPE,
 } from './sales-import-storage.service.js';
 import type {
+  SalesImportAuditOrigin,
   SalesImportConfirmResult,
   SalesImportDetail,
   SalesImportFileDownload,
+  SalesImportManualResolutionSummary,
   SalesImportPreview,
   SalesImportPreviewOutcome,
   SalesImportPreviewResult,
+  SalesImportResolutionOptions,
+  SalesImportResolvedConfirmResult,
   SalesImportSummary,
   SalesImportUploadedFile,
   SalesImportVersionRef,
@@ -82,9 +92,12 @@ const SUMMARY_SELECT = {
   createdAt: true,
   confirmedAt: true,
   supersededAt: true,
+  storeResolution: true,
+  resolvedAt: true,
   store: { select: { id: true, name: true } },
   uploadedBy: PERSON_SELECT,
   confirmedBy: PERSON_SELECT,
+  resolvedBy: PERSON_SELECT,
 } satisfies Prisma.SalesImportSelect;
 
 const DETAIL_SELECT = {
@@ -97,7 +110,17 @@ const DETAIL_SELECT = {
       originalLabel: true,
       amount: true,
       percentage: true,
+      resolution: true,
       paymentMethod: { select: { id: true, code: true, name: true } },
+    },
+  },
+  skippedLines: {
+    orderBy: { lineNumber: 'asc' },
+    select: {
+      lineNumber: true,
+      originalLabel: true,
+      amount: true,
+      percentage: true,
     },
   },
 } satisfies Prisma.SalesImportSelect;
@@ -164,7 +187,16 @@ function toSummary(record: SummaryRecord): SalesImportSummary {
       : null,
     confirmedAt: record.confirmedAt,
     supersededAt: record.supersededAt,
+    storeResolution: record.storeResolution,
+    resolvedBy: record.resolvedBy
+      ? { id: record.resolvedBy.id, name: personName(record.resolvedBy) }
+      : null,
+    resolvedAt: record.resolvedAt,
   };
+}
+
+function decimalOrNull(value: number | null): Prisma.Decimal | null {
+  return value === null ? null : new Prisma.Decimal(value.toFixed(2));
 }
 
 function toVersionRef(record: VersionRecord): SalesImportVersionRef {
@@ -220,7 +252,13 @@ export class SalesImportsService {
         : null;
       return {
         created: false,
-        preview: this.buildPreview('UNRESOLVED', resolution, null, active),
+        preview: this.buildPreview(
+          'UNRESOLVED',
+          resolution,
+          null,
+          active,
+          await this.resolutionOptions(resolution, businessDate),
+        ),
       };
     }
 
@@ -283,10 +321,7 @@ export class SalesImportsService {
             originalLabel: line.originalLabel,
             normalizedLabel: line.normalizedLabel,
             amount: BigInt(line.amount),
-            percentage:
-              line.percentage === null
-                ? null
-                : new Prisma.Decimal(line.percentage.toFixed(2)),
+            percentage: decimalOrNull(line.percentage),
             paymentMethodId: requireMethod(
               line.paymentMethod,
               line.originalLabel,
@@ -391,31 +426,9 @@ export class SalesImportsService {
           });
         }
 
-        const now = new Date();
-        if (active) {
-          await tx.salesImport.update({
-            where: { id: active.id },
-            data: { status: 'SUPERSEDED', isCurrent: null, supersededAt: now },
-          });
-        }
-        await tx.salesImport.update({
-          where: { id },
-          data: {
-            status: 'ACTIVE',
-            isCurrent: true,
-            confirmedAt: now,
-            confirmedById: currentUser.id,
-          },
-        });
         return {
           confirmed: true,
-          superseded: active
-            ? {
-                ...toVersionRef(active),
-                status: 'SUPERSEDED' as const,
-                supersededAt: now,
-              }
-            : null,
+          superseded: await this.promote(tx, id, active, currentUser),
         };
       });
       return { ...result, import: await this.findOne(id) };
@@ -428,6 +441,166 @@ export class SalesImportsService {
       const rule = databaseRuleViolation(error);
       if (rule !== null) {
         throw new UnprocessableEntityException(rule);
+      }
+      throw error;
+    }
+  }
+
+  // Importa y confirma en un solo paso un Excel cuya vista previa quedó
+  // UNRESOLVED, con la resolución manual del administrador (SPRINT-4A-T18).
+  // Se vuelve a leer y resolver el archivo, se valida la resolución completa
+  // (400 sin guardar nada si falta algo) y, en UNA transacción, se aplica
+  // «recordar» (ID Subway del local o alias del medio, auditados), se crea la
+  // importación con lo resuelto a mano y quién lo resolvió, y queda vigente
+  // reemplazando a la versión anterior igual que en confirm().
+  async confirmWithResolution(
+    file: SalesImportUploadedFile | undefined,
+    dto: SalesImportResolutionDto,
+    currentUser: AuthUser,
+    origin: SalesImportAuditOrigin,
+  ): Promise<SalesImportResolvedConfirmResult> {
+    if (!file) {
+      throw new BadRequestException(
+        'Adjunta el «Informe de Ventas Diario» de MrComanda en el campo file',
+      );
+    }
+    const report = await this.readReport(file.buffer);
+    const resolution = await this.resolver.resolve(report);
+    const plan = await this.planResolution(resolution, dto);
+    const manualResolution = this.manualSummary(plan, report.subwayStoreId);
+    const storeId = plan.store.id;
+    const businessDate = dbDate(report.businessDate);
+    const sha256Hash = this.storage.computeSha256(file.buffer);
+
+    const stored = await this.storage.save(file.buffer);
+    try {
+      const outcome = await this.prisma.$transaction(async (tx) => {
+        // Mismo orden de bloqueo que la vista previa y la confirmación.
+        await tx.$queryRaw`SELECT id FROM stores WHERE id = ${storeId}::uuid FOR UPDATE`;
+        const existing = await tx.salesImport.findUnique({
+          where: {
+            storeId_businessDate_sha256Hash: {
+              storeId,
+              businessDate,
+              sha256Hash,
+            },
+          },
+          select: { id: true, status: true, version: true },
+        });
+        if (existing !== null) {
+          // Reintento del mismo archivo ya vigente en ese local: idempotente.
+          if (existing.status === 'ACTIVE') {
+            return { id: existing.id, confirmed: false, superseded: null };
+          }
+          throw new ConflictException(
+            existing.status === 'PENDING'
+              ? 'Este archivo ya tiene una vista previa pendiente para ese local: confírmala o descártala desde el historial'
+              : `Este archivo ya se importó para ese local como la versión ${existing.version}, que fue reemplazada: sube el archivo corregido`,
+          );
+        }
+        const active = await tx.salesImport.findFirst({
+          where: { storeId, businessDate, status: 'ACTIVE' },
+          select: VERSION_SELECT,
+        });
+        if ((active?.id ?? null) !== dto.expectedActiveImportId) {
+          throw new ConflictException({
+            statusCode: 409,
+            error: 'Conflict',
+            message:
+              'La versión vigente cambió desde la vista previa: revisa la importación vigente antes de confirmar',
+            activeImport: active ? toVersionRef(active) : null,
+          });
+        }
+
+        await this.rememberChoices(tx, plan, currentUser, origin);
+
+        const now = new Date();
+        const last = await tx.salesImport.aggregate({
+          where: { storeId, businessDate },
+          _max: { version: true },
+        });
+        const header = await tx.salesImport.create({
+          data: {
+            system: 'MRCOMANDA',
+            storeId,
+            businessDate,
+            periodStart: report.periodStart,
+            periodEnd: report.periodEnd,
+            issuedAt: report.issuedAt,
+            externalStoreCode: report.externalStoreCode,
+            // El ID Subway leído del archivo se guarda tal cual, aunque el
+            // local se haya elegido a mano (el trigger revisa que no
+            // identifique a otro local activo).
+            subwayStoreId: report.subwayStoreId,
+            version: (last._max.version ?? 0) + 1,
+            totalAmount: BigInt(report.totalAmount),
+            fileName: sanitizeFileName(file.originalname),
+            filePath: stored.relativePath,
+            mimeType: XLSX_MIME_TYPE,
+            sizeBytes: BigInt(stored.sizeBytes),
+            sha256Hash: stored.sha256Hash,
+            uploadedById: currentUser.id,
+            storeResolution: plan.storeResolution,
+            resolvedById: currentUser.id,
+            resolvedAt: now,
+          },
+          select: { id: true },
+        });
+        await tx.salesImportLine.createMany({
+          data: plan.lines.map(({ line, paymentMethodId, resolution }) => ({
+            importId: header.id,
+            lineNumber: line.lineNumber,
+            originalLabel: line.originalLabel,
+            normalizedLabel: line.normalizedLabel,
+            amount: BigInt(line.amount),
+            percentage: decimalOrNull(line.percentage),
+            paymentMethodId,
+            resolution,
+          })),
+        });
+        if (plan.skipped.length > 0) {
+          await tx.salesImportSkippedLine.createMany({
+            data: plan.skipped.map((line) => ({
+              importId: header.id,
+              lineNumber: line.lineNumber,
+              originalLabel: line.originalLabel,
+              normalizedLabel: line.normalizedLabel,
+              amount: BigInt(line.amount),
+              percentage: decimalOrNull(line.percentage),
+            })),
+          });
+        }
+        const superseded = await this.promote(
+          tx,
+          header.id,
+          active,
+          currentUser,
+        );
+        return { id: header.id, confirmed: true, superseded };
+      });
+      if (!outcome.confirmed) {
+        await this.removeOrphanFile(stored.relativePath);
+      }
+      return {
+        import: await this.findOne(outcome.id),
+        confirmed: outcome.confirmed,
+        superseded: outcome.superseded,
+        manualResolution,
+      };
+    } catch (error) {
+      await this.removeOrphanFile(stored.relativePath);
+      // Otra carga o un cambio de equivalencias ganó la carrera (mismo
+      // archivo, ID Subway o alias creado al mismo tiempo).
+      if (isUniqueViolation(error)) {
+        throw new ConflictException(
+          'Otro cambio se guardó al mismo tiempo para este archivo, local o medio: vuelve a cargar el archivo',
+        );
+      }
+      const rule = databaseRuleViolation(error);
+      if (rule !== null) {
+        throw new ConflictException(
+          `${rule}. Las equivalencias cambiaron durante la carga: vuelve a subir el archivo.`,
+        );
       }
       throw error;
     }
@@ -548,6 +721,13 @@ export class SalesImportsService {
         amount: Number(line.amount),
         percentage: line.percentage === null ? null : Number(line.percentage),
         paymentMethod: line.paymentMethod,
+        resolution: line.resolution,
+      })),
+      skippedLines: record.skippedLines.map((line) => ({
+        lineNumber: line.lineNumber,
+        originalLabel: line.originalLabel,
+        amount: Number(line.amount),
+        percentage: line.percentage === null ? null : Number(line.percentage),
       })),
       versions: versions.map(toVersionRef),
     };
@@ -597,6 +777,7 @@ export class SalesImportsService {
     resolution: ResolvedSalesReport,
     detail: SalesImportDetail | null,
     activeImport: SalesImportVersionRef | null,
+    resolutionOptions: SalesImportResolutionOptions | null = null,
   ): SalesImportPreview {
     const { report } = resolution;
     return {
@@ -620,7 +801,226 @@ export class SalesImportsService {
       })),
       import: detail,
       activeImport,
+      resolutionOptions,
     };
+  }
+
+  // Opciones de la resolución manual (SPRINT-4A-T18): locales activos con su
+  // versión vigente en la fecha (solo si el local no se identificó) y medios
+  // activos del catálogo (solo si alguna línea no tiene alias).
+  private async resolutionOptions(
+    resolution: ResolvedSalesReport,
+    businessDate: Date,
+  ): Promise<SalesImportResolutionOptions> {
+    const needsStore = resolution.store === null;
+    const needsMethods = resolution.lines.some(
+      (line) => line.paymentMethod === null,
+    );
+    const [stores, actives, paymentMethods] = await Promise.all([
+      needsStore
+        ? this.prisma.store.findMany({
+            where: { isActive: true },
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true, subwayStoreId: true },
+          })
+        : Promise.resolve([]),
+      needsStore
+        ? this.prisma.salesImport.findMany({
+            where: { businessDate, status: 'ACTIVE' },
+            select: { ...VERSION_SELECT, storeId: true },
+          })
+        : Promise.resolve([]),
+      needsMethods
+        ? this.prisma.paymentMethod.findMany({
+            where: { isActive: true },
+            orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+            select: { id: true, code: true, name: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    const activeByStore = new Map(
+      actives.map((active) => [active.storeId, toVersionRef(active)]),
+    );
+    return {
+      stores: stores.map((store) => ({
+        id: store.id,
+        name: store.name,
+        subwayStoreId: store.subwayStoreId,
+        activeImport: activeByStore.get(store.id) ?? null,
+      })),
+      paymentMethods,
+    };
+  }
+
+  // Pasa la importación PENDING a vigente y, si había, la anterior a
+  // reemplazada, en la transacción del llamador (el trigger revisa que las
+  // líneas sumen el total).
+  private async promote(
+    tx: Prisma.TransactionClient,
+    id: string,
+    active: VersionRecord | null,
+    currentUser: AuthUser,
+  ): Promise<SalesImportVersionRef | null> {
+    const now = new Date();
+    if (active) {
+      await tx.salesImport.update({
+        where: { id: active.id },
+        data: { status: 'SUPERSEDED', isCurrent: null, supersededAt: now },
+      });
+    }
+    await tx.salesImport.update({
+      where: { id },
+      data: {
+        status: 'ACTIVE',
+        isCurrent: true,
+        confirmedAt: now,
+        confirmedById: currentUser.id,
+      },
+    });
+    return active
+      ? { ...toVersionRef(active), status: 'SUPERSEDED', supersededAt: now }
+      : null;
+  }
+
+  // Lee de la base lo que eligió el administrador y arma el plan (400 si la
+  // resolución no es válida o está incompleta).
+  private async planResolution(
+    resolution: ResolvedSalesReport,
+    dto: SalesImportResolutionDto,
+  ): Promise<ManualResolutionPlan> {
+    const methodIds = dto.lines
+      .map((line) => line.paymentMethodId)
+      .filter((id): id is string => typeof id === 'string');
+    const [store, methods] = await Promise.all([
+      dto.store
+        ? this.prisma.store.findUnique({
+            where: { id: dto.store.storeId },
+            select: {
+              id: true,
+              name: true,
+              isActive: true,
+              subwayStoreId: true,
+            },
+          })
+        : Promise.resolve(null),
+      methodIds.length > 0
+        ? this.prisma.paymentMethod.findMany({
+            where: { id: { in: methodIds } },
+            select: { id: true, code: true, name: true, isActive: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    return planManualResolution(
+      resolution,
+      dto,
+      store,
+      new Map(methods.map((method) => [method.id, method])),
+    );
+  }
+
+  private manualSummary(
+    plan: ManualResolutionPlan,
+    subwayStoreId: string | null,
+  ): SalesImportManualResolutionSummary {
+    return {
+      store:
+        plan.storeResolution === 'MANUAL'
+          ? {
+              storeId: plan.store.id,
+              subwayStoreId,
+              remembered: plan.rememberSubwayStoreId !== null,
+            }
+          : null,
+      lines: [
+        ...plan.lines
+          .filter((line) => line.resolution === 'MANUAL')
+          .map((line) => ({
+            lineNumber: line.line.lineNumber,
+            originalLabel: line.line.originalLabel,
+            action: 'ASSIGN' as const,
+            paymentMethodId: line.paymentMethodId,
+            remembered: line.remember,
+          })),
+        ...plan.skipped.map((line) => ({
+          lineNumber: line.lineNumber,
+          originalLabel: line.originalLabel,
+          action: 'SKIP' as const,
+          paymentMethodId: null,
+          remembered: false,
+        })),
+      ].sort((a, b) => a.lineNumber - b.lineNumber),
+    };
+  }
+
+  // «Recordar» (SPRINT-4A-T18): asigna el ID Subway al local elegido solo si
+  // sigue sin uno (nunca lo sobrescribe) y crea los alias de los medios
+  // elegidos. Cada cambio se audita en la misma transacción, con el mismo
+  // detalle que su endpoint de administración y el origen sales_import.
+  private async rememberChoices(
+    tx: Prisma.TransactionClient,
+    plan: ManualResolutionPlan,
+    currentUser: AuthUser,
+    origin: SalesImportAuditOrigin,
+  ): Promise<void> {
+    const audit = {
+      userId: currentUser.id,
+      ipAddress: origin.ipAddress,
+      userAgent: origin.userAgent?.slice(0, 255) ?? null,
+    };
+    if (plan.rememberSubwayStoreId !== null) {
+      const assigned = await tx.store.updateMany({
+        where: { id: plan.store.id, subwayStoreId: null },
+        data: { subwayStoreId: plan.rememberSubwayStoreId },
+      });
+      if (assigned.count !== 1) {
+        throw new ConflictException(
+          `El local «${plan.store.name}» recibió un ID Subway mientras confirmabas: vuelve a cargar el archivo`,
+        );
+      }
+      await tx.auditLog.create({
+        data: {
+          ...audit,
+          action: AUDIT_ACTION.STORE_UPDATED,
+          entityType: 'stores',
+          entityId: plan.store.id,
+          storeId: plan.store.id,
+          detail: {
+            previousSubwayStoreId: null,
+            subwayStoreId: plan.rememberSubwayStoreId,
+            source: 'sales_import',
+          },
+        },
+      });
+    }
+    for (const { line, paymentMethodId } of plan.lines.filter(
+      (planned) => planned.remember,
+    )) {
+      const alias = await tx.paymentMethodAlias.create({
+        data: {
+          system: 'MRCOMANDA',
+          label: line.originalLabel,
+          normalizedLabel: line.normalizedLabel,
+          paymentMethodId,
+        },
+        select: { id: true },
+      });
+      await tx.auditLog.create({
+        data: {
+          ...audit,
+          action: AUDIT_ACTION.PAYMENT_METHOD_ALIAS_CREATED,
+          entityType: 'payment_method_aliases',
+          entityId: alias.id,
+          storeId: null,
+          detail: {
+            system: 'MRCOMANDA',
+            label: line.originalLabel,
+            normalizedLabel: line.normalizedLabel,
+            paymentMethodId,
+            source: 'sales_import',
+          },
+        },
+      });
+    }
   }
 
   // Limpieza de un archivo que quedó sin importación (descarte, duplicado

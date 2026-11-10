@@ -4,7 +4,9 @@ import {
   Delete,
   Get,
   Header,
+  Headers,
   HttpCode,
+  Ip,
   Param,
   ParseUUIDPipe,
   Post,
@@ -22,6 +24,7 @@ import {
   ApiConflictResponse,
   ApiConsumes,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -43,9 +46,12 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import { contentDisposition } from '../documents/utils/download-name.util.js';
 import {
+  ConfirmResolvedSalesImportBodyDto,
+  ConfirmResolvedSalesImportFormDto,
   ConfirmSalesImportDto,
   ListSalesImportsQueryDto,
   PreviewSalesImportFormDto,
+  SalesImportResolutionDto,
 } from './dto/sales-import-request.dto.js';
 import {
   SalesImportConflictDto,
@@ -69,6 +75,7 @@ import type {
 // manual de ventas y el archivo no aporta propinas ni descuadres (esos vienen
 // de la operación diaria).
 @ApiTags('sales-imports')
+@ApiExtraModels(SalesImportResolutionDto)
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
 @ApiForbiddenResponse({
@@ -170,6 +177,99 @@ export class SalesImportsController {
         : undefined,
     });
     return preview;
+  }
+
+  @Post('confirm-with-resolution')
+  @HttpCode(200)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_REPORT_FILE_BYTES, files: 1 },
+    }),
+  )
+  @Audited({
+    action: AUDIT_ACTION.SALES_IMPORT_CONFIRMED,
+    entityType: 'sales_imports',
+    entityIdFrom: 'response.id',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ type: ConfirmResolvedSalesImportFormDto })
+  @ApiOperation({
+    summary:
+      'Importa y confirma el Excel eligiendo a mano el local y los medios no identificados',
+    description:
+      'Para una vista previa UNRESOLVED (SPRINT-4A-T18): se vuelve a enviar ' +
+      'el mismo archivo junto con la resolución (campo resolution, JSON con ' +
+      'el esquema SalesImportResolutionDto). Nada se adivina: store.storeId ' +
+      'elige un local activo cuando el ID Subway no lo identificó, y cada ' +
+      'línea sin alias trae ASSIGN con un medio activo del catálogo o SKIP ' +
+      '(solo si su monto es 0). remember guarda la elección para próximas ' +
+      'cargas: asigna el ID Subway del archivo al local elegido solo si el ' +
+      'local no tiene uno (nunca lo sobrescribe) o crea el alias del medio; ' +
+      'cada cambio queda auditado. El servidor exige que la resolución cubra ' +
+      'exactamente los datos pendientes: si falta algo o una elección no es ' +
+      'válida responde 400 y no guarda nada. En una sola transacción crea la ' +
+      'importación (con lo resuelto a mano y quién lo resolvió) y la deja ' +
+      'vigente reemplazando a expectedActiveImportId, igual que ' +
+      'POST /sales-imports/{id}/confirm. Si el mismo archivo ya está vigente ' +
+      'en ese local devuelve 200 sin cambios.',
+  })
+  @ApiOkResponse({
+    description:
+      'Importación vigente con sus líneas, las omitidas, quién resolvió a mano y todas sus versiones.',
+    type: SalesImportDetailDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Falta el archivo, la resolución es inválida o incompleta (local o línea sin elegir, local o medio inactivo, omitir una línea con monto distinto de 0, recordar un ID ya configurado) o el archivo ya no tiene datos por identificar. No se guarda nada.',
+  })
+  @ApiPayloadTooLargeResponse({
+    description:
+      'El archivo supera los 5 MB, o su contenido supera los 25 MB al descomprimirse o los 100 archivos internos (code FILE_TOO_LARGE).',
+  })
+  @ApiUnsupportedMediaTypeResponse({
+    description: 'El archivo no es un .xlsx (por ejemplo .xls antiguo o CSV).',
+    type: SalesImportReportErrorDto,
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'El .xlsx está dañado o no es un «Informe de Ventas Diario» válido. Incluye code y row.',
+    type: SalesImportReportErrorDto,
+  })
+  @ApiConflictResponse({
+    description:
+      'La versión vigente cambió desde la vista previa (incluye la vigente actual), el archivo ya tiene otra versión pendiente o reemplazada en ese local, o una equivalencia cambió al mismo tiempo.',
+    type: SalesImportConflictDto,
+  })
+  async confirmWithResolution(
+    @UploadedFile() file: SalesImportUploadedFile | undefined,
+    @Body() form: ConfirmResolvedSalesImportBodyDto,
+    @CurrentUser() currentUser: AuthUser,
+    @Ip() ip: string | undefined,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<SalesImportDetail> {
+    const result = await this.salesImports.confirmWithResolution(
+      file,
+      form.resolution,
+      currentUser,
+      { ipAddress: ip ?? null, userAgent: userAgent ?? null },
+    );
+    // Lista blanca: identificadores, totales y lo resuelto a mano; nunca el
+    // contenido del archivo. Un reintento idempotente no se audita de nuevo.
+    setAuditContext(res, {
+      storeId: result.import.store.id,
+      skipAudit: !result.confirmed,
+      detail: {
+        businessDate: result.import.businessDate,
+        sha256Hash: result.import.sha256Hash,
+        version: result.import.version,
+        totalAmount: result.import.totalAmount,
+        supersededImportId: result.superseded?.id ?? null,
+        supersededVersion: result.superseded?.version ?? null,
+        manualResolution: result.manualResolution,
+      },
+    });
+    return result.import;
   }
 
   @Post(':id/confirm')

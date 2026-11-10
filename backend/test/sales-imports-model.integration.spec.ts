@@ -811,11 +811,13 @@ describe.skipIf(!databaseUrl)(
         });
       });
 
+      // Desde SPRINT-4A-T18 las líneas omitidas también referencian la
+      // cabecera, así que el TRUNCATE incluye las tres tablas.
       it('rechaza TRUNCATE sobre importaciones y líneas', async () => {
         await withinRollback(async (tx) => {
           await expect(
             tx.$executeRawUnsafe(
-              'TRUNCATE "sales_imports", "sales_import_lines"',
+              'TRUNCATE "sales_imports", "sales_import_lines", "sales_import_skipped_lines"',
             ),
           ).rejects.toThrow(/no se permite TRUNCATE/);
         });

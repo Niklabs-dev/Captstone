@@ -5,6 +5,7 @@ import { ApiProperty } from '@nestjs/swagger';
 // metadatos (la descarga es GET /sales-imports/:id/file).
 
 const STATUSES = ['PENDING', 'ACTIVE', 'SUPERSEDED'] as const;
+const RESOLUTIONS = ['AUTOMATIC', 'MANUAL'] as const;
 
 export class SalesImportStoreDto {
   @ApiProperty({
@@ -79,10 +80,44 @@ export class SalesImportLineDto {
   percentage: number | null;
 
   @ApiProperty({
-    description: 'Medio del catálogo resuelto por alias.',
+    description:
+      'Medio del catálogo resuelto por alias o elegido a mano (ver resolution).',
     type: SalesImportPaymentMethodDto,
   })
   paymentMethod: SalesImportPaymentMethodDto;
+
+  @ApiProperty({
+    description:
+      'AUTOMATIC si el medio salió de un alias; MANUAL si lo eligió el administrador al importar.',
+    enum: RESOLUTIONS,
+    example: 'AUTOMATIC',
+  })
+  resolution: string;
+}
+
+export class SalesImportSkippedLineDto {
+  @ApiProperty({ description: 'Posición de la línea omitida.', example: 4 })
+  lineNumber: number;
+
+  @ApiProperty({
+    description: 'Etiqueta tal como viene en el reporte.',
+    example: 'N.de Créd.',
+  })
+  originalLabel: string;
+
+  @ApiProperty({
+    description: 'Monto en CLP (siempre 0: solo se omiten líneas en 0).',
+    example: 0,
+  })
+  amount: number;
+
+  @ApiProperty({
+    description: 'Porcentaje del total según el reporte.',
+    example: 0,
+    type: Number,
+    nullable: true,
+  })
+  percentage: number | null;
 }
 
 export class SalesImportVersionDto {
@@ -246,6 +281,30 @@ export class SalesImportSummaryDto {
     nullable: true,
   })
   supersededAt: Date | null;
+
+  @ApiProperty({
+    description:
+      'AUTOMATIC si el local se identificó por su ID Subway; MANUAL si lo eligió el administrador al importar.',
+    enum: RESOLUTIONS,
+    example: 'AUTOMATIC',
+  })
+  storeResolution: string;
+
+  @ApiProperty({
+    description:
+      'Quién resolvió a mano algún dato (local o medios); null si todo se identificó por equivalencias.',
+    type: SalesImportPersonDto,
+    nullable: true,
+  })
+  resolvedBy: SalesImportPersonDto | null;
+
+  @ApiProperty({
+    description: 'Fecha y hora de la resolución manual.',
+    example: null,
+    type: Date,
+    nullable: true,
+  })
+  resolvedAt: Date | null;
 }
 
 export class SalesImportDetailDto extends SalesImportSummaryDto {
@@ -255,6 +314,14 @@ export class SalesImportDetailDto extends SalesImportSummaryDto {
     isArray: true,
   })
   lines: SalesImportLineDto[];
+
+  @ApiProperty({
+    description:
+      'Líneas omitidas a mano al importar (monto 0); vacío si no se omitió ninguna.',
+    type: SalesImportSkippedLineDto,
+    isArray: true,
+  })
+  skippedLines: SalesImportSkippedLineDto[];
 
   @ApiProperty({
     description:
@@ -282,7 +349,7 @@ export class SalesImportIssueDto {
   @ApiProperty({
     description: 'Mensaje accionable para el administrador.',
     example:
-      'El ID Subway 72597 no está asignado a ningún local. Asígnalo al local que corresponda en la administración de locales y vuelve a cargar el archivo.',
+      'El ID Subway 72597 no está asignado a ningún local. Elige el local para confirmar; si lo recuerdas, el ID queda asignado para próximas cargas.',
   })
   message: string;
 
@@ -348,10 +415,56 @@ export class SalesImportPreviewLineDto {
   paymentMethod: SalesImportPaymentMethodDto | null;
 }
 
+export class SalesImportStoreOptionDto {
+  @ApiProperty({
+    description: 'ID del local activo.',
+    example: '1010021e-9bab-42d5-851c-417e9e2503bf',
+  })
+  id: string;
+
+  @ApiProperty({ description: 'Nombre del local.', example: 'Santa María' })
+  name: string;
+
+  @ApiProperty({
+    description:
+      'ID Subway configurado en el local; «recordar» solo asigna el del archivo si es null.',
+    example: null,
+    type: String,
+    nullable: true,
+  })
+  subwayStoreId: string | null;
+
+  @ApiProperty({
+    description:
+      'Versión vigente de ese local en la fecha del archivo (la que se reemplazaría al confirmar); null si no hay.',
+    type: SalesImportVersionDto,
+    nullable: true,
+  })
+  activeImport: SalesImportVersionDto | null;
+}
+
+export class SalesImportResolutionOptionsDto {
+  @ApiProperty({
+    description:
+      'Locales activos para elegir a mano; vacío si el local se identificó.',
+    type: SalesImportStoreOptionDto,
+    isArray: true,
+  })
+  stores: SalesImportStoreOptionDto[];
+
+  @ApiProperty({
+    description:
+      'Medios activos del catálogo para las líneas sin alias; vacío si todas se identificaron.',
+    type: SalesImportPaymentMethodDto,
+    isArray: true,
+  })
+  paymentMethods: SalesImportPaymentMethodDto[];
+}
+
 export class SalesImportPreviewDto {
   @ApiProperty({
     description:
-      'CREATED: archivo nuevo guardado como PENDING. EXISTING: el mismo archivo ya estaba importado (no se duplica). UNRESOLVED: falta configurar el local o algún medio; no se guardó nada.',
+      'CREATED: archivo nuevo guardado como PENDING. EXISTING: el mismo archivo ya estaba importado (no se duplica). UNRESOLVED: el local o algún medio no se identificó; no se guardó nada y el administrador puede elegirlos a mano (resolutionOptions).',
     enum: ['CREATED', 'EXISTING', 'UNRESOLVED'],
     example: 'CREATED',
   })
@@ -365,7 +478,8 @@ export class SalesImportPreviewDto {
   canConfirm: boolean;
 
   @ApiProperty({
-    description: 'Problemas que impiden confirmar (vacío si no hay).',
+    description:
+      'Datos que no se identificaron y hay que elegir a mano (vacío si no hay).',
     type: SalesImportIssueDto,
     isArray: true,
   })
@@ -448,6 +562,14 @@ export class SalesImportPreviewDto {
     nullable: true,
   })
   activeImport: SalesImportVersionDto | null;
+
+  @ApiProperty({
+    description:
+      'Solo en UNRESOLVED: locales y medios para elegir a mano lo que no se identificó y confirmar con POST /sales-imports/confirm-with-resolution; null en CREATED y EXISTING.',
+    type: SalesImportResolutionOptionsDto,
+    nullable: true,
+  })
+  resolutionOptions: SalesImportResolutionOptionsDto | null;
 }
 
 export class SalesImportReportErrorDto {

@@ -73,6 +73,9 @@ export const AUDIT_ACTION = {
   SALES_IMPORT_CONFIRMED: 'SALES_IMPORT_CONFIRMED',
   SALES_IMPORT_DISCARDED: 'SALES_IMPORT_DISCARDED',
   SALES_IMPORT_FILE_DOWNLOADED: 'SALES_IMPORT_FILE_DOWNLOADED',
+  // Alias de un medio de pago creado al «recordar» un medio elegido a mano en
+  // la importación de ventas (SPRINT-4A-T18): etiqueta, medio y origen.
+  PAYMENT_METHOD_ALIAS_CREATED: 'PAYMENT_METHOD_ALIAS_CREATED',
   // Calendario de operación de los locales (SPRINT-4R-T12): cambio de días
   // semanales y fecha de inicio (con la configuración anterior), y alta o
   // retiro de una excepción de cierre (con su fecha y motivo).
