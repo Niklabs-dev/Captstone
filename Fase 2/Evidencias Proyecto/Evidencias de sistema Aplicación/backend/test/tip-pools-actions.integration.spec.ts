@@ -1331,6 +1331,14 @@ describe.skipIf(!databaseUrl)(
           where: { store: storeWhere, voucherId: { not: null } },
           select: { voucherId: true },
         });
+        await tx.dailyTipAllocation.deleteMany({
+          where: {
+            OR: [
+              { store: storeWhere },
+              { worker: { email: { endsWith: DOMAIN } } },
+            ],
+          },
+        });
         await tx.dailyOperationParticipant.deleteMany({
           where: { operation: { store: storeWhere } },
         });

@@ -272,6 +272,34 @@ describe('Swagger de la operación diaria (SPRINT-4R-T01 y SPRINT-4R-T03)', () =
     });
   });
 
+  it('tipa el reparto automático por trabajador con monto y estado (SPRINT-4A-T03)', () => {
+    const schemas = document.components?.schemas ?? {};
+    const response = schemas.DailyOperationResponseDto as {
+      properties: Record<string, unknown>;
+    };
+    expect(response.properties.tipAllocations).toMatchObject({
+      type: 'array',
+      items: { $ref: '#/components/schemas/DailyTipAllocationResponseDto' },
+    });
+    const tip = schemas.DailyTipAllocationResponseDto as {
+      properties: Record<
+        string,
+        { description?: string; example?: unknown; enum?: unknown }
+      >;
+    };
+    expect(Object.keys(tip.properties).sort()).toEqual([
+      'amount',
+      'id',
+      'status',
+      'worker',
+    ]);
+    expect(tip.properties.status.enum).toEqual(['UNPAID', 'PAID']);
+    for (const field of ['id', 'amount', 'status']) {
+      expect(tip.properties[field].description).toEqual(expect.any(String));
+      expect(tip.properties[field].example).toBeDefined();
+    }
+  });
+
   it('documenta el ID consultable ante un contenido distinto (409)', () => {
     expect(
       operation('post', '/daily-operations').responses['409'],

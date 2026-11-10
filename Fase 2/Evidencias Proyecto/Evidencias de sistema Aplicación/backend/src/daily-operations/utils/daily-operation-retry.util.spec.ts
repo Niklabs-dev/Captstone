@@ -51,6 +51,7 @@ function operation(
       { id: 'worker-1', name: 'Ana Participa' },
       { id: 'worker-2', name: 'Beto Participa' },
     ],
+    tipAllocations: [],
     createdAt: new Date('2026-03-10T20:14:30.000Z'),
     updatedAt: new Date('2026-03-10T20:14:30.000Z'),
     ...overrides,

@@ -77,6 +77,21 @@ const RECORD = {
     { worker: { id: WORKER_1, firstName: 'Ana', lastName: 'Participa' } },
     { worker: { id: WORKER_2, firstName: 'Beto', lastName: 'Participa' } },
   ],
+  // Reparto automático de 36.102 entre 2 (SPRINT-4A-T03).
+  tipAllocations: [
+    {
+      id: 'tip-1',
+      amount: BigInt(18051),
+      status: 'UNPAID',
+      worker: { id: WORKER_1, firstName: 'Ana', lastName: 'Participa' },
+    },
+    {
+      id: 'tip-2',
+      amount: BigInt(18051),
+      status: 'UNPAID',
+      worker: { id: WORKER_2, firstName: 'Beto', lastName: 'Participa' },
+    },
+  ],
 };
 
 function triggerError(
@@ -110,6 +125,10 @@ function createService() {
       delete: vi.fn(),
     },
     dailyOperationParticipant: {
+      createMany: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    dailyTipAllocation: {
       createMany: vi.fn(),
       deleteMany: vi.fn(),
     },
@@ -209,6 +228,52 @@ describe('DailyOperationsService (SPRINT-4R-T01 y SPRINT-4R-T03)', () => {
     });
   });
 
+  it('guarda el reparto automático en la misma transacción que la operación (SPRINT-4A-T03)', async () => {
+    const { service, prisma } = createService();
+    prisma.dailyOperation.findUnique.mockResolvedValue(null);
+    prisma.dailyOperationVoucher.create.mockResolvedValue({ id: 'voucher-1' });
+    prisma.dailyOperation.create.mockResolvedValue({ id: 'op-1' });
+    prisma.dailyOperation.findUniqueOrThrow.mockResolvedValue(RECORD);
+    prisma.user.findMany.mockResolvedValue([
+      { id: WORKER_1 },
+      { id: WORKER_2 },
+    ]);
+
+    const result = await service.create(DTO, VOUCHER_FILE, USER);
+
+    // 36.102 entre 2: 18.051 a cada uno, No pagadas (estado por defecto).
+    expect(prisma.dailyTipAllocation.createMany).toHaveBeenCalledWith({
+      data: [WORKER_1, WORKER_2].map((workerId) => ({
+        operationId: 'op-1',
+        storeId: STORE_ID,
+        businessDate: new Date('2026-03-10T00:00:00.000Z'),
+        workerId,
+        amount: BigInt(18051),
+      })),
+    });
+    // Participantes antes que propinas: la base exige que cada propina sea
+    // de un participante de la operación.
+    expect(
+      prisma.dailyOperationParticipant.createMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      prisma.dailyTipAllocation.createMany.mock.invocationCallOrder[0],
+    );
+    expect(result.operation.tipAllocations).toEqual([
+      {
+        id: 'tip-1',
+        worker: { id: WORKER_1, name: 'Ana Participa' },
+        amount: 18051,
+        status: 'UNPAID',
+      },
+      {
+        id: 'tip-2',
+        worker: { id: WORKER_2, name: 'Beto Participa' },
+        amount: 18051,
+        status: 'UNPAID',
+      },
+    ]);
+  });
+
   it('crea sin voucher ni participantes cuando el fondo es 0', async () => {
     const { service, prisma, voucherStorage } = createService();
     prisma.dailyOperation.findUnique.mockResolvedValue(null);
@@ -233,6 +298,8 @@ describe('DailyOperationsService (SPRINT-4R-T01 y SPRINT-4R-T03)', () => {
     expect(voucherStorage.save).not.toHaveBeenCalled();
     expect(prisma.dailyOperationVoucher.create).not.toHaveBeenCalled();
     expect(prisma.dailyOperationParticipant.createMany).not.toHaveBeenCalled();
+    // Fondo 0: no hay propinas que repartir.
+    expect(prisma.dailyTipAllocation.createMany).not.toHaveBeenCalled();
     expect(prisma.dailyOperation.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ voucherId: null }) as Record<
@@ -701,6 +768,137 @@ describe('DailyOperationsService (SPRINT-4R-T01 y SPRINT-4R-T03)', () => {
       ]);
       // Sin reemplazo no se toca ningún archivo.
       expect(voucherStorage.remove).not.toHaveBeenCalled();
+    });
+
+    describe('reparto automático (SPRINT-4A-T03)', () => {
+      const PAID_RECORD = {
+        ...RECORD,
+        tipAllocations: RECORD.tipAllocations.map((tip) => ({
+          ...tip,
+          status: 'PAID',
+        })),
+      };
+
+      it('recalcula el reparto No pagado cuando cambia el fondo', async () => {
+        const { service, prisma } = createService();
+        prisma.dailyOperation.findUnique.mockResolvedValue(RECORD);
+        prisma.dailyOperation.findUniqueOrThrow.mockResolvedValue(RECORD);
+
+        await service.update('op-1', { cashTipAmount: 4501 }, undefined, USER);
+
+        // 36.103 entre 2: el peso de residuo va al primero de la rotación.
+        expect(prisma.dailyTipAllocation.deleteMany).toHaveBeenCalledWith({
+          where: { operationId: 'op-1' },
+        });
+        const call = prisma.dailyTipAllocation.createMany.mock.calls[0] as [
+          { data: { workerId: string; amount: bigint }[] },
+        ];
+        const amounts = call[0].data.map((row) => row.amount);
+        expect([...amounts].sort()).toEqual([BigInt(18051), BigInt(18052)]);
+        expect(amounts.reduce((sum, amount) => sum + amount, 0n)).toBe(
+          BigInt(36103),
+        );
+        // La selección no cambió: no se reescriben los participantes.
+        expect(
+          prisma.dailyOperationParticipant.deleteMany,
+        ).not.toHaveBeenCalled();
+      });
+
+      it('no toca el reparto al corregir solo el motivo o la diferencia', async () => {
+        const { service, prisma } = createService();
+        prisma.dailyOperation.findUnique.mockResolvedValue(PAID_RECORD);
+        prisma.dailyOperation.findUniqueOrThrow.mockResolvedValue(PAID_RECORD);
+        prisma.user.findMany.mockResolvedValue([
+          { id: WORKER_1 },
+          { id: WORKER_2 },
+        ]);
+
+        await service.update(
+          'op-1',
+          {
+            cashDifference: -500,
+            differenceReason: 'Corrección',
+            participantIds: [WORKER_2, WORKER_1],
+          },
+          undefined,
+          USER,
+        );
+
+        expect(prisma.dailyOperation.update).toHaveBeenCalled();
+        expect(prisma.dailyTipAllocation.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.dailyTipAllocation.createMany).not.toHaveBeenCalled();
+        expect(
+          prisma.dailyOperationParticipant.deleteMany,
+        ).not.toHaveBeenCalled();
+      });
+
+      it('responde 409 sin cambiar nada si alguna propina está pagada', async () => {
+        for (const dto of [
+          { cashTipAmount: 9000 },
+          { participantIds: [WORKER_1] },
+        ]) {
+          const { service, prisma, voucherStorage } = createService();
+          prisma.dailyOperation.findUnique.mockResolvedValue(PAID_RECORD);
+          prisma.dailyOperation.findUniqueOrThrow.mockResolvedValue(
+            PAID_RECORD,
+          );
+          prisma.user.findMany.mockResolvedValue([{ id: WORKER_1 }]);
+
+          await expect(
+            service.update('op-1', dto, VOUCHER_FILE, USER),
+          ).rejects.toThrow(/propinas pagadas/);
+          await expect(
+            service.update('op-1', dto, undefined, USER),
+          ).rejects.toBeInstanceOf(ConflictException);
+          // El rechazo llega antes de guardar el archivo y de escribir.
+          expect(voucherStorage.save).not.toHaveBeenCalled();
+          expect(prisma.$transaction).not.toHaveBeenCalled();
+          expect(prisma.dailyOperation.update).not.toHaveBeenCalled();
+        }
+      });
+
+      it('exige participantes al corregir el fondo de una operación sin selección', async () => {
+        const { service, prisma } = createService();
+        const legacy = {
+          ...RECORD,
+          participants: [],
+          tipAllocations: [],
+        };
+        prisma.dailyOperation.findUnique.mockResolvedValue(legacy);
+
+        await expect(
+          service.update('op-1', { cashTipAmount: 9000 }, undefined, USER),
+        ).rejects.toThrow(/al menos un trabajador/);
+        expect(prisma.dailyOperation.update).not.toHaveBeenCalled();
+      });
+
+      it('genera el reparto faltante al informar la selección', async () => {
+        const { service, prisma } = createService();
+        const legacy = {
+          ...RECORD,
+          participants: [],
+          tipAllocations: [],
+        };
+        prisma.dailyOperation.findUnique.mockResolvedValue(legacy);
+        prisma.dailyOperation.findUniqueOrThrow.mockResolvedValue(legacy);
+        prisma.user.findMany.mockResolvedValue([{ id: WORKER_1 }]);
+
+        await service.update(
+          'op-1',
+          { participantIds: [WORKER_1] },
+          undefined,
+          USER,
+        );
+
+        expect(prisma.dailyTipAllocation.createMany).toHaveBeenCalledWith({
+          data: [
+            expect.objectContaining({
+              workerId: WORKER_1,
+              amount: BigInt(36102),
+            }),
+          ],
+        });
+      });
     });
 
     it('reemplaza el voucher conservando la selección cuando no se envía', async () => {

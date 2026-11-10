@@ -25,6 +25,7 @@ import {
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 const T02_MIGRATION = '20261110040000_propinas_diarias_lotes_pago';
+const T03_MIGRATION = '20261110050000_reparto_diario_automatico';
 
 const MIGRATIONS_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -451,6 +452,83 @@ describe.skipIf(!databaseUrl)(
 
     it('no modifica ni borra repartos, líneas, fuentes, operaciones ni participantes', async () => {
       expect(await poolSnapshot(db())).toBe(poolSnapshotBefore);
+    });
+
+    // SPRINT-4A-T03: la migración siguiente genera el reparto de cualquier
+    // operación con fondo y participantes que haya quedado sin él y lo vuelve
+    // obligatorio; su down.sql vuelve a la conciliación de T02.
+    it('SPRINT-4A-T03 genera el reparto faltante y lo exige al commit', async () => {
+      const client = db();
+      // Bajo la regla de T02 una operación con fondo y participantes puede
+      // quedar sin reparto (ej. registrada por la API anterior).
+      await insertDay(
+        client,
+        ids.store,
+        '2026-11-01',
+        10_000,
+        days[0].participantIds.slice(0, 3),
+        null,
+      );
+      const pending = days[days.length - 1];
+      expect(
+        (await allocations(client)).filter(
+          (row) => row.operation_id === pending.operationId,
+        ),
+      ).toEqual([]);
+
+      await client.query(await sqlOf(T03_MIGRATION, 'migration.sql'));
+      const generated = (await allocations(client))
+        .filter((row) => row.operation_id === pending.operationId)
+        .map((row) => ({ userId: row.worker_id, amount: Number(row.amount) }));
+      expect(generated).toEqual(splitDailyFund(pending));
+      expect(
+        (await allocations(client)).every(
+          (row) =>
+            row.operation_id !== pending.operationId || row.status === 'UNPAID',
+        ),
+      ).toBe(true);
+
+      // Con la regla nueva, una operación con fondo y participantes sin
+      // reparto no llega al commit; fondo 0 y fondo sin participantes sí.
+      const strict = await client
+        .query(
+          `BEGIN;
+           INSERT INTO daily_operations (store_id, business_date, card_tip_amount, cash_tip_amount, tip_fund_amount, cash_difference, responsible_id, updated_at)
+           VALUES ('${ids.store}', '2026-11-02', 0, 500, 500, 0, '${ids.supervisor}', NOW());
+           INSERT INTO daily_operation_participants (operation_id, worker_id)
+           SELECT id, '${ids.supervisor}' FROM daily_operations WHERE store_id = '${ids.store}' AND business_date = '2026-11-02';
+           COMMIT;`,
+        )
+        .then(
+          () => null,
+          (error: unknown) => (error instanceof Error ? error.message : ''),
+        );
+      await client.query('ROLLBACK');
+      expect(strict).toMatch(/no tiene su reparto de propinas diarias/);
+      await client.query(
+        `INSERT INTO daily_operations (store_id, business_date, card_tip_amount, cash_tip_amount, tip_fund_amount, cash_difference, responsible_id, updated_at)
+         VALUES ($1, '2026-11-03', 0, 700, 700, 0, $2, NOW()),
+                ($1, '2026-11-04', 0, 0, 0, 0, $2, NOW())`,
+        [ids.store, ids.supervisor],
+      );
+
+      // La reversa de T03 vuelve a la conciliación de T02 (sin exigirlo).
+      await client.query(await sqlOf(T03_MIGRATION, 'down.sql'));
+      await client.query(
+        `BEGIN;
+         INSERT INTO daily_operations (store_id, business_date, card_tip_amount, cash_tip_amount, tip_fund_amount, cash_difference, responsible_id, updated_at)
+         VALUES ('${ids.store}', '2026-11-05', 0, 500, 500, 0, '${ids.supervisor}', NOW());
+         INSERT INTO daily_operation_participants (operation_id, worker_id)
+         SELECT id, '${ids.supervisor}' FROM daily_operations WHERE store_id = '${ids.store}' AND business_date = '2026-11-05';
+         COMMIT;`,
+      );
+      // Limpieza de lo agregado para que la foto de históricos siga igual.
+      await client.query(
+        `DELETE FROM daily_tip_allocations WHERE business_date >= '2026-11-01';
+         DELETE FROM daily_operation_participants USING daily_operations o
+           WHERE o.id = operation_id AND o.business_date >= '2026-11-01';
+         DELETE FROM daily_operations WHERE business_date >= '2026-11-01';`,
+      );
     });
 
     it('down.sql retira el modelo y conserva los históricos', async () => {
