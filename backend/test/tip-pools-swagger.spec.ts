@@ -4,47 +4,36 @@ import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module.js';
 import { createSwaggerDocument } from '../src/swagger.js';
 
-// Verifica la documentación Swagger de las acciones del contador sobre el
-// reparto de propinas (SPRINT-3-T13) y del cálculo equitativo (SPRINT-4R-T04)
-// leyendo el mismo documento OpenAPI que
-// main.ts publica en /api/docs. No necesita base de datos: la aplicación se
-// compila pero no se inicializa, así que PrismaService no se conecta.
+// Verifica la documentación Swagger de los repartos por período: las
+// consultas históricas de solo lectura (SPRINT-3-T13 y T15) y las acciones
+// retiradas en SPRINT-4A-T08, que responden 410. Lee el mismo documento
+// OpenAPI que main.ts publica en /api/docs. No necesita base de datos: la
+// aplicación se compila pero no se inicializa, así que PrismaService no se
+// conecta.
 
 type Operation = NonNullable<OpenAPIObject['paths'][string]['get']>;
 
-const ROUTES: {
-  method: 'get' | 'post';
-  path: string;
-  statuses: string[];
-}[] = [
+const READ_ROUTES: { path: string; statuses: string[] }[] = [
+  { path: '/tip-pools', statuses: ['200', '400', '401', '403'] },
+  { path: '/tip-pools/{id}', statuses: ['200', '400', '401', '403', '404'] },
   {
-    method: 'post',
-    path: '/tip-pools/{id}/observations',
-    statuses: ['200', '400', '401', '403', '404', '409'],
-  },
-  {
-    method: 'post',
-    path: '/tip-pools/{id}/confirm',
-    statuses: ['200', '400', '401', '403', '404', '409', '422'],
-  },
-  {
-    method: 'post',
-    path: '/tip-pools/{id}/pay',
-    statuses: ['200', '400', '401', '403', '404', '409'],
-  },
-  {
-    method: 'get',
     path: '/tip-pools/{id}/receipts',
     statuses: ['200', '400', '401', '403', '404', '409'],
   },
   {
-    method: 'get',
     path: '/tip-pools/{id}/receipts/{userId}/download',
     statuses: ['200', '400', '401', '403', '404', '409'],
   },
 ];
 
-describe('Swagger de confirmación y pago del reparto (SPRINT-3-T13)', () => {
+const RETIRED_ROUTES = [
+  '/tip-pools/preview',
+  '/tip-pools/{id}/observations',
+  '/tip-pools/{id}/confirm',
+  '/tip-pools/{id}/pay',
+];
+
+describe('Swagger de los repartos por período (SPRINT-3-T13 y SPRINT-4A-T08)', () => {
   let app: INestApplication;
   let document: OpenAPIObject;
 
@@ -74,95 +63,108 @@ describe('Swagger de confirmación y pago del reparto (SPRINT-3-T13)', () => {
     return found;
   }
 
-  it.each(ROUTES)(
-    '$method $path documenta tag, resumen, JWT y respuestas',
-    ({ method, path, statuses }) => {
-      const op = operation(method, path);
+  it.each(READ_ROUTES)(
+    'GET $path documenta tag, resumen, JWT y respuestas',
+    ({ path, statuses }) => {
+      const op = operation('get', path);
       expect(op.tags).toContain('tip-pools');
       expect(op.summary).toEqual(expect.any(String));
+      expect(op.deprecated).toBeUndefined();
       expect(op.security).toEqual(expect.arrayContaining([{ bearer: [] }]));
       expect(Object.keys(op.responses).sort()).toEqual([...statuses].sort());
     },
   );
 
-  it('las acciones piden expectedVersion y responden el reparto con version', () => {
+  it.each(RETIRED_ROUTES)(
+    'POST %s está retirado: obsoleto, sin cuerpo y solo 410 o 401',
+    (path) => {
+      const op = operation('post', path);
+      expect(op.tags).toContain('tip-pools');
+      expect(op.summary).toMatch(/^Retirado: /);
+      expect(op.description).toEqual(expect.stringContaining('SPRINT-4A-T08'));
+      expect(op.deprecated).toBe(true);
+      expect(op.security).toEqual(expect.arrayContaining([{ bearer: [] }]));
+      expect(op.requestBody).toBeUndefined();
+      expect(Object.keys(op.responses).sort()).toEqual(['401', '410']);
+      expect(op.responses['410']).toMatchObject({
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/TipPoolRetiredActionDto' },
+          },
+        },
+      });
+      if (path.includes('{id}')) {
+        expect(op.parameters).toEqual([
+          expect.objectContaining({ name: 'id', in: 'path' }),
+        ]);
+      }
+    },
+  );
+
+  it('el 410 y los filtros opcionales de la consulta documentan cada campo con ejemplo', () => {
     const schemas = document.components?.schemas ?? {};
+    const retired = schemas.TipPoolRetiredActionDto as {
+      required: string[];
+      properties: Record<string, { description?: string; example?: unknown }>;
+    };
+    expect(retired.required.sort()).toEqual(
+      ['error', 'message', 'statusCode'].sort(),
+    );
+    for (const field of ['statusCode', 'message', 'error']) {
+      expect(retired.properties[field]).toMatchObject({
+        description: expect.any(String) as unknown,
+        example: expect.anything() as unknown,
+      });
+    }
+    expect(retired.properties.statusCode.example).toBe(410);
+    // Los DTOs de las acciones retiradas ya no se publican.
     for (const name of [
+      'CalculateTipPoolDto',
       'ObserveTipPoolDto',
       'ConfirmTipPoolDto',
       'PayTipPoolDto',
+      'TipPoolConflictDto',
+      'TipPoolValidationErrorDto',
     ]) {
-      expect(schemas[name]).toMatchObject({
-        required: expect.arrayContaining(['expectedVersion']) as unknown,
-      });
+      expect(schemas[name]).toBeUndefined();
     }
-    expect(schemas.ObserveTipPoolDto).toMatchObject({
-      required: expect.arrayContaining(['notes']) as unknown,
-    });
-    expect(
-      Object.keys(
-        (schemas.TipPoolResponseDto as { properties: object }).properties,
-      ),
-    ).toEqual(
-      expect.arrayContaining([
-        'version',
-        'notes',
-        'confirmedBy',
-        'confirmedAt',
-        'paidBy',
-        'paidAt',
-        'paymentDate',
-        'receiptsCount',
-      ]),
+
+    const list = operation('get', '/tip-pools');
+    const params = (list.parameters ?? []) as {
+      name: string;
+      required?: boolean;
+      description?: string;
+      schema?: { example?: unknown };
+    }[];
+    expect(params.map((param) => param.name).sort()).toEqual(
+      ['periodEnd', 'periodStart', 'storeId'].sort(),
     );
-    const pay = operation('post', '/tip-pools/{id}/pay');
-    expect(pay.responses['200']).toMatchObject({
+    for (const param of params) {
+      expect(param.required).toBe(false);
+      expect(param.description).toEqual(expect.any(String));
+      expect(param.schema?.example).toEqual(expect.anything());
+    }
+    expect(list.responses['200']).toMatchObject({
       content: {
         'application/json': {
-          schema: { $ref: '#/components/schemas/TipPoolResponseDto' },
-        },
-      },
-    });
-    expect(pay.responses['409']).toMatchObject({
-      content: {
-        'application/json': {
-          schema: { $ref: '#/components/schemas/TipPoolConflictDto' },
+          schema: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/TipPoolResponseDto' },
+          },
         },
       },
     });
   });
 
-  it('documenta el cálculo equitativo: regla, residuo, fuentes diarias y horas nulas (SPRINT-4R-T04)', () => {
+  it('el reparto conserva su foto: estado, regla, fuentes diarias y horas nulas', () => {
     const schemas = document.components?.schemas ?? {};
-    const preview = operation('post', '/tip-pools/preview');
-    expect(preview.tags).toContain('tip-pools');
-    expect(preview.security).toEqual(expect.arrayContaining([{ bearer: [] }]));
-    expect(Object.keys(preview.responses).sort()).toEqual(
-      ['200', '201', '400', '401', '403', '404', '409', '422'].sort(),
-    );
-    expect(preview.description).toEqual(
-      expect.stringContaining('$3.334, $3.333 y $3.333'),
-    );
-    expect(preview.requestBody).toMatchObject({
-      content: {
-        'application/json': {
-          schema: { $ref: '#/components/schemas/CalculateTipPoolDto' },
-        },
-      },
-    });
-    const body = schemas.CalculateTipPoolDto as {
-      required?: string[];
-      properties: Record<string, { description?: string; example?: unknown }>;
-    };
-    expect(body.required).not.toContain('expectedVersion');
-    expect(body.properties.expectedVersion).toMatchObject({
-      description: expect.any(String) as unknown,
-      example: 2,
-    });
-
     const pool = schemas.TipPoolResponseDto as {
       properties: Record<string, Record<string, unknown>>;
     };
+    expect(pool.properties.status).toMatchObject({
+      enum: ['DRAFT', 'CONFIRMED', 'PAID'],
+      description: expect.stringContaining('borrador sin efecto') as unknown,
+    });
     expect(pool.properties.rule).toMatchObject({
       enum: ['PROPORTIONAL_TO_HOURS', 'EQUAL_SHARES'],
     });
@@ -175,21 +177,6 @@ describe('Swagger de confirmación y pago del reparto (SPRINT-3-T13)', () => {
       properties: Record<string, Record<string, unknown>>;
     };
     expect(line.properties.hoursWorked).toMatchObject({ nullable: true });
-    const dailySource = schemas.TipPoolDailySourceResponseDto as {
-      properties: Record<string, { description?: string; example?: unknown }>;
-    };
-    for (const field of [
-      'operationId',
-      'businessDate',
-      'cardTipAmount',
-      'cashTipAmount',
-      'amount',
-    ]) {
-      expect(dailySource.properties[field]).toMatchObject({
-        description: expect.any(String) as unknown,
-        example: expect.anything() as unknown,
-      });
-    }
   });
 
   it('la descarga se documenta como PDF con nosniff y Content-Disposition', () => {

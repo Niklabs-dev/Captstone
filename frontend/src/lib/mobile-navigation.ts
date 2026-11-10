@@ -38,7 +38,7 @@ export function getNavigationIcon(href: NavigationItem['href']) {
     '/liquidaciones': 'wallet',
     '/propinas': 'tips',
     '/propinas/diarias': 'tips',
-    '/propinas/repartos': 'tips',
+    '/propinas/historico': 'tips',
     '/portal/propinas': 'tips',
     '/portal/documentos': 'document',
     '/portal/liquidaciones': 'wallet',

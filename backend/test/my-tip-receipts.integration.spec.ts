@@ -17,6 +17,11 @@ import type {
 } from '../src/tips/types/tip-pools.types.js';
 import { createDailyOperation } from './helpers/daily-operations.js';
 import {
+  confirmLegacyTipPool,
+  createLegacyTipPool,
+  payLegacyTipPool,
+} from './helpers/legacy-tip-pools.js';
+import {
   ensureDefaultPaymentMethods,
   paymentMethodIdOf,
 } from './helpers/payment-methods.js';
@@ -129,7 +134,9 @@ describe.skipIf(!databaseUrl)(
     // Mismos montos del reparto demo con la regla equitativa (SPRINT-4R-T04):
     // el 05-01 los dos trabajadores se reparten 20.000 (15.000 de tarjeta y
     // 5.000 en efectivo) y el 06-01 solo el segundo recibe 5.000 en efectivo:
-    // 10.000 y 15.000, total 25.000. El reparto queda en DRAFT.
+    // 10.000 y 15.000, total 25.000. Desde SPRINT-4A-T08 la API ya no
+    // calcula ni paga repartos: el histórico se construye en la base con el
+    // helper de repartos históricos y queda en DRAFT.
     async function createFixture(
       tx: Prisma.TransactionClient,
     ): Promise<Fixture> {
@@ -162,7 +169,7 @@ describe.skipIf(!databaseUrl)(
         store.id,
         'Trabajador Dos',
       );
-      await createDailyOperation(tx, {
+      const mixedDay = await createDailyOperation(tx, {
         storeId: store.id,
         responsibleId: supervisor.id,
         businessDate: '2026-01-05',
@@ -170,21 +177,37 @@ describe.skipIf(!databaseUrl)(
         cashTipAmount: 5000,
         participantIds: [workerOne.id, workerTwo.id],
       });
-      await createDailyOperation(tx, {
+      const cashDay = await createDailyOperation(tx, {
         storeId: store.id,
         responsibleId: supervisor.id,
         businessDate: '2026-01-06',
         cashTipAmount: 5000,
         participantIds: [workerTwo.id],
       });
-      const { pool } = await app.get(TipPoolsService).preview(
-        {
-          storeId: store.id,
-          periodStart: PERIOD.start,
-          periodEnd: PERIOD.end,
-        },
-        accountant,
-      );
+      const created = await createLegacyTipPool(tx, {
+        storeId: store.id,
+        periodStart: PERIOD.start,
+        periodEnd: PERIOD.end,
+        accountantId: accountant.id,
+        status: 'DRAFT',
+        days: [
+          {
+            operationId: mixedDay,
+            businessDate: '2026-01-05',
+            fundAmount: 20000,
+            participantIds: [workerOne.id, workerTwo.id],
+          },
+          {
+            operationId: cashDay,
+            businessDate: '2026-01-06',
+            fundAmount: 5000,
+            participantIds: [workerTwo.id],
+          },
+        ],
+      });
+      const pool = await app
+        .get(TipPoolsService)
+        .findOne(created.id, accountant);
       return {
         tx,
         storeName,
@@ -200,8 +223,8 @@ describe.skipIf(!databaseUrl)(
     // Reparto proporcional histórico (anterior a SPRINT-4R-T04) en otro
     // período del mismo local, construido directamente en la base como lo
     // dejaba el motor anterior: pacto, registros diarios, horas 40/60 y
-    // líneas 10.000/15.000. Queda en DRAFT para confirmarlo y pagarlo por la
-    // API.
+    // líneas 10.000/15.000. Queda en DRAFT para confirmarlo y pagarlo con el
+    // helper de repartos históricos.
     async function createLegacyPool(f: Fixture): Promise<TipPoolResponse> {
       const legacy = { start: '2025-12-01', end: '2025-12-07' } as const;
       const storeId = f.pool.store.id;
@@ -294,21 +317,15 @@ describe.skipIf(!databaseUrl)(
       }
     }
 
-    function confirm(f: Fixture): Promise<TipPoolResponse> {
-      return app
-        .get(TipPoolsService)
-        .confirm(f.pool.id, { expectedVersion: f.pool.version }, f.accountant);
+    async function confirm(f: Fixture): Promise<TipPoolResponse> {
+      await confirmLegacyTipPool(f.tx, f.pool.id, f.accountant.id);
+      return app.get(TipPoolsService).findOne(f.pool.id, f.accountant);
     }
 
     async function pay(f: Fixture): Promise<TipPoolResponse> {
-      const ready = await confirm(f);
-      return app
-        .get(TipPoolsService)
-        .pay(
-          ready.id,
-          { expectedVersion: ready.version, paymentDate: PAYMENT_DATE },
-          f.accountant,
-        );
+      await confirm(f);
+      await payLegacyTipPool(f.tx, f.pool.id, f.accountant.id, PAYMENT_DATE);
+      return app.get(TipPoolsService).findOne(f.pool.id, f.accountant);
     }
 
     function receiptOf(f: Fixture, userId: string) {
@@ -568,16 +585,12 @@ describe.skipIf(!databaseUrl)(
           const legacy = await createLegacyPool(f);
           expect(legacy.rule).toBe('PROPORTIONAL_TO_HOURS');
           expect(legacy.totalHours).toBe('100.00');
-          const service = app.get(TipPoolsService);
-          const ready = await service.confirm(
+          await confirmLegacyTipPool(f.tx, legacy.id, f.accountant.id);
+          await payLegacyTipPool(
+            f.tx,
             legacy.id,
-            { expectedVersion: legacy.version },
-            f.accountant,
-          );
-          await service.pay(
-            ready.id,
-            { expectedVersion: ready.version, paymentDate: PAYMENT_DATE },
-            f.accountant,
+            f.accountant.id,
+            PAYMENT_DATE,
           );
 
           const list = await get('/my-tip-receipts', f.workerOne).expect(200);

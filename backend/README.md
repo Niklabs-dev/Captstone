@@ -467,17 +467,13 @@ del modelo en
 
 ## Reparto equitativo de propinas (SPRINT-4R-T04)
 
-`POST /tip-pools/preview` (solo `CONTADOR`, con alcance por local) calcula y
-guarda el borrador (`DRAFT`) del reparto de un local y período. **Todo cálculo
-nuevo es equitativo** y sale de las operaciones diarias del período; los
-pactos, las horas y los `tip_entries` históricos ya no intervienen.
-
-**Regla.** Para cada operación diaria se suman la propina de tarjeta y la de
-efectivo (`tipFundAmount`) y ese fondo se divide **una sola vez** en partes
-iguales entre los participantes de ese día. Cada trabajador recibe la suma de
-sus asignaciones diarias del período: nunca se divide el total del período
-entre la unión de trabajadores. Un no seleccionado no recibe línea, y las
-líneas guardan `hoursWorked = null` (la regla no usa horas y no se inventan).
+**Regla.** El fondo de cada operación diaria (propina de tarjeta + efectivo,
+`tipFundAmount`) se divide **una sola vez** en partes iguales entre los
+participantes de ese día; un no seleccionado no recibe nada y no se usan
+horas. Desde SPRINT-4A-T03 la API aplica la regla al guardar o corregir la
+operación diaria y guarda una propina No pagada por participante
+(`daily_tip_allocations`), que se paga por período con
+`POST /daily-tips/payment-batches` (SPRINT-4A-T06).
 
 **Residuo CLP (determinista).** Cada participante recibe
 `floor(fondo / n)` y los `fondo mod n` pesos sobrantes se entregan de a $1:
@@ -485,37 +481,35 @@ los participantes se ordenan por ID ascendente y el primer peso va a la
 posición `(días desde 1970-01-01 hasta la fecha de negocio) mod n`, el
 siguiente a la posición siguiente (circular). Así el peso extra rota entre los
 participantes día a día en lugar de favorecer siempre al mismo, y la
-asignación de un día depende solo de ese día. Las líneas siempre suman el
-fondo exacto: $10.000 entre 3 asigna $3.334, $3.333 y $3.333. La regla vive en
-`src/tips/calculation/equal-daily-distribution.calculator.ts`.
+asignación de un día depende solo de ese día. Las asignaciones siempre suman
+el fondo exacto: $10.000 entre 3 asigna $3.334, $3.333 y $3.333. La regla vive
+en `splitDailyFund` (`src/tips/calculation/equal-daily-distribution.calculator.ts`).
 
-**Respuesta.** `rule: "EQUAL_SHARES"`, `agreement: null`, `totalHours: null`,
-`lines` (`userId`, `workerName`, `amount` a pagar) y `dailySources` (una por
-operación: fecha, tarjeta, efectivo y fondo aplicado); `sources` queda para los
-`tip_entries` de repartos históricos. La foto guarda `agreement_id NULL` y en
-`agreement_snapshot` solo la regla, que los triggers usan para exigir horas
-`NULL`.
+### Repartos por período: histórico de solo lectura (SPRINT-4A-T08)
 
-**Errores 422** (todas las causas a la vez, sin guardar nada):
-`DAILY_OPERATIONS_MISSING` (no hay operaciones en el período),
-`DAILY_OPERATION_ALREADY_USED` (otra operación ya alimenta otro reparto) y
-`DAILY_PARTICIPANTS_MISSING` (un día con fondo positivo sin participantes).
+Hasta SPRINT-4A-T08 el contador calculaba un borrador por local y período
+(`tip_pools`), lo observaba, confirmaba y pagaba, y el pago emitía una
+constancia por trabajador. Ese flujo se retiró: pagar un reparto por período
+dejaba las propinas diarias del período No pagadas y permitía pagarlas dos
+veces. Las tablas y sus filas (repartos, líneas, fuentes y constancias) se
+conservan sin cambios.
 
-**Versión y vigencia.** Recalcular un `DRAFT` reemplaza la foto conservando su
-ID y sube `version`; con `expectedVersion` (opcional) responde **409** con
-`currentStatus`/`currentVersion` si el borrador cambió desde que se revisó.
-`CONFIRMED` y `PAID` no se recalculan (409). Al confirmar, el reparto
-equitativo se recalcula con las operaciones vigentes (bloqueadas `FOR UPDATE`)
-y, si una operación se corrigió, agregó o cambió su selección desde el
-cálculo, responde **422** pidiendo recalcular. Desde la confirmación los
-triggers de T02 congelan montos y participantes de las operaciones fuente, y
-las constancias del pago copian la regla (`detail.rule`) con horas `null`; el
-PDF explica la regla en vez de mostrar horas.
+| Endpoint | Roles | Descripción |
+| --- | --- | --- |
+| `GET /tip-pools` | `CONTADOR`, `ADMINISTRADOR` | Lista los repartos guardados del período más reciente al más antiguo. Filtros opcionales: `storeId` y el período exacto `periodStart` + `periodEnd` (van juntos). |
+| `GET /tip-pools/:id` | `CONTADOR`, `ADMINISTRADOR` | Foto guardada del reparto, sin recalcular. |
+| `GET /tip-pools/:id/receipts` | `CONTADOR`, `ADMINISTRADOR` | Constancias de un reparto `PAID` (409 si es `DRAFT` o `CONFIRMED`). |
+| `GET /tip-pools/:id/receipts/:userId/download` | `CONTADOR`, `ADMINISTRADOR` | PDF de la constancia, generado desde su foto, sin caché y auditado. |
+| `POST /tip-pools/preview`, `POST /tip-pools/:id/observations`, `/confirm` y `/pay` | — | **410 Gone** para cualquier rol autenticado, sin leer el cuerpo ni tocar la base (documentados como obsoletos en Swagger). |
 
-**Compatibilidad histórica.** Los repartos proporcionales ya guardados (por
-ejemplo el `DRAFT` del seed demo) se consultan, confirman y pagan tal cual,
-con sus horas, fuentes `tip_entries` y constancias. Recalcular uno de ellos lo
-reemplaza por la foto equitativa del período (si hay operaciones diarias).
+Estados del histórico: `DRAFT` es un **borrador sin efecto** (nunca se
+confirmó ni se pagó; no bloquea correcciones de sus operaciones ni el pago por
+lote), `CONFIRMED` es un reparto confirmado sin pago registrado (los triggers
+siguen congelando sus operaciones fuente) y `PAID` es un reparto pagado con
+sus constancias. Los repartos proporcionales anteriores a SPRINT-4R-T04 se
+leen con sus horas, pacto y fuentes `tip_entries`; los equitativos, con
+`rule: "EQUAL_SHARES"`, `totalHours: null` y `dailySources`. Los triggers de
+la base mantienen la inmutabilidad de `CONFIRMED`, `PAID` y las constancias.
 
 ## Lectura del Excel diario de MrComanda (SPRINT-4R-T09)
 
@@ -719,6 +713,9 @@ límite es el séptimo día hábil posterior, excluyendo el día de recepción,
 sábados, domingos y feriados. La alerta incluye registros aún sin reparto y
 repartos `DRAFT` o `CONFIRMED`; desaparece cuando el reparto vinculado pasa a
 `PAID` y queda registrado el pago. No se almacena como una fila independiente.
+Desde SPRINT-4A-T08 ningún reparto por período cambia de estado, así que la
+alerta solo informa los registros históricos que quedaron sin pagar; la
+interfaz la muestra junto a los repartos anteriores (`/propinas/historico`).
 
 `daysRemaining` se calcula con la fecha de Chile (`America/Santiago`): es 0 en
 el día límite y negativo al vencer, descontando solo días hábiles. Si el plazo
@@ -1011,9 +1008,12 @@ Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
 ### Consulta de reparto por local y período (SPRINT-3-T15)
 
 `GET /tip-pools?storeId=<uuid>&periodStart=YYYY-MM-DD&periodEnd=YYYY-MM-DD`
-consulta la foto guardada sin recalcular. Solo contador y administrador;
-responde una lista vacía o un reparto. Fechas inválidas o período invertido
-responden 400, otros roles 403. No cambia montos, versiones ni estados.
+consulta la foto guardada sin recalcular; desde SPRINT-4A-T08 los filtros son
+opcionales (ver
+[Repartos por período](#repartos-por-período-histórico-de-solo-lectura-sprint-4a-t08)).
+Solo contador y administrador. Fechas inválidas, una sola fecha o período
+invertido responden 400, otros roles 403. No cambia montos, versiones ni
+estados.
 
 ### Constancias propias de propinas (SPRINT-3-T16)
 

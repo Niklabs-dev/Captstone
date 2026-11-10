@@ -4,7 +4,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client, type QueryResultRow } from 'pg';
 import {
-  calculateEqualDailyDistribution,
   splitDailyFund,
   type EqualDailyShareDay,
 } from '../src/tips/calculation/equal-daily-distribution.calculator.js';
@@ -154,8 +153,9 @@ describe.skipIf(!databaseUrl)(
     }
 
     // Reparto equitativo alimentado por los días indicados, con sus líneas
-    // (calculadas con la misma regla que el servicio de repartos) y llevado
-    // al estado pedido con las transiciones que exigen los triggers.
+    // (la suma por trabajador de splitDailyFund de cada día, como lo
+    // calculaba el reparto por período hasta SPRINT-4A-T08) y llevado al
+    // estado pedido con las transiciones que exigen los triggers.
     async function insertPool(
       client: Client,
       key: 'paid' | 'confirmed' | 'draft',
@@ -163,7 +163,21 @@ describe.skipIf(!databaseUrl)(
       period: { start: string; end: string },
     ): Promise<void> {
       const fed = days.filter((day) => day.poolKey === key);
-      const distribution = calculateEqualDailyDistribution(fed);
+      const totals = new Map<string, number>();
+      for (const day of fed) {
+        for (const share of splitDailyFund(day)) {
+          totals.set(
+            share.userId,
+            (totals.get(share.userId) ?? 0) + share.amount,
+          );
+        }
+      }
+      const distribution = {
+        totalAmount: fed.reduce((sum, day) => sum + day.fundAmount, 0),
+        lines: [...totals.entries()]
+          .sort(([a], [b]) => (a < b ? -1 : 1))
+          .map(([userId, amount]) => ({ userId, amount })),
+      };
       const pool = await queryOne<{ id: string }>(
         client,
         `INSERT INTO tip_pools (

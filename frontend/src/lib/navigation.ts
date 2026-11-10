@@ -19,7 +19,7 @@ export interface NavigationItem {
     | '/liquidaciones'
     | '/propinas'
     | '/propinas/diarias'
-    | '/propinas/repartos'
+    | '/propinas/historico'
     | '/portal/liquidaciones'
     | '/portal/documentos'
     | '/portal/propinas';
@@ -42,7 +42,7 @@ export function getNavigationView(pathname: string): {
     { href: '/admin/reportes-ventas', title: 'Reportes de ventas' },
     { href: '/admin/calendario-locales', title: 'Calendario de locales' },
     { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
-    { href: '/propinas/repartos', title: 'Reparto de propinas' },
+    { href: '/propinas/historico', title: 'Repartos anteriores' },
     { href: '/propinas/diarias', title: 'Operación diaria' },
     // Después de las subrutas: /propinas solo coincide consigo misma.
     { href: '/propinas', title: 'Propinas' },
@@ -66,7 +66,8 @@ const MY_TIPS: NavigationItem = {
 };
 
 // SPRINT-4A-T07: propinas diarias y pago por período de ADMINISTRADOR y
-// CONTADOR; reemplaza a /propinas/repartos para ambos roles.
+// CONTADOR. Los repartos por período antiguos se consultan, solo lectura, en
+// /propinas/historico (SPRINT-4A-T08), enlazado desde esta vista.
 const TIPS: NavigationItem = { href: '/propinas', label: 'Propinas' };
 
 // Una sola fuente de enlaces para todas las vistas; los permisos siguen en el servidor.
@@ -85,7 +86,6 @@ export function getNavigationItems(
     return [
       home,
       { href: '/propinas/diarias', label: 'Operación diaria' },
-      { href: '/propinas/repartos', label: 'Reparto de propinas' },
       MY_TIPS,
       { href: '/portal/documentos', label: 'Mis documentos' },
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
@@ -146,14 +146,16 @@ export function getPageRedirect(role: Role, pathname: string): string | null {
     return role === 'ADMINISTRADOR' || role === 'CONTADOR'
       ? null
       : '/dashboard?reason=forbidden';
-  const inPoolHistory =
-    pathname === '/propinas/repartos' ||
-    pathname.startsWith('/propinas/repartos/');
-  // El reparto por período quedó solo para el supervisor (lo retira T08).
-  if (inPoolHistory && (role === 'ADMINISTRADOR' || role === 'CONTADOR'))
-    return TIPS.href;
-  if (inPoolHistory && role !== 'SUPERVISOR')
-    return '/dashboard?reason=forbidden';
+  const startsWith = (path: string): boolean =>
+    pathname === path || pathname.startsWith(path + '/');
+  const manager = role === 'ADMINISTRADOR' || role === 'CONTADOR';
+  // SPRINT-4A-T08: histórico de solo lectura de los repartos por período.
+  if (startsWith('/propinas/historico'))
+    return manager ? null : '/dashboard?reason=forbidden';
+  // La vista de borradores y confirmación se retiró: los administradores y
+  // contadores van a /propinas y el supervisor vuelve a su inicio.
+  if (startsWith('/propinas/repartos'))
+    return manager ? TIPS.href : getHomePath(role);
   const inAdmin = pathname === '/admin' || pathname.startsWith('/admin/');
   if (inAdmin && role !== 'ADMINISTRADOR') return '/dashboard?reason=forbidden';
   return null;

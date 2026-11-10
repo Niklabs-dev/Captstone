@@ -48,11 +48,7 @@ async function forward(
   const raw: unknown = await response.json().catch(() => null);
   const data = collection ? parsePaymentMethods(raw) : parsePaymentMethod(raw);
   if (data && init.method && init.method !== 'GET') {
-    for (const page of [
-      '/admin/medios-pago',
-      '/propinas/diarias',
-      '/propinas/repartos',
-    ])
+    for (const page of ['/admin/medios-pago', '/propinas/diarias'])
       revalidatePath(page);
   }
   return data

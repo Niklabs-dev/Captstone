@@ -1,21 +1,33 @@
 import { isRecord } from './auth';
 import { isUuid } from './users';
+import type { StatusTone } from './daily-tips';
 import { isTipDate, isTipMethodCode } from './tips';
+// Repartos de propinas por período: histórico de solo lectura desde
+// SPRINT-4A-T08. El reparto vigente es la propina diaria por trabajador
+// (/propinas); aquí solo se consultan los repartos guardados y se descargan
+// las constancias de los pagados.
 export const POOL_STATUS = {
-  DRAFT: 'Borrador',
-  CONFIRMED: 'Confirmado',
-  PAID: 'Enterado',
+  DRAFT: 'Borrador sin efecto',
+  CONFIRMED: 'Confirmado sin pago',
+  PAID: 'Pagado',
 } as const;
 export type PoolStatus = keyof typeof POOL_STATUS;
-export type PoolAction = 'observations' | 'confirm' | 'pay';
-// SPRINT-4R-T06: todo cálculo nuevo es equitativo; las horas solo existen en
-// los repartos proporcionales históricos.
+// Explicación de cada estado para quien revisa el histórico.
+export const POOL_STATUS_NOTE: Record<PoolStatus, string> = {
+  DRAFT:
+    'Nunca se confirmó ni se pagó: no tiene efecto. Las propinas de esos días se consultan y pagan en Propinas.',
+  CONFIRMED:
+    'Se confirmó, pero no se registró su pago por período. Las propinas diarias de esos días se pagan en Propinas.',
+  PAID: 'Se pagó por período y cada trabajador tiene su constancia.',
+};
+export const POOL_STATUS_TONE: Record<PoolStatus, StatusTone> = {
+  DRAFT: 'neutral',
+  CONFIRMED: 'info',
+  PAID: 'ok',
+};
+// Las horas solo existen en los repartos proporcionales anteriores a
+// SPRINT-4R-T04.
 export type PoolRule = 'PROPORTIONAL_TO_HOURS' | 'EQUAL_SHARES';
-export interface PoolPeriod {
-  storeId: string;
-  periodStart: string;
-  periodEnd: string;
-}
 export interface PoolPerson {
   id: string;
   name: string;
@@ -108,63 +120,6 @@ export function poolRuleLabel(rule: PoolRule): string {
   return rule === 'EQUAL_SHARES'
     ? 'Reparto equitativo diario entre participantes'
     : 'Proporcional a las horas trabajadas';
-}
-// Cifras de la conciliación visible del reparto (SPRINT-4R-T06).
-export function poolReconciliation(
-  pool: Pick<TipPool, 'lines' | 'sources' | 'dailySources' | 'totalAmount'>,
-): {
-  beneficiaries: number;
-  individualTotal: number;
-  sourcesTotal: number;
-  linesDifference: number;
-  sourcesDifference: number;
-} {
-  const individualTotal = pool.lines.reduce((a, l) => a + l.amount, 0);
-  const sourcesTotal =
-    pool.sources.reduce((a, s) => a + s.amount, 0) +
-    pool.dailySources.reduce((a, s) => a + s.amount, 0);
-  return {
-    beneficiaries: pool.lines.length,
-    individualTotal,
-    sourcesTotal,
-    linesDifference: pool.totalAmount - individualTotal,
-    sourcesDifference: pool.totalAmount - sourcesTotal,
-  };
-}
-// Operaciones corregidas después del cálculo (SPRINT-4R-T06): amount quedó
-// congelado al calcular y tarjeta + efectivo son los valores actuales. Un
-// borrador así se muestra para recalcularlo; no es una respuesta inválida.
-export function poolStaleSources(
-  pool: Pick<TipPool, 'dailySources'>,
-): { businessDate: string; calculatedAmount: number; currentAmount: number }[] {
-  return pool.dailySources.flatMap((s) => {
-    const currentAmount = s.cardTipAmount + s.cashTipAmount;
-    return currentAmount === s.amount
-      ? []
-      : [
-          {
-            businessDate: s.businessDate,
-            calculatedAmount: s.amount,
-            currentAmount,
-          },
-        ];
-  });
-}
-export function parsePeriod(v: unknown): PoolPeriod | null {
-  if (
-    !isRecord(v) ||
-    Object.keys(v).length !== 3 ||
-    !isUuid(v.storeId) ||
-    !isTipDate(v.periodStart) ||
-    !isTipDate(v.periodEnd) ||
-    v.periodEnd < v.periodStart
-  )
-    return null;
-  return {
-    storeId: v.storeId,
-    periodStart: v.periodStart,
-    periodEnd: v.periodEnd,
-  };
 }
 export function parsePool(v: unknown): TipPool | null {
   if (
@@ -392,84 +347,43 @@ export function parseReceipts(
     ? result
     : null;
 }
-export function parsePoolAction(
-  v: unknown,
-  action: PoolAction,
-): Record<string, string | number> | null {
-  if (
-    !isRecord(v) ||
-    !Number.isSafeInteger(v.expectedVersion) ||
-    Number(v.expectedVersion) < 1
-  )
-    return null;
-  const allowed =
-    action === 'observations'
-      ? ['expectedVersion', 'notes']
-      : action === 'pay'
-        ? ['expectedVersion', 'paymentDate']
-        : ['expectedVersion'];
-  if (Object.keys(v).some((k) => !allowed.includes(k))) return null;
-  const result: Record<string, string | number> = {
-    expectedVersion: Number(v.expectedVersion),
-  };
-  if (action === 'observations') {
-    if (
-      typeof v.notes !== 'string' ||
-      !v.notes.trim() ||
-      v.notes.trim().length > 255
-    )
-      return null;
-    result.notes = v.notes.trim();
-  }
-  if (action === 'pay' && v.paymentDate !== undefined) {
-    if (!isTipDate(v.paymentDate)) return null;
-    result.paymentDate = v.paymentDate;
-  }
-  return result;
-}
-export const POOL_ISSUES: Record<string, string> = {
-  AGREEMENT_MISSING: 'No hay un pacto vigente para el período.',
-  AGREEMENT_CHANGES_IN_PERIOD:
-    'El pacto cambia durante el período. Divide la consulta.',
-  AGREEMENT_RULE_UNSUPPORTED: 'La regla del pacto no admite este cálculo.',
-  TIP_ENTRIES_MISSING: 'No hay propinas registradas para el período.',
-  TIP_ENTRY_ALREADY_USED: 'Hay propinas incluidas en otro reparto.',
-  WORK_HOURS_MISSING: 'Faltan horas de los trabajadores.',
-  WORK_HOURS_PERIOD_MISMATCH: 'Las horas no corresponden al período.',
-  WORK_HOURS_TOTAL_ZERO: 'Las horas totales deben ser mayores que cero.',
-  WORKER_NOT_IN_STORE: 'Un trabajador no pertenece al local.',
-  DAILY_OPERATIONS_MISSING: 'No hay operaciones diarias para el período.',
-  DAILY_OPERATION_ALREADY_USED:
-    'Hay operaciones diarias incluidas en otro reparto.',
-  DAILY_PARTICIPANTS_MISSING:
-    'Hay operaciones diarias con propinas y sin participantes.',
-};
 export function poolError(status: number): string {
   return (
     (
       {
-        400: 'Revisa el local, las fechas y los campos ingresados.',
+        400: 'La dirección del reparto o de la constancia no es válida.',
         401: 'Tu sesión venció. Inicia sesión nuevamente.',
-        403: 'Tu cuenta no tiene permiso para realizar esta acción.',
-        404: 'No se encontró el reparto solicitado.',
-        409: 'El reparto cambió desde que lo revisaste. Actualiza el reparto antes de continuar.',
-        422: 'No se puede calcular con los datos disponibles. Revisa las operaciones diarias del período y sus participantes.',
+        403: 'Tu cuenta no tiene permiso para consultar los repartos anteriores.',
+        404: 'No se encontró el reparto o la constancia solicitada.',
+        409: 'El reparto no se pagó por período, así que no tiene constancias.',
         429: 'Hay demasiadas solicitudes. Espera un momento y vuelve a intentar.',
       } as Record<number, string>
     )[status] ??
-    'No se pudo completar la operación. Conservamos tus campos; vuelve a intentar.'
+    'No se pudieron cargar los repartos anteriores. Intenta nuevamente en unos momentos.'
   );
 }
 
-export function parsePoolForPeriod(
-  value: unknown,
-  period: PoolPeriod,
-): TipPool | null {
-  const pool = parsePool(value);
-  return pool &&
-    pool.store.id === period.storeId &&
-    pool.periodStart === period.periodStart &&
-    pool.periodEnd === period.periodEnd
-    ? pool
-    : null;
+// Lista del histórico: todas las fotos deben ser válidas.
+export function parsePools(v: unknown): TipPool[] | null {
+  if (!Array.isArray(v)) return null;
+  const pools = v.map(parsePool);
+  return pools.every((pool): pool is TipPool => pool !== null) ? pools : null;
+}
+
+// Los borradores sin efecto se separan para no confundirlos con repartos
+// que se confirmaron o pagaron; el orden del backend se conserva.
+export function groupPoolHistory(pools: readonly TipPool[]): {
+  closed: TipPool[];
+  drafts: TipPool[];
+} {
+  return {
+    closed: pools.filter((pool) => pool.status !== 'DRAFT'),
+    drafts: pools.filter((pool) => pool.status === 'DRAFT'),
+  };
+}
+
+// Descarga de la constancia por el BFF autenticado (el token no sale del
+// servidor).
+export function poolReceiptHref(poolId: string, userId: string): string {
+  return `/api/tip-pools/${poolId}/receipts/${userId}/download`;
 }

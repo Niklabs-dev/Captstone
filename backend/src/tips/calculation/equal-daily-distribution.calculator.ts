@@ -3,9 +3,10 @@
 // que el redondeo no dependa del punto flotante.
 //
 // Regla: el fondo de cada día (propina de tarjeta + efectivo de la operación
-// diaria) se divide UNA sola vez entre los participantes de ese día, y cada
-// trabajador recibe la suma de sus asignaciones diarias del período. Nunca se
-// divide el total del período entre la unión de trabajadores.
+// diaria) se divide UNA sola vez entre los participantes de ese día. Desde
+// SPRINT-4A-T03 la usa el reparto automático de la operación diaria
+// (daily_tip_allocations); el reparto por período que acumulaba estas
+// asignaciones se retiró en SPRINT-4A-T08.
 //
 // Residuo CLP: cada participante recibe floor(fondo / n) y los r = fondo mod n
 // pesos sobrantes se entregan de a $1. Los participantes se ordenan por ID
@@ -31,26 +32,9 @@ export interface EqualDailyShareAllocation {
   amount: number;
 }
 
-export interface EqualDailyShareDayResult {
-  operationId: string;
-  businessDate: string;
-  fundAmount: number;
-  // Una asignación por participante, ordenadas por userId.
-  allocations: EqualDailyShareAllocation[];
-}
-
-export interface EqualDailyDistributionResult {
-  days: EqualDailyShareDayResult[];
-  // Suma por trabajador de sus asignaciones diarias, ordenadas por userId.
-  // Solo aparecen los trabajadores que participaron de algún día.
-  lines: EqualDailyShareAllocation[];
-  totalAmount: number;
-}
-
 export type EqualDistributionErrorCode =
   | 'INVALID_FUND'
   | 'INVALID_DATE'
-  | 'DUPLICATED_OPERATION'
   | 'DUPLICATED_PARTICIPANT'
   | 'NO_PARTICIPANTS';
 
@@ -139,52 +123,4 @@ export function splitDailyFund(
       amount: Number(base + (turn < residual ? 1n : 0n)),
     };
   });
-}
-
-// Calcula el reparto equitativo del período: asignación diaria de cada
-// operación y acumulado por trabajador. Las líneas siempre suman el total.
-export function calculateEqualDailyDistribution(
-  days: readonly EqualDailyShareDay[],
-): EqualDailyDistributionResult {
-  const seen = new Set<string>();
-  const results: EqualDailyShareDayResult[] = [];
-  const totals = new Map<string, bigint>();
-  let total = 0n;
-  for (const day of days) {
-    if (seen.has(day.operationId)) {
-      throw new EqualDistributionError(
-        'DUPLICATED_OPERATION',
-        `Operación diaria repetida en el reparto: ${day.operationId}`,
-      );
-    }
-    seen.add(day.operationId);
-    const allocations = splitDailyFund(day);
-    for (const allocation of allocations) {
-      totals.set(
-        allocation.userId,
-        (totals.get(allocation.userId) ?? 0n) + BigInt(allocation.amount),
-      );
-    }
-    total += BigInt(day.fundAmount);
-    results.push({
-      operationId: day.operationId,
-      businessDate: day.businessDate,
-      fundAmount: day.fundAmount,
-      allocations,
-    });
-  }
-
-  const lines = [...totals.entries()]
-    .sort(([a], [b]) => compareIds(a, b))
-    .map(([userId, amount]) => ({ userId, amount: Number(amount) }));
-  const totalAmount = Number(total);
-
-  // Invariante de conciliación: si falla es un error de programación.
-  const linesTotal = lines.reduce((sum, line) => sum + line.amount, 0);
-  if (linesTotal !== totalAmount) {
-    throw new Error(
-      `El reparto no concilia: líneas ${linesTotal} ≠ fondo ${totalAmount}`,
-    );
-  }
-  return { days: results, lines, totalAmount };
 }

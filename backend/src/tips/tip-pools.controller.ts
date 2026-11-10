@@ -1,9 +1,8 @@
 import {
-  Body,
   Controller,
   Get,
+  GoneException,
   Header,
-  HttpCode,
   Param,
   ParseUUIDPipe,
   Post,
@@ -15,15 +14,15 @@ import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
-  ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiGoneResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
-  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { AUDIT_ACTION } from '../audit/constants/audit-actions.constants.js';
@@ -32,30 +31,45 @@ import { setAuditContext } from '../audit/utils/audit-context.util.js';
 import { ROLE } from '../auth/constants/roles.constants.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
-import { StoreScoped } from '../auth/decorators/store-scoped.decorator.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import { contentDisposition } from '../documents/utils/download-name.util.js';
+import { ListTipPoolsQueryDto } from './dto/list-tip-pools-query.dto.js';
 import {
-  CalculateTipPoolDto,
-  PreviewTipPoolDto,
-} from './dto/preview-tip-pool.dto.js';
-import {
-  ConfirmTipPoolDto,
-  ObserveTipPoolDto,
-  PayTipPoolDto,
-} from './dto/tip-pool-action.dto.js';
-import {
-  TipPoolConflictDto,
   TipPoolReceiptResponseDto,
   TipPoolResponseDto,
-  TipPoolValidationErrorDto,
+  TipPoolRetiredActionDto,
 } from './dto/tip-pool-response.dto.js';
 import { TipPoolsService } from './tip-pools.service.js';
-import type {
-  TipPoolReceiptResponse,
-  TipPoolResponse,
+import {
+  TIP_POOL_RETIRED_MESSAGE,
+  type TipPoolReceiptResponse,
+  type TipPoolResponse,
 } from './types/tip-pools.types.js';
 
+const POOL_ID_PARAM = {
+  name: 'id',
+  description: 'ID del reparto (se ignora: la acción ya no existe).',
+  example: 'a9000000-0000-4000-8000-000000000009',
+} as const;
+
+const RETIRED_RESPONSE = {
+  description:
+    'Acción retirada en SPRINT-4A-T08: no crea ni cambia repartos y responde siempre 410, con cualquier rol y cuerpo.',
+  type: TipPoolRetiredActionDto,
+} as const;
+
+// Las acciones retiradas responden 410 sin leer el cuerpo ni tocar la base.
+function retiredAction(): never {
+  throw new GoneException(TIP_POOL_RETIRED_MESSAGE);
+}
+
+// Repartos de propinas por período (SPRINT-3-T12 y T13), histórico de solo
+// lectura desde SPRINT-4A-T08: el reparto se genera al guardar la operación
+// diaria y se paga por lote (POST /daily-tips/payment-batches). Contador y
+// administrador consultan los repartos guardados y descargan las constancias
+// de los pagados; el cálculo, la observación, la confirmación y el pago
+// responden 410 para que nadie pague por aquí propinas que el flujo diario
+// también pagaría.
 @ApiTags('tip-pools')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
@@ -63,106 +77,48 @@ import type {
 export class TipPoolsController {
   constructor(private readonly tipPoolsService: TipPoolsService) {}
 
-  // SUPERVISOR solo lee los repartos de su local (SPRINT-4R-T06): el servicio
-  // aplica canAccessStore y las acciones siguen siendo del contador.
   @Get()
-  @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR, ROLE.SUPERVISOR)
+  @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR)
   @ApiOperation({
-    summary: 'Consulta un reparto por local y período, sin recalcular',
+    summary: 'Lista los repartos históricos por período, sin recalcular',
+    description:
+      'Solo lectura. Sin filtros devuelve todos los repartos guardados, del período más reciente al más antiguo (DRAFT: borrador sin efecto; CONFIRMED: confirmado sin pago registrado; PAID: pagado con constancias). storeId acota a un local y periodStart con periodEnd buscan el período exacto.',
   })
   @ApiOkResponse({
-    description: 'Reparto existente o lista vacía.',
+    description: 'Repartos encontrados o lista vacía.',
     type: TipPoolResponseDto,
     isArray: true,
   })
-  @ApiBadRequestResponse({ description: 'Local o período inválidos.' })
-  @ApiForbiddenResponse({
+  @ApiBadRequestResponse({
     description:
-      'Solo contador, administrador y el supervisor del local consultado.',
+      'Local inválido, fecha inválida, solo una de las dos fechas o período invertido.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Solo el contador y el administrador consultan repartos.',
   })
   list(
-    @Query() query: PreviewTipPoolDto,
+    @Query() query: ListTipPoolsQueryDto,
     @CurrentUser() user: AuthUser,
   ): Promise<TipPoolResponse[]> {
-    return this.tipPoolsService.findPeriod(query, user);
+    return this.tipPoolsService.findAll(query, user);
   }
 
   @Post('preview')
-  @Roles(ROLE.CONTADOR)
-  @StoreScoped({ source: 'body' })
-  @Audited({
-    // El primer cálculo del período y los siguientes se distinguen en la
-    // auditoría; el controller marca el recálculo con setAuditContext.
-    action: (info) =>
-      info.context?.detail?.recalculated === true
-        ? AUDIT_ACTION.TIP_POOL_RECALCULATED
-        : AUDIT_ACTION.TIP_POOL_CALCULATED,
-    entityType: 'tip_pools',
-    entityIdFrom: 'response.id',
-    detailFromResponse: {
-      storeId: 'store.id',
-      periodStart: 'periodStart',
-      periodEnd: 'periodEnd',
-      rule: 'rule',
-      totalAmount: 'totalAmount',
-    },
-  })
   @ApiOperation({
-    summary:
-      'Calcula y guarda la vista previa (DRAFT) del reparto equitativo de propinas',
+    summary: 'Retirado: calculaba el borrador del reparto por período',
     description:
-      'Regla equitativa (SPRINT-4R-T04): para cada operación diaria del período se suman la propina de tarjeta y la de efectivo, y ese fondo se divide una sola vez en partes iguales entre los participantes de ese día; cada trabajador recibe la suma de sus asignaciones diarias (no se divide el total del período entre la unión de trabajadores). Residuo CLP: los pesos sobrantes de cada día van de a $1 a los participantes ordenados por ID, comenzando en la posición (días desde 1970-01-01) mod n, así el peso extra rota día a día; las líneas siempre suman el fondo exacto (ej. $10.000 entre 3 → $3.334, $3.333 y $3.333). Un no seleccionado no recibe línea y no se usan horas. Si ya existe un borrador del mismo local y período, lo reemplaza conservando su ID y subiendo su versión; con expectedVersion el recálculo exige que la versión revisada siga vigente.',
+      'Desde SPRINT-4A-T08 el reparto se genera automáticamente al guardar la operación diaria (daily_tip_allocations); este endpoint ya no crea ni recalcula repartos.',
+    deprecated: true,
   })
-  @ApiCreatedResponse({
-    description: 'Primer cálculo del período: borrador creado.',
-    type: TipPoolResponseDto,
-  })
-  @ApiOkResponse({
-    description: 'Recálculo: el borrador existente se reemplazó.',
-    type: TipPoolResponseDto,
-  })
-  @ApiBadRequestResponse({
-    description:
-      'Datos inválidos (UUID, fechas o período invertido) o local inactivo.',
-  })
-  @ApiForbiddenResponse({
-    description: 'Solo el contador puede generar o recalcular repartos.',
-  })
-  @ApiNotFoundResponse({ description: 'Local no encontrado.' })
-  @ApiConflictResponse({
-    description:
-      'El reparto del período ya está confirmado o pagado, expectedVersion no coincide con el borrador (cuerpo con currentStatus y currentVersion), o hubo un cálculo simultáneo.',
-    type: TipPoolConflictDto,
-  })
-  @ApiUnprocessableEntityResponse({
-    description:
-      'No hay operaciones diarias en el período, alguna ya forma parte de otro reparto o un día con propinas no tiene participantes; se informan todas las causas y no se guarda nada.',
-    type: TipPoolValidationErrorDto,
-  })
-  async preview(
-    @Body() dto: CalculateTipPoolDto,
-    @CurrentUser() currentUser: AuthUser,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<TipPoolResponse> {
-    const result = await this.tipPoolsService.preview(dto, currentUser);
-    res.status(result.created ? 201 : 200);
-    setAuditContext(res, {
-      storeId: result.pool.store.id,
-      detail: {
-        recalculated: !result.created,
-        workers: result.pool.lines.length,
-        sources: result.pool.dailySources.length,
-        // El recálculo limpia la observación: el registro guarda qué atendió.
-        ...(result.created ? {} : { previousNotes: result.previousNotes }),
-      },
-    });
-    return result.pool;
+  @ApiGoneResponse(RETIRED_RESPONSE)
+  preview(): never {
+    return retiredAction();
   }
 
   @Get(':id')
-  @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR, ROLE.SUPERVISOR)
+  @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR)
   @ApiOperation({
-    summary: 'Obtiene la foto guardada de un reparto sin recalcularlo',
+    summary: 'Obtiene la foto guardada de un reparto histórico',
   })
   @ApiOkResponse({
     description: 'Reparto con el pacto, las líneas y las fuentes guardadas.',
@@ -170,7 +126,7 @@ export class TipPoolsController {
   })
   @ApiBadRequestResponse({ description: 'El ID no es un UUID válido.' })
   @ApiForbiddenResponse({
-    description: 'El rol no permite consultar repartos.',
+    description: 'Solo el contador y el administrador consultan repartos.',
   })
   @ApiNotFoundResponse({
     description: 'Reparto no encontrado o sin acceso a su local.',
@@ -182,160 +138,50 @@ export class TipPoolsController {
     return this.tipPoolsService.findOne(id, currentUser);
   }
 
-  // Acciones del contador sobre el reparto (SPRINT-3-T13). Todas bloquean el
-  // reparto, comparan expectedVersion y responden el reparto actualizado.
-
   @Post(':id/observations')
-  @HttpCode(200)
-  @Roles(ROLE.CONTADOR)
-  @Audited({
-    action: AUDIT_ACTION.TIP_POOL_OBSERVED,
-    entityType: 'tip_pools',
-    entityIdFrom: 'response.id',
-    detailFromResponse: { version: 'version' },
-  })
   @ApiOperation({
-    summary:
-      'Registra una observación del contador sobre un reparto en borrador',
+    summary: 'Retirado: registraba una observación sobre un borrador',
     description:
-      'Reemplaza las observaciones vigentes y sube la versión; el reparto sigue en DRAFT. Al recalcular (POST /tip-pools/preview) las observaciones se limpian y quedan en la auditoría.',
+      'Desde SPRINT-4A-T08 los borradores son históricos sin efecto y no admiten observaciones.',
+    deprecated: true,
   })
-  @ApiOkResponse({
-    description: 'Reparto con la observación registrada.',
-    type: TipPoolResponseDto,
-  })
-  @ApiBadRequestResponse({
-    description:
-      'ID no UUID, expectedVersion faltante o no entero, o notes vacío o de más de 255 caracteres.',
-  })
-  @ApiForbiddenResponse({
-    description: 'Solo el contador puede observar un reparto.',
-  })
-  @ApiNotFoundResponse({
-    description: 'Reparto no encontrado o sin acceso a su local.',
-  })
-  @ApiConflictResponse({
-    description:
-      'El reparto no está en DRAFT o cambió desde que se revisó (expectedVersion desactualizado).',
-    type: TipPoolConflictDto,
-  })
-  async observe(
-    @Param('id', new ParseUUIDPipe()) id: string,
-    @Body() dto: ObserveTipPoolDto,
-    @CurrentUser() currentUser: AuthUser,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<TipPoolResponse> {
-    const pool = await this.tipPoolsService.observe(id, dto, currentUser);
-    // El texto completo (máx. 255 caracteres): el recálculo lo borra del
-    // reparto y audit_logs es inmutable, así que aquí queda protegido.
-    setAuditContext(res, {
-      storeId: pool.store.id,
-      detail: { notes: dto.notes, notesLength: dto.notes.length },
-    });
-    return pool;
+  @ApiParam(POOL_ID_PARAM)
+  @ApiGoneResponse(RETIRED_RESPONSE)
+  observe(): never {
+    return retiredAction();
   }
 
   @Post(':id/confirm')
-  @HttpCode(200)
-  @Roles(ROLE.CONTADOR)
-  @Audited({
-    action: AUDIT_ACTION.TIP_POOL_CONFIRMED,
-    entityType: 'tip_pools',
-    entityIdFrom: 'response.id',
-    detailFromResponse: { totalAmount: 'totalAmount', version: 'version' },
-  })
   @ApiOperation({
-    summary: 'Valida el cálculo del reparto y lo confirma (DRAFT → CONFIRMED)',
+    summary: 'Retirado: confirmaba un borrador (DRAFT → CONFIRMED)',
     description:
-      'Revalida que el reparto esté conciliado (Σ líneas = total y Σ fuentes = total). En el reparto equitativo además recalcula con las operaciones diarias vigentes del período y exige que fuentes y líneas coincidan con la foto: si una operación se corrigió, agregó o cambió su selección, responde 422 y hay que recalcular. Desde la confirmación los montos, las operaciones fuente y su selección no se pueden modificar.',
+      'Desde SPRINT-4A-T08 los repartos no se confirman: las propinas de cada día quedan registradas al guardar la operación diaria.',
+    deprecated: true,
   })
-  @ApiOkResponse({
-    description: 'Reparto confirmado.',
-    type: TipPoolResponseDto,
-  })
-  @ApiBadRequestResponse({
-    description: 'ID no UUID o expectedVersion faltante o no entero.',
-  })
-  @ApiForbiddenResponse({
-    description: 'Solo el contador puede confirmar un reparto.',
-  })
-  @ApiNotFoundResponse({
-    description: 'Reparto no encontrado o sin acceso a su local.',
-  })
-  @ApiConflictResponse({
-    description:
-      'El reparto ya está confirmado o pagado, o cambió desde que se revisó.',
-    type: TipPoolConflictDto,
-  })
-  @ApiUnprocessableEntityResponse({
-    description:
-      'El reparto no está conciliado o su foto equitativa quedó desactualizada; no se confirma y hay que recalcularlo.',
-  })
-  async confirm(
-    @Param('id', new ParseUUIDPipe()) id: string,
-    @Body() dto: ConfirmTipPoolDto,
-    @CurrentUser() currentUser: AuthUser,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<TipPoolResponse> {
-    const pool = await this.tipPoolsService.confirm(id, dto, currentUser);
-    setAuditContext(res, { storeId: pool.store.id });
-    return pool;
+  @ApiParam(POOL_ID_PARAM)
+  @ApiGoneResponse(RETIRED_RESPONSE)
+  confirm(): never {
+    return retiredAction();
   }
 
   @Post(':id/pay')
-  @HttpCode(200)
-  @Roles(ROLE.CONTADOR)
-  @Audited({
-    action: AUDIT_ACTION.TIP_POOL_PAID,
-    entityType: 'tip_pools',
-    entityIdFrom: 'response.id',
-    detailFromResponse: {
-      paymentDate: 'paymentDate',
-      receiptsCount: 'receiptsCount',
-      totalAmount: 'totalAmount',
-    },
-  })
   @ApiOperation({
-    summary:
-      'Marca como pagado (enterado) un reparto confirmado y emite las constancias',
+    summary: 'Retirado: marcaba un reparto como pagado y emitía constancias',
     description:
-      'CONFIRMED → PAID. En la misma transacción genera una constancia por trabajador (también con monto 0) con fecha, monto, local, período, responsable y la foto del reparto. Sin paymentDate se usa el día de hoy en hora de Chile.',
+      'Desde SPRINT-4A-T08 el pago se registra por período en POST /daily-tips/payment-batches, que marca como pagadas las propinas diarias. Pagar aquí dejaba esas propinas sin pagar y permitía pagarlas dos veces.',
+    deprecated: true,
   })
-  @ApiOkResponse({
-    description: 'Reparto pagado, con receiptsCount constancias emitidas.',
-    type: TipPoolResponseDto,
-  })
-  @ApiBadRequestResponse({
-    description:
-      'ID no UUID, expectedVersion inválido o paymentDate inválida, futura o anterior al término del período.',
-  })
-  @ApiForbiddenResponse({
-    description: 'Solo el contador puede marcar un reparto como pagado.',
-  })
-  @ApiNotFoundResponse({
-    description: 'Reparto no encontrado o sin acceso a su local.',
-  })
-  @ApiConflictResponse({
-    description:
-      'El reparto no está confirmado (en borrador o ya pagado) o cambió desde que se revisó.',
-    type: TipPoolConflictDto,
-  })
-  async pay(
-    @Param('id', new ParseUUIDPipe()) id: string,
-    @Body() dto: PayTipPoolDto,
-    @CurrentUser() currentUser: AuthUser,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<TipPoolResponse> {
-    const pool = await this.tipPoolsService.pay(id, dto, currentUser);
-    setAuditContext(res, { storeId: pool.store.id });
-    return pool;
+  @ApiParam(POOL_ID_PARAM)
+  @ApiGoneResponse(RETIRED_RESPONSE)
+  pay(): never {
+    return retiredAction();
   }
 
   @Get(':id/receipts')
   @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR)
   @Header('Cache-Control', 'private, no-store')
   @ApiOperation({
-    summary: 'Lista las constancias de pago de un reparto pagado',
+    summary: 'Lista las constancias de pago de un reparto histórico pagado',
   })
   @ApiOkResponse({
     description: 'Una constancia por trabajador, ordenadas por userId.',
@@ -350,7 +196,8 @@ export class TipPoolsController {
     description: 'Reparto no encontrado o sin acceso a su local.',
   })
   @ApiConflictResponse({
-    description: 'El reparto todavía no está pagado.',
+    description:
+      'El reparto no está pagado (DRAFT o CONFIRMED) y no tiene constancias.',
   })
   listReceipts(
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -403,7 +250,8 @@ export class TipPoolsController {
       'Reparto no encontrado, sin acceso a su local, o el trabajador no tiene constancia en el reparto.',
   })
   @ApiConflictResponse({
-    description: 'El reparto todavía no está pagado.',
+    description:
+      'El reparto no está pagado (DRAFT o CONFIRMED) y no tiene constancias.',
   })
   async downloadReceipt(
     @Param('id', new ParseUUIDPipe()) id: string,

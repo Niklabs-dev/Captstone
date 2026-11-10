@@ -2,61 +2,16 @@ import {
   TIP_POOL_RULES,
   type TipAgreementSnapshot,
   type TipPoolLineResponse,
-  type TipPoolPersonResponse,
   type TipPoolReceiptDetail,
-  type TipPoolResponse,
   type TipPoolRule,
 } from '../types/tip-pools.types.js';
 
-// Armado y lectura de la foto que guarda cada constancia de pago
-// (SPRINT-3-T13). Funciones puras, sin NestJS ni base de datos. Desde
+// Lectura de la foto que guarda cada constancia de pago (SPRINT-3-T13).
+// Función pura, sin NestJS ni base de datos. Las constancias se emitían al
+// pagar un reparto por período, acción retirada en SPRINT-4A-T08: las
+// existentes se conservan y se siguen leyendo y descargando. Desde
 // SPRINT-4R-T04 la foto incluye la regla aplicada y las horas son null en los
 // repartos equitativos.
-
-export interface TipPoolReceiptDraft {
-  userId: string;
-  workerName: string;
-  storeId: string;
-  storeName: string;
-  periodStart: string;
-  periodEnd: string;
-  hoursWorked: string | null;
-  amount: number;
-  paymentDate: string;
-  paidById: string;
-  paidByName: string;
-  detail: TipPoolReceiptDetail;
-}
-
-// Una constancia por línea del reparto, también las de monto 0. Todas llevan
-// el mismo detalle: el pacto, el total y todas las líneas al momento del pago.
-export function buildTipPoolReceipts(
-  pool: TipPoolResponse,
-  paymentDate: string,
-  paidBy: TipPoolPersonResponse,
-): TipPoolReceiptDraft[] {
-  const detail: TipPoolReceiptDetail = {
-    rule: pool.rule,
-    agreementSnapshot: pool.agreement,
-    totalAmount: pool.totalAmount,
-    totalHours: pool.totalHours,
-    lines: pool.lines.map((line) => ({ ...line })),
-  };
-  return pool.lines.map((line) => ({
-    userId: line.userId,
-    workerName: line.workerName,
-    storeId: pool.store.id,
-    storeName: pool.store.name,
-    periodStart: pool.periodStart,
-    periodEnd: pool.periodEnd,
-    hoursWorked: line.hoursWorked,
-    amount: line.amount,
-    paymentDate,
-    paidById: paidBy.id,
-    paidByName: paidBy.name,
-    detail,
-  }));
-}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -110,8 +65,8 @@ function isRule(value: unknown): value is TipPoolRule {
   return TIP_POOL_RULES.some((rule) => rule === value);
 }
 
-// Lee el detalle JSON guardado sin confiar en su forma. Lo escribe solo
-// buildTipPoolReceipts, así que una forma inválida es un dato corrupto. Las
+// Lee el detalle JSON guardado sin confiar en su forma. Lo escribía solo el
+// pago del reparto, así que una forma inválida es un dato corrupto. Las
 // constancias anteriores a SPRINT-4R-T04 no guardan la regla: todas son del
 // reparto proporcional histórico.
 export function parseReceiptDetail(value: unknown): TipPoolReceiptDetail {

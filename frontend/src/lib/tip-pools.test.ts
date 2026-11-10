@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  groupPoolHistory,
   parsePool,
-  parsePoolForPeriod,
-  parsePeriod,
-  parsePoolAction,
+  parsePools,
   parseAlerts,
   parseReceipts,
   poolError,
-  poolReconciliation,
+  poolReceiptHref,
   poolRuleLabel,
-  poolStaleSources,
+  POOL_STATUS,
+  POOL_STATUS_NOTE,
 } from './tip-pools';
 const id = 'a9000000-0000-4000-8000-000000000001';
 const person = { id, name: 'Prueba', passwordHash: 'private' };
@@ -52,16 +52,6 @@ const pool = {
   paymentDate: null,
   receiptsCount: 0,
 };
-test('El período exige fechas reales, orden y únicamente los campos permitidos', () => {
-  assert.deepEqual(parsePeriod(period), period);
-  for (const bad of [
-    { ...period, periodEnd: '2026-02-30' },
-    { ...period, periodEnd: '2025-01-01' },
-    { ...period, storeId: 'otro' },
-    { ...period, role: 'ADMINISTRADOR' },
-  ])
-    assert.equal(parsePeriod(bad), null);
-});
 test('La foto del reparto verifica conciliación, unicidad, montos, estado y versión', () => {
   assert.ok(parsePool(pool));
   for (const bad of [
@@ -80,32 +70,6 @@ test('La proyección no expone datos adicionales de responsables ni local', () =
   assert.deepEqual(parsed.store, { id, name: 'Prueba' });
   assert.deepEqual(parsed.calculatedBy, { id, name: 'Prueba' });
   assert.ok(!JSON.stringify(parsed).includes('private'));
-});
-test('Las acciones solo aceptan versión válida y los campos propios', () => {
-  assert.deepEqual(
-    parsePoolAction({ expectedVersion: 1, notes: ' Hola ' }, 'observations'),
-    { expectedVersion: 1, notes: 'Hola' },
-  );
-  assert.equal(
-    parsePoolAction({ expectedVersion: 1, notes: ' ' }, 'observations'),
-    null,
-  );
-  assert.equal(
-    parsePoolAction(
-      { expectedVersion: 1, notes: 'x'.repeat(256) },
-      'observations',
-    ),
-    null,
-  );
-  assert.equal(
-    parsePoolAction({ expectedVersion: 1, status: 'PAID' }, 'confirm'),
-    null,
-  );
-  assert.equal(
-    parsePoolAction({ expectedVersion: 1, paymentDate: '2026-02-30' }, 'pay'),
-    null,
-  );
-  assert.equal(parsePoolAction({ expectedVersion: 0 }, 'confirm'), null);
 });
 test('Alertas conservan plazos del backend y proyectan datos conocidos', () => {
   const value = {
@@ -163,27 +127,53 @@ test('Los códigos de medios salen del catálogo y no de una lista fija (SPRINT-
   ])
     assert.equal(parsePool({ ...pool, sources: [bad] }), null);
 });
-test('Los conflictos indican recargar y los fallos no publican errores internos', () => {
-  assert.match(poolError(409), /Actualiza/);
-  assert.match(poolError(422), /operaciones diarias/);
-  assert.match(poolError(500), /Conservamos tus campos/);
+test('Los errores explican qué pasó sin publicar errores internos', () => {
+  assert.match(poolError(409), /no tiene constancias/);
+  assert.match(poolError(403), /permiso/);
+  assert.match(poolError(500), /Intenta nuevamente/);
 });
 
-test('El cálculo y la consulta rechazan respuestas de otro local o período', () => {
-  assert.ok(parsePoolForPeriod(pool, period));
-  assert.equal(
-    parsePoolForPeriod(
-      {
-        ...pool,
-        store: { ...person, id: 'a9000000-0000-4000-8000-000000000099' },
-      },
-      period,
-    ),
-    null,
+test('El histórico valida todas las fotos y separa los borradores sin efecto (SPRINT-4A-T08)', () => {
+  const draft = { ...pool, id: 'a9000000-0000-4000-8000-000000000011' };
+  const paid = {
+    ...pool,
+    id: 'a9000000-0000-4000-8000-000000000012',
+    status: 'PAID',
+    confirmedBy: person,
+    confirmedAt: '2026-01-03T13:00:00Z',
+    paidBy: person,
+    paidAt: '2026-01-03T14:00:00Z',
+    paymentDate: '2026-01-03',
+    receiptsCount: 1,
+  };
+  const confirmed = {
+    ...paid,
+    id: 'a9000000-0000-4000-8000-000000000013',
+    status: 'CONFIRMED',
+    paidBy: null,
+    paidAt: null,
+    paymentDate: null,
+    receiptsCount: 0,
+  };
+  const list = parsePools([draft, paid, confirmed]);
+  assert.ok(list);
+  const groups = groupPoolHistory(list);
+  assert.deepEqual(
+    groups.closed.map((item) => item.id),
+    [paid.id, confirmed.id],
   );
+  assert.deepEqual(
+    groups.drafts.map((item) => item.id),
+    [draft.id],
+  );
+  assert.equal(parsePools([paid, { ...draft, totalAmount: -1 }]), null);
+  assert.equal(parsePools({ items: [] }), null);
+  assert.deepEqual(parsePools([]), []);
+  assert.equal(POOL_STATUS.DRAFT, 'Borrador sin efecto');
+  assert.match(POOL_STATUS_NOTE.DRAFT, /no tiene efecto/);
   assert.equal(
-    parsePoolForPeriod({ ...pool, periodEnd: '2026-01-03' }, period),
-    null,
+    poolReceiptHref(paid.id, id),
+    `/api/tip-pools/${paid.id}/receipts/${id}/download`,
   );
 });
 
@@ -215,16 +205,9 @@ test('Acepta el reparto equitativo sin horas ni pacto y concilia sus operaciones
   assert.equal(parsed.rule, 'EQUAL_SHARES');
   assert.equal(parsed.totalHours, null);
   assert.equal(parsed.lines[0].hoursWorked, null);
-  assert.deepEqual(poolReconciliation(parsed), {
-    beneficiaries: 2,
-    individualTotal: 10_001,
-    sourcesTotal: 10_001,
-    linesDifference: 0,
-    sourcesDifference: 0,
-  });
   assert.match(poolRuleLabel(parsed.rule), /equitativo/);
 });
-test('No inventa horas ni mezcla reglas y expone la conciliación fallida', () => {
+test('No inventa horas ni mezcla reglas y conserva la conciliación fallida', () => {
   const lines = equalPool.lines;
   for (const bad of [
     { ...equalPool, totalHours: '0.00' },
@@ -246,30 +229,13 @@ test('No inventa horas ni mezcla reglas y expone la conciliación fallida', () =
   });
   assert.ok(failed);
   assert.equal(failed.reconciled, false);
-  assert.equal(poolReconciliation(failed).linesDifference, 1);
-  const excess = parsePool({
-    ...equalPool,
-    lines: [lines[0], { ...lines[1], amount: 5_001 }],
-    reconciled: false,
-  });
-  assert.ok(excess);
-  assert.equal(poolReconciliation(excess).linesDifference, -1);
-});
-test('Una operación corregida deja el borrador visible y desactualizado', () => {
-  const parsed = parsePool({
-    ...equalPool,
-    dailySources: [{ ...equalPool.dailySources[0], cashTipAmount: 10_200 }],
-  });
-  assert.ok(parsed);
-  assert.equal(parsed.reconciled, true);
-  assert.deepEqual(poolStaleSources(parsed), [
-    {
-      businessDate: '2026-01-01',
-      calculatedAmount: 10_001,
-      currentAmount: 10_201,
-    },
-  ]);
-  const current = parsePool(equalPool);
-  assert.ok(current);
-  assert.deepEqual(poolStaleSources(current), []);
+  // El flag del backend debe coincidir con la suma real.
+  assert.equal(
+    parsePool({
+      ...equalPool,
+      lines: [lines[0], { ...lines[1], amount: 4_999 }],
+      reconciled: true,
+    }),
+    null,
+  );
 });

@@ -1,21 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  TIP_POOL_ISSUE_CODE,
+  TIP_POOL_RETIRED_MESSAGE,
   TIP_POOL_RULES,
   TIP_POOL_STATUSES,
   type TipAgreementSnapshot,
   type TipPoolDailySourceResponse,
-  type TipPoolIssue,
-  type TipPoolIssueCode,
-  type TipPoolConflictBody,
   type TipPoolLineResponse,
   type TipPoolReceiptDetail,
   type TipPoolReceiptResponse,
   type TipPoolResponse,
+  type TipPoolRetiredActionBody,
   type TipPoolRule,
   type TipPoolSourceResponse,
   type TipPoolStatusCode,
-  type TipPoolValidationErrorBody,
 } from '../types/tip-pools.types.js';
 
 class TipPoolStoreResponseDto {
@@ -181,21 +178,22 @@ class TipPoolSourceResponseDto implements TipPoolSourceResponse {
 
 export class TipPoolResponseDto implements TipPoolResponse {
   @ApiProperty({
-    description: 'ID del reparto; se conserva al recalcular un borrador.',
+    description: 'ID del reparto.',
     example: 'a9000000-0000-4000-8000-000000000009',
   })
   id: string;
 
   @ApiProperty({
-    description: 'Estado del reparto.',
+    description:
+      'Estado en que quedó el reparto: DRAFT (borrador sin efecto: nunca se confirmó ni pagó), CONFIRMED (confirmado sin pago registrado) o PAID (pagado, con constancias). Desde SPRINT-4A-T08 ninguna acción lo cambia.',
     enum: TIP_POOL_STATUSES,
-    example: 'DRAFT',
+    example: 'PAID',
   })
   status: TipPoolStatusCode;
 
   @ApiProperty({
     description:
-      'Versión del reparto (bloqueo optimista). Sube en cada recálculo, observación, confirmación y pago; las acciones la reciben como expectedVersion.',
+      'Versión que dejó el ciclo de vida del reparto (subía con cada recálculo, observación, confirmación y pago antes de SPRINT-4A-T08).',
     example: 1,
   })
   version: number;
@@ -220,7 +218,7 @@ export class TipPoolResponseDto implements TipPoolResponse {
 
   @ApiProperty({
     description:
-      'Regla aplicada. Todo cálculo nuevo es EQUAL_SHARES: el fondo de cada operación diaria (tarjeta + efectivo) se divide en partes iguales entre sus participantes y cada trabajador recibe la suma de sus asignaciones diarias. Los pesos sobrantes de cada día se entregan de a $1 a los participantes ordenados por ID, comenzando en la posición (días desde 1970-01-01) mod n, de modo que el peso extra rota día a día. PROPORTIONAL_TO_HOURS identifica los repartos históricos guardados.',
+      'Regla aplicada. EQUAL_SHARES: el fondo de cada operación diaria (tarjeta + efectivo) se dividió en partes iguales entre sus participantes y cada trabajador recibió la suma de sus asignaciones diarias. PROPORTIONAL_TO_HOURS: reparto anterior, proporcional a las horas según el pacto.',
     enum: TIP_POOL_RULES,
     example: 'EQUAL_SHARES',
   })
@@ -281,14 +279,14 @@ export class TipPoolResponseDto implements TipPoolResponse {
   reconciled: boolean;
 
   @ApiProperty({
-    description: 'Usuario que hizo el último cálculo.',
+    description: 'Usuario que hizo el último cálculo del borrador.',
     type: TipPoolUserResponseDto,
   })
   calculatedBy: TipPoolUserResponseDto;
 
   @ApiProperty({
     description:
-      'Instante del último cálculo; observar, confirmar y pagar no lo cambian.',
+      'Instante del último cálculo del borrador; la confirmación y el pago no lo cambiaron.',
     example: '2026-10-26T15:00:00.000Z',
   })
   calculatedAt: Date;
@@ -301,7 +299,7 @@ export class TipPoolResponseDto implements TipPoolResponse {
 
   @ApiProperty({
     description:
-      'Observación vigente del contador; null si no hay. El recálculo la limpia (queda en la auditoría).',
+      'Última observación del contador sobre el borrador; null si no hay.',
     example: null,
     nullable: true,
     type: String,
@@ -351,29 +349,6 @@ export class TipPoolResponseDto implements TipPoolResponse {
     example: 0,
   })
   receiptsCount: number;
-}
-
-export class TipPoolConflictDto implements TipPoolConflictBody {
-  @ApiProperty({ description: 'Código HTTP.', example: 409 })
-  statusCode: 409;
-
-  @ApiProperty({
-    description:
-      'Motivo: estado incorrecto para la acción o versión desactualizada.',
-    example:
-      'El reparto cambió desde que lo revisaste; recarga y vuelve a intentarlo',
-  })
-  message: string;
-
-  @ApiProperty({
-    description: 'Estado actual del reparto.',
-    enum: TIP_POOL_STATUSES,
-    example: 'DRAFT',
-  })
-  currentStatus: TipPoolStatusCode;
-
-  @ApiProperty({ description: 'Versión actual del reparto.', example: 3 })
-  currentVersion: number;
 }
 
 class TipPoolReceiptDetailDto implements TipPoolReceiptDetail {
@@ -493,50 +468,17 @@ export class TipPoolReceiptResponseDto implements TipPoolReceiptResponse {
   createdAt: Date;
 }
 
-class TipPoolIssueDto implements TipPoolIssue {
-  @ApiProperty({
-    description: 'Código estable de la causa.',
-    enum: Object.values(TIP_POOL_ISSUE_CODE),
-    example: TIP_POOL_ISSUE_CODE.DAILY_PARTICIPANTS_MISSING,
-  })
-  code: TipPoolIssueCode;
+// 410 de las acciones del reparto por período retiradas en SPRINT-4A-T08.
+export class TipPoolRetiredActionDto implements TipPoolRetiredActionBody {
+  @ApiProperty({ description: 'Código HTTP.', example: 410 })
+  statusCode: 410;
 
   @ApiProperty({
-    description: 'Explicación para el contador.',
-    example:
-      '1 día(s) del período tienen propinas por repartir y ningún trabajador participante; corrige la operación diaria antes de calcular.',
+    description: 'Motivo y dónde se hace ahora la operación.',
+    example: TIP_POOL_RETIRED_MESSAGE,
   })
   message: string;
 
-  @ApiPropertyOptional({
-    description: 'Datos que identifican las operaciones diarias involucradas.',
-    example: {
-      operations: [
-        {
-          operationId: 'c4a1b2d3-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
-          businessDate: '2026-10-02',
-          tipFundAmount: 36102,
-        },
-      ],
-    },
-  })
-  details?: Record<string, unknown>;
-}
-
-export class TipPoolValidationErrorDto implements TipPoolValidationErrorBody {
-  @ApiProperty({ description: 'Código HTTP.', example: 422 })
-  statusCode: 422;
-
-  @ApiProperty({
-    description: 'Resumen del error.',
-    example: 'No se puede calcular el reparto del período',
-  })
-  message: string;
-
-  @ApiProperty({
-    description: 'Todas las causas encontradas.',
-    type: TipPoolIssueDto,
-    isArray: true,
-  })
-  issues: TipPoolIssueDto[];
+  @ApiProperty({ description: 'Nombre del estado HTTP.', example: 'Gone' })
+  error: 'Gone';
 }
