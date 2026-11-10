@@ -2,13 +2,13 @@ import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { AUDIT_ACTION } from '../src/audit/constants/audit-actions.constants.js';
 import { ROLE, type RoleCode } from '../src/auth/constants/roles.constants.js';
 import type { JwtPayload } from '../src/auth/types/auth.types.js';
-import { PrismaClient } from '../src/generated/prisma/client.js';
+import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import type { StoreResponse } from '../src/stores/types/stores.types.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
 
@@ -23,6 +23,19 @@ const DOMAIN = '@stores-test.moi-food.cl';
 const STORE_PREFIX = 'Subway Stores Test';
 const DOCUMENT_PREFIX = 'Subway Stores Test Document';
 const MISSING_ID = '00000000-0000-4000-8000-000000000000';
+
+// ID Subway ficticio de 10 dígitos: no choca con los de los locales base
+// (74413, 72597, 69132) ni con los de otras corridas en paralelo.
+function fakeSubwayStoreId(): string {
+  return String(randomInt(1_000_000_000, 10_000_000_000));
+}
+
+class Rollback extends Error {
+  constructor() {
+    super('rollback de prueba');
+    this.name = 'Rollback';
+  }
+}
 
 function storePayload(suffix: string, extra: object = {}): object {
   return {
@@ -528,6 +541,213 @@ describe.skipIf(!databaseUrl)(
         await changeState(store.id, 'deactivate', token).expect(403);
         await changeState(store.id, 'reactivate', token).expect(403);
       }
+    });
+
+    // Transacción que siempre se revierte (patrón de
+    // test/database.integration.spec.ts): las pruebas directas sobre la base
+    // no dejan datos.
+    async function withinRollback(
+      fn: (tx: Prisma.TransactionClient) => Promise<void>,
+    ): Promise<void> {
+      try {
+        await prisma.$transaction(
+          async (tx) => {
+            await fn(tx);
+            throw new Rollback();
+          },
+          { maxWait: 30_000, timeout: 60_000 },
+        );
+      } catch (error) {
+        if (!(error instanceof Rollback)) throw error;
+      }
+    }
+
+    it('acepta, valida y devuelve el ID Subway en POST, PATCH y GET (SPRINT-4A-T15)', async () => {
+      const subwayStoreId = fakeSubwayStoreId();
+      const created = (
+        await createStore(
+          storePayload('Subway válido', {
+            subwayStoreId: ` ${subwayStoreId} `,
+          }),
+        ).expect(201)
+      ).body as StoreResponse;
+      expect(created.subwayStoreId).toBe(subwayStoreId);
+
+      const listed = (await listStores().expect(200)).body as StoreResponse[];
+      expect(listed.find((store) => store.id === created.id)).toMatchObject({
+        subwayStoreId,
+      });
+
+      const withoutId = (
+        await createStore(storePayload('Subway sin ID')).expect(201)
+      ).body as StoreResponse;
+      expect(withoutId.subwayStoreId).toBeNull();
+      const withNull = (
+        await createStore(
+          storePayload('Subway null', { subwayStoreId: null }),
+        ).expect(201)
+      ).body as StoreResponse;
+      expect(withNull.subwayStoreId).toBeNull();
+
+      const invalidValues: unknown[] = [
+        '',
+        '   ',
+        'abc',
+        '7259a',
+        '208 - 72597',
+        '72 597',
+        '72.597',
+        '-72597',
+        '12345678901',
+        72597,
+        true,
+        ['72597'],
+      ];
+      for (const [index, subwayStoreIdValue] of invalidValues.entries()) {
+        const rejected = await createStore(
+          storePayload(`Subway inválido ${index}`, {
+            subwayStoreId: subwayStoreIdValue,
+          }),
+        ).expect(400);
+        expect(JSON.stringify(rejected.body)).toContain('subwayStoreId');
+        await updateStore(withoutId.id, {
+          subwayStoreId: subwayStoreIdValue,
+        }).expect(400);
+      }
+      expect(
+        await prisma.store.count({
+          where: { name: { startsWith: `${STORE_PREFIX} Subway inválido` } },
+        }),
+      ).toBe(0);
+      expect(
+        (await prisma.store.findUniqueOrThrow({ where: { id: withoutId.id } }))
+          .subwayStoreId,
+      ).toBeNull();
+
+      const newId = fakeSubwayStoreId();
+      const updated = (
+        await updateStore(withoutId.id, { subwayStoreId: newId }).expect(200)
+      ).body as StoreResponse;
+      expect(updated.subwayStoreId).toBe(newId);
+      const cleared = (
+        await updateStore(withoutId.id, { subwayStoreId: null }).expect(200)
+      ).body as StoreResponse;
+      expect(cleared.subwayStoreId).toBeNull();
+    });
+
+    it('rechaza un ID Subway repetido con 409 y la base conserva la unicidad', async () => {
+      const subwayStoreId = fakeSubwayStoreId();
+      const first = (
+        await createStore(
+          storePayload('Subway único A', { subwayStoreId }),
+        ).expect(201)
+      ).body as StoreResponse;
+
+      const duplicate = await createStore(
+        storePayload('Subway único B', { subwayStoreId }),
+      ).expect(409);
+      expect((duplicate.body as ErrorResponse).message).toBe(
+        'Ya existe un local con ese ID Subway',
+      );
+
+      const second = (
+        await createStore(storePayload('Subway único C')).expect(201)
+      ).body as StoreResponse;
+      const patched = await updateStore(second.id, { subwayStoreId }).expect(
+        409,
+      );
+      expect((patched.body as ErrorResponse).message).toBe(
+        'Ya existe un local con ese ID Subway',
+      );
+      expect(
+        (await prisma.store.findUniqueOrThrow({ where: { id: second.id } }))
+          .subwayStoreId,
+      ).toBeNull();
+
+      // Reenviar el propio ID no es un conflicto.
+      await updateStore(first.id, { subwayStoreId }).expect(200);
+
+      // Al liberarlo, otro local lo puede tomar.
+      await updateStore(first.id, { subwayStoreId: null }).expect(200);
+      await updateStore(second.id, { subwayStoreId }).expect(200);
+
+      await withinRollback(async (tx) => {
+        await expect(
+          tx.store.create({
+            data: {
+              name: `${STORE_PREFIX} Subway directo`,
+              city: 'Melipilla',
+              address: 'Acceso directo a BD',
+              subwayStoreId,
+            },
+          }),
+        ).rejects.toMatchObject({ code: 'P2002' });
+      });
+    });
+
+    it('la base rechaza un ID Subway que no sea solo dígitos (CHECK)', async () => {
+      for (const value of ['', ' 1', '12a', '1-2', '１２３']) {
+        await withinRollback(async (tx) => {
+          await expect(
+            tx.$executeRaw`INSERT INTO stores (name, city, address, subway_store_id, updated_at)
+              VALUES (${`${STORE_PREFIX} Check ${randomUUID()}`}, 'Melipilla', 'Calle 1', ${value}, now())`,
+          ).rejects.toThrow(/stores_subway_store_id_digits/);
+        });
+      }
+      await withinRollback(async (tx) => {
+        const store = await tx.store.create({
+          data: {
+            name: `${STORE_PREFIX} Check válido`,
+            city: 'Melipilla',
+            address: 'Calle 1',
+            subwayStoreId: '0012345678',
+          },
+        });
+        expect(store.subwayStoreId).toBe('0012345678');
+      });
+    });
+
+    it('audita el cambio de ID Subway con el valor anterior y el nuevo', async () => {
+      const initialId = fakeSubwayStoreId();
+      const nextId = fakeSubwayStoreId();
+      const store = (
+        await createStore(
+          storePayload('Subway auditado', { subwayStoreId: initialId }),
+        ).expect(201)
+      ).body as StoreResponse;
+      await updateStore(store.id, { subwayStoreId: nextId }).expect(200);
+      await updateStore(store.id, { subwayStoreId: null }).expect(200);
+      await updateStore(store.id, { subwayStoreId: initialId }).expect(200);
+      await updateStore(store.id, { city: 'Quillota' }).expect(200);
+      // Un rechazo no deja auditoría de cambio.
+      await updateStore(store.id, { subwayStoreId: 'abc' }).expect(400);
+
+      const logs = await prisma.auditLog.findMany({
+        where: { entityType: 'stores', entityId: store.id },
+        orderBy: { id: 'asc' },
+      });
+      expect(logs.map((log) => log.action)).toEqual([
+        AUDIT_ACTION.STORE_CREATED,
+        AUDIT_ACTION.STORE_UPDATED,
+        AUDIT_ACTION.STORE_UPDATED,
+        AUDIT_ACTION.STORE_UPDATED,
+        AUDIT_ACTION.STORE_UPDATED,
+      ]);
+      expect(logs[0].detail).toMatchObject({ subwayStoreId: initialId });
+      expect(logs[1].detail).toEqual({
+        previousSubwayStoreId: initialId,
+        subwayStoreId: nextId,
+      });
+      expect(logs[2].detail).toEqual({
+        previousSubwayStoreId: nextId,
+        subwayStoreId: null,
+      });
+      expect(logs[3].detail).toEqual({
+        previousSubwayStoreId: null,
+        subwayStoreId: initialId,
+      });
+      expect(logs[4].detail).toEqual({ city: 'Quillota' });
+      for (const log of logs) expect(log.userId).toBe(adminId);
     });
   },
 );

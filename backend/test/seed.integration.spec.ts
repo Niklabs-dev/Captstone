@@ -6,6 +6,7 @@ import {
   BASE_PAYMENT_METHOD_ALIASES,
   BASE_PAYMENT_METHODS,
   BASE_ROLES,
+  BASE_STORE_SUBWAY_IDS,
   BASE_STORES,
   DOCUMENT_TYPES,
   seedDatabase,
@@ -219,6 +220,76 @@ describe.skipIf(!databaseUrl)(
           address: 'Dirección administrada',
           isActive: false,
         });
+      });
+    });
+
+    it('asigna el ID Subway de los locales base sin pisar valores configurados (SPRINT-4A-T15)', async () => {
+      const ids = BASE_STORES.map((s) => s.id);
+      const subwayIds = BASE_STORE_SUBWAY_IDS.map((s) => s.subwayStoreId);
+      async function subwayIdOf(
+        tx: Prisma.TransactionClient,
+        id: string,
+      ): Promise<string | null> {
+        return (await tx.store.findUniqueOrThrow({ where: { id } }))
+          .subwayStoreId;
+      }
+
+      await withinRollback(async (tx) => {
+        await seedDatabase(tx, opciones);
+        await tx.store.updateMany({
+          where: { subwayStoreId: { in: subwayIds } },
+          data: { subwayStoreId: null },
+        });
+
+        await seedDatabase(tx, opciones);
+        expect(
+          Object.fromEntries(
+            BASE_STORE_SUBWAY_IDS.map((s) => [s.storeId, s.subwayStoreId]),
+          ),
+        ).toEqual({
+          '73b590e0-11b2-4781-ba7b-4f7f8c2c6e35': '74413',
+          '1010021e-9bab-42d5-851c-417e9e2503bf': '72597',
+          '9ba7ac40-9463-47ec-b0b1-e53c79a185f9': '69132',
+        });
+        for (const { storeId, subwayStoreId } of BASE_STORE_SUBWAY_IDS) {
+          expect(await subwayIdOf(tx, storeId)).toBe(subwayStoreId);
+        }
+
+        // Repetir el seed no cambia nada.
+        await seedDatabase(tx, opciones);
+        for (const { storeId, subwayStoreId } of BASE_STORE_SUBWAY_IDS) {
+          expect(await subwayIdOf(tx, storeId)).toBe(subwayStoreId);
+        }
+
+        // Un valor configurado por la API no se pisa, y un ID que ya usa otro
+        // local no se reasigna (ni rompe el seed por el índice único).
+        const [santaMaria, ugalde, calera] = ids;
+        await tx.store.update({
+          where: { id: ugalde },
+          data: { subwayStoreId: '99999' },
+        });
+        await tx.store.update({
+          where: { id: santaMaria },
+          data: { subwayStoreId: null },
+        });
+        const otro = await tx.store.create({
+          data: {
+            name: 'Local seed con ID Subway tomado',
+            city: 'Melipilla',
+            address: 'Calle seed 1',
+            subwayStoreId: '72597',
+          },
+        });
+        await tx.store.update({
+          where: { id: calera },
+          data: { subwayStoreId: null },
+        });
+
+        await seedDatabase(tx, opciones);
+        expect(await subwayIdOf(tx, ugalde)).toBe('99999');
+        expect(await subwayIdOf(tx, santaMaria)).toBeNull();
+        expect(await subwayIdOf(tx, otro.id)).toBe('72597');
+        expect(await subwayIdOf(tx, calera)).toBe('69132');
       });
     });
 

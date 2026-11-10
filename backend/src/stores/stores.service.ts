@@ -9,17 +9,29 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import type { CreateStoreDto } from './dto/create-store.dto.js';
 import type { ListStoresQueryDto } from './dto/list-stores-query.dto.js';
 import type { UpdateStoreDto } from './dto/update-store.dto.js';
-import type { StoreResponse, StoreStateChange } from './types/stores.types.js';
+import type {
+  StoreResponse,
+  StoreStateChange,
+  StoreUpdateResult,
+} from './types/stores.types.js';
 import {
   normalizeStoreName,
   normalizeStoreText,
 } from './utils/store-name.util.js';
+import {
+  SUBWAY_STORE_ID_UNIQUE_INDEX,
+  violatedUniqueIndex,
+} from './utils/subway-store-id.util.js';
+
+const NAME_TAKEN_MESSAGE = 'Ya existe un local con ese nombre';
+const SUBWAY_STORE_ID_TAKEN_MESSAGE = 'Ya existe un local con ese ID Subway';
 
 const STORE_SELECT = {
   id: true,
   name: true,
   city: true,
   address: true,
+  subwayStoreId: true,
   isActive: true,
   createdAt: true,
   updatedAt: true,
@@ -33,6 +45,7 @@ function toStoreResponse(store: StoreRecord): StoreResponse {
     name: store.name,
     city: store.city,
     address: store.address,
+    subwayStoreId: store.subwayStoreId,
     isActive: store.isActive,
     createdAt: store.createdAt,
     updatedAt: store.updatedAt,
@@ -54,7 +67,11 @@ export class StoresService {
 
   async create(dto: CreateStoreDto): Promise<StoreResponse> {
     const name = normalizeStoreText(dto.name);
+    const subwayStoreId = dto.subwayStoreId ?? null;
     await this.ensureNameAvailable(name);
+    if (subwayStoreId !== null) {
+      await this.ensureSubwayStoreIdAvailable(subwayStoreId);
+    }
 
     try {
       const store = await this.prisma.store.create({
@@ -62,6 +79,7 @@ export class StoresService {
           name,
           city: normalizeStoreText(dto.city),
           address: normalizeStoreText(dto.address),
+          subwayStoreId,
         },
         select: STORE_SELECT,
       });
@@ -71,16 +89,19 @@ export class StoresService {
     }
   }
 
-  async update(id: string, dto: UpdateStoreDto): Promise<StoreResponse> {
+  // Edita el local bajo bloqueo de fila: el valor anterior que se audita (ID
+  // Subway) es exactamente el que reemplaza esta escritura, aunque haya otra
+  // edición simultánea del mismo local.
+  async update(id: string, dto: UpdateStoreDto): Promise<StoreUpdateResult> {
     await this.findById(id);
     const data: Prisma.StoreUpdateInput = {};
-    if (dto.name !== undefined) {
-      data.name = normalizeStoreText(dto.name);
-      await this.ensureNameAvailable(data.name, id);
-    }
+    if (dto.name !== undefined) data.name = normalizeStoreText(dto.name);
     if (dto.city !== undefined) data.city = normalizeStoreText(dto.city);
     if (dto.address !== undefined) {
       data.address = normalizeStoreText(dto.address);
+    }
+    if (dto.subwayStoreId !== undefined) {
+      data.subwayStoreId = dto.subwayStoreId;
     }
     if (Object.keys(data).length === 0) {
       throw new BadRequestException(
@@ -88,16 +109,30 @@ export class StoresService {
       );
     }
 
-    try {
-      const store = await this.prisma.store.update({
-        where: { id },
-        data,
-        select: STORE_SELECT,
-      });
-      return toStoreResponse(store);
-    } catch (error) {
-      this.handleWriteError(error);
-    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM stores WHERE id = ${id}::uuid FOR UPDATE`;
+      const previous = await this.findById(id, tx);
+      if (typeof data.name === 'string') {
+        await this.ensureNameAvailable(data.name, id, tx);
+      }
+      if (typeof data.subwayStoreId === 'string') {
+        await this.ensureSubwayStoreIdAvailable(data.subwayStoreId, id, tx);
+      }
+
+      try {
+        const store = await tx.store.update({
+          where: { id },
+          data,
+          select: STORE_SELECT,
+        });
+        return {
+          store: toStoreResponse(store),
+          previous: toStoreResponse(previous),
+        };
+      } catch (error) {
+        this.handleWriteError(error);
+      }
+    });
   }
 
   async deactivate(id: string): Promise<StoreStateChange> {
@@ -168,16 +203,33 @@ export class StoresService {
   private async ensureNameAvailable(
     name: string,
     excludedId?: string,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
   ): Promise<void> {
     const normalizedName = normalizeStoreName(name);
-    const stores = await this.prisma.store.findMany({
+    const stores = await client.store.findMany({
       where: excludedId === undefined ? undefined : { id: { not: excludedId } },
       select: { name: true },
     });
     if (
       stores.some((store) => normalizeStoreName(store.name) === normalizedName)
     ) {
-      throw new ConflictException('Ya existe un local con ese nombre');
+      throw new ConflictException(NAME_TAKEN_MESSAGE);
+    }
+  }
+
+  // El índice único de la base cierra la carrera entre esta verificación y
+  // la escritura (handleWriteError traduce su P2002 al mismo 409).
+  private async ensureSubwayStoreIdAvailable(
+    subwayStoreId: string,
+    excludedId?: string,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<void> {
+    const holder = await client.store.findUnique({
+      where: { subwayStoreId },
+      select: { id: true },
+    });
+    if (holder !== null && holder.id !== excludedId) {
+      throw new ConflictException(SUBWAY_STORE_ID_TAKEN_MESSAGE);
     }
   }
 
@@ -186,7 +238,11 @@ export class StoresService {
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
-      throw new ConflictException('Ya existe un local con ese nombre');
+      throw new ConflictException(
+        violatedUniqueIndex(error.meta) === SUBWAY_STORE_ID_UNIQUE_INDEX
+          ? SUBWAY_STORE_ID_TAKEN_MESSAGE
+          : NAME_TAKEN_MESSAGE,
+      );
     }
     throw error;
   }
