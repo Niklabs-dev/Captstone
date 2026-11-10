@@ -18,6 +18,7 @@ import {
   toDbDate,
 } from '../src/documents/utils/document-dates.util.js';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
+import { fakeSubwayStoreId } from './helpers/subway-store-id.js';
 import { isoWeekdayOf } from '../src/operating-days/calculation/sales-day-status.js';
 import { OperatingDaysService } from '../src/operating-days/operating-days.service.js';
 import type {
@@ -58,6 +59,7 @@ interface Fixture {
   storeId: string;
   otherStoreId: string;
   externalCode: string;
+  subwayStoreId: string;
   cashMethodId: string;
   cashLabel: string;
   admin: AuthUser;
@@ -177,10 +179,14 @@ describe.skipIf(!databaseUrl)(
           address: 'Calle sintética 456',
         },
       });
-      const externalCode = `7${randomInt(10, 99)} - ${randomInt(10_000, 99_999)}`;
-      await tx.storeExternalCode.create({
-        data: { system: 'MRCOMANDA', externalCode, storeId: store.id },
+      // Las importaciones identifican el local por su ID Subway
+      // (SPRINT-4A-T17); el prefijo es el número interno de MrComanda.
+      const subwayStoreId = fakeSubwayStoreId();
+      await tx.store.update({
+        where: { id: store.id },
+        data: { subwayStoreId },
       });
+      const externalCode = `7${randomInt(10, 99)} - ${subwayStoreId}`;
       // Solo lectura del medio CASH (sembrado por la migración) y un alias
       // propio con etiqueta única: no se escribe la fila compartida
       // MRCOMANDA/EFECTIVO, porque la transacción de rollback retendría su
@@ -201,6 +207,7 @@ describe.skipIf(!databaseUrl)(
         storeId: store.id,
         otherStoreId: otherStore.id,
         externalCode,
+        subwayStoreId,
         cashMethodId,
         cashLabel,
         admin: await createUser(tx, ROLE.ADMINISTRADOR, null),
@@ -225,6 +232,7 @@ describe.skipIf(!databaseUrl)(
           periodStart: start,
           periodEnd: new Date(start.getTime() + 8 * 3_600_000),
           externalStoreCode: f.externalCode,
+          subwayStoreId: f.subwayStoreId,
           version:
             (await f.tx.salesImport.count({
               where: {

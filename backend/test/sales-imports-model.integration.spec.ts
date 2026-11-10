@@ -1,6 +1,7 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import { normalizeExternalLabel } from '../src/sales-imports/normalization/normalize-external-label.js';
+import { fakeSubwayStoreId } from './helpers/subway-store-id.js';
 
 // Tests de integración del modelo de importaciones diarias de ventas
 // MrComanda (SPRINT-4R-T08) contra PostgreSQL real: equivalencias explícitas
@@ -17,6 +18,9 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 const BUSINESS_DATE = new Date('2026-11-05T00:00:00.000Z');
 const PERIOD_START = new Date('2026-11-05T03:00:00.000Z');
 const PERIOD_END = new Date('2026-11-06T02:59:00.000Z');
+// Texto original del encabezado; el local se identifica por el ID Subway de
+// la cabecera (subway_store_id, SPRINT-4A-T17), que el trigger compara con el
+// del local. Cada base de prueba usa un ID Subway ficticio propio.
 const EXTERNAL_CODE = '208 - 72597';
 
 // Líneas ficticias con la misma estructura del reporte: suman 873.260.
@@ -69,12 +73,13 @@ describe.skipIf(!databaseUrl)(
 
     interface Base {
       storeId: string;
+      subwayStoreId: string;
       otherStoreId: string;
       adminId: string;
       methodIds: Record<string, string>;
     }
 
-    // Dos locales (solo el primero con identificador MrComanda), un
+    // Dos locales (solo el primero con ID Subway), un
     // administrador, un medio propio para la nota de crédito y alias para las
     // cuatro etiquetas del reporte. Los medios y alias se crean con códigos y
     // etiquetas propios del test cuando el seed ya sembró los globales.
@@ -84,6 +89,7 @@ describe.skipIf(!databaseUrl)(
           name: 'Subway Importacion Modelo Test',
           city: 'Melipilla',
           address: 'Calle 123',
+          subwayStoreId: fakeSubwayStoreId(),
         },
       });
       const otherStore = await tx.store.create({
@@ -107,15 +113,6 @@ describe.skipIf(!databaseUrl)(
           roleId: adminRole.id,
         },
       });
-      await tx.storeExternalCode.create({
-        data: {
-          system: 'MRCOMANDA',
-          externalCode: EXTERNAL_CODE,
-          externalName: 'Local de prueba',
-          storeId: store.id,
-        },
-      });
-
       const methodIds: Record<string, string> = {};
       const catalog = [
         { code: 'CASH', name: 'Efectivo', behavior: 'CASH' },
@@ -157,6 +154,7 @@ describe.skipIf(!databaseUrl)(
       }
       return {
         storeId: store.id,
+        subwayStoreId: store.subwayStoreId ?? '',
         otherStoreId: otherStore.id,
         adminId: admin.id,
         methodIds,
@@ -174,6 +172,7 @@ describe.skipIf(!databaseUrl)(
         periodEnd: PERIOD_END,
         externalStoreCode: EXTERNAL_CODE,
         externalStoreName: 'Local de prueba',
+        subwayStoreId: base.subwayStoreId,
         version: 1,
         totalAmount: BigInt(TOTAL),
         fileName: 'ventas-06-11-2026.xlsx',
@@ -305,9 +304,18 @@ describe.skipIf(!databaseUrl)(
         });
       });
 
+      // store_external_codes queda sin uso desde SPRINT-4A-T17, pero la tabla y
+      // sus restricciones se conservan.
       it('un identificador externo no apunta a dos locales', async () => {
         await withinRollback(async (tx) => {
           const base = await crearBase(tx);
+          await tx.storeExternalCode.create({
+            data: {
+              system: 'MRCOMANDA',
+              externalCode: EXTERNAL_CODE,
+              storeId: base.storeId,
+            },
+          });
           await expect(
             tx.storeExternalCode.create({
               data: {
@@ -323,6 +331,13 @@ describe.skipIf(!databaseUrl)(
       it('un local tiene a lo más un identificador por sistema', async () => {
         await withinRollback(async (tx) => {
           const base = await crearBase(tx);
+          await tx.storeExternalCode.create({
+            data: {
+              system: 'MRCOMANDA',
+              externalCode: EXTERNAL_CODE,
+              storeId: base.storeId,
+            },
+          });
           await expect(
             tx.storeExternalCode.create({
               data: {
@@ -357,6 +372,7 @@ describe.skipIf(!databaseUrl)(
           expect(saved.periodStart).toEqual(PERIOD_START);
           expect(saved.periodEnd).toEqual(PERIOD_END);
           expect(saved.externalStoreCode).toBe(EXTERNAL_CODE);
+          expect(saved.subwayStoreId).toBe(base.subwayStoreId);
           expect(saved.fileName).toBe('ventas-06-11-2026.xlsx');
           expect(saved.sha256Hash).toBe('a1'.repeat(32));
           expect(saved.uploadedById).toBe(base.adminId);
@@ -380,14 +396,47 @@ describe.skipIf(!databaseUrl)(
         });
       });
 
-      it('rechaza un identificador externo no configurado', async () => {
+      it('rechaza una cabecera sin ID Subway (SPRINT-4A-T17)', async () => {
         await withinRollback(async (tx) => {
           const base = await crearBase(tx);
           await expect(
             tx.salesImport.create({
-              data: headerData(base, { externalStoreCode: '777 - 1' }),
+              data: headerData(base, { subwayStoreId: null }),
             }),
-          ).rejects.toThrow(/no está configurado para el local/);
+          ).rejects.toThrow(/debe indicar el ID Subway del local/);
+        });
+      });
+
+      it('rechaza un ID Subway que no es el del local (SPRINT-4A-T17)', async () => {
+        await withinRollback(async (tx) => {
+          const base = await crearBase(tx);
+          await expect(
+            tx.salesImport.create({
+              data: headerData(base, { subwayStoreId: fakeSubwayStoreId() }),
+            }),
+          ).rejects.toThrow(/no está asignado al local de la importación/);
+        });
+      });
+
+      it('ya no exige store_external_codes: basta el ID Subway del local (SPRINT-4A-T17)', async () => {
+        await withinRollback(async (tx) => {
+          const base = await crearBase(tx);
+          expect(
+            await tx.storeExternalCode.count({
+              where: { storeId: base.storeId },
+            }),
+          ).toBe(0);
+          const importId = await crearImportacion(tx, base, {
+            externalStoreCode: '777 - 1',
+          });
+          await confirmar(tx, base, importId);
+          expect(
+            (
+              await tx.salesImport.findUniqueOrThrow({
+                where: { id: importId },
+              })
+            ).status,
+          ).toBe('ACTIVE');
         });
       });
 
@@ -398,7 +447,7 @@ describe.skipIf(!databaseUrl)(
             tx.salesImport.create({
               data: headerData(base, { storeId: base.otherStoreId }),
             }),
-          ).rejects.toThrow(/no está configurado para el local/);
+          ).rejects.toThrow(/no está asignado al local de la importación/);
         });
       });
 
@@ -644,6 +693,31 @@ describe.skipIf(!databaseUrl)(
             tx.salesImport.update({
               where: { id: importId },
               data: { issuedAt: new Date('2026-11-07T10:00:00.000Z') },
+            }),
+          ).rejects.toThrow(/son inmutables/);
+        });
+      });
+
+      it('el ID Subway de la importación no cambia y no depende de cambios posteriores del local (SPRINT-4A-T17)', async () => {
+        await withinRollback(async (tx) => {
+          const base = await crearBase(tx);
+          const importId = await crearImportacion(tx, base);
+          // Cambiar el ID Subway del local después no reescribe la importación
+          // ni impide confirmarla: el trigger solo lo exige al insertar.
+          await tx.store.update({
+            where: { id: base.storeId },
+            data: { subwayStoreId: fakeSubwayStoreId() },
+          });
+          await confirmar(tx, base, importId);
+          const saved = await tx.salesImport.findUniqueOrThrow({
+            where: { id: importId },
+          });
+          expect(saved.subwayStoreId).toBe(base.subwayStoreId);
+          expect(saved.status).toBe('ACTIVE');
+          await expect(
+            tx.salesImport.update({
+              where: { id: importId },
+              data: { subwayStoreId: fakeSubwayStoreId() },
             }),
           ).rejects.toThrow(/son inmutables/);
         });

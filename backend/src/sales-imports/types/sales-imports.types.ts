@@ -40,6 +40,9 @@ export interface SalesImportSummary {
   periodEnd: Date;
   issuedAt: Date | null;
   externalStoreCode: string;
+  // ID Subway con que se identificó el local (SPRINT-4A-T17); null solo en
+  // importaciones anteriores a ese cambio.
+  subwayStoreId: string | null;
   totalAmount: number;
   fileName: string;
   sizeBytes: number;
@@ -94,6 +97,8 @@ export interface SalesImportPreview {
   periodEnd: Date;
   issuedAt: Date | null;
   externalStoreCode: string;
+  // ID Subway extraído del encabezado; null si no trae uno reconocible.
+  subwayStoreId: string | null;
   store: SalesImportStoreRef | null;
   totalAmount: number;
   lines: SalesImportPreviewLine[];

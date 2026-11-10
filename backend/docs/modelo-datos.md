@@ -482,7 +482,7 @@ Migración `20261108010000_importaciones_ventas_mrcomanda` (con reversa en
 
 | Tabla | Propósito |
 | --- | --- |
-| `store_external_codes` | Identificador explícito de un local en un sistema externo (`ExternalSystem`, hoy solo `MRCOMANDA`), con el nombre externo opcional. Un local tiene a lo más uno por sistema y un identificador nunca apunta a dos locales. |
+| `store_external_codes` | Identificador explícito de un local en un sistema externo (`ExternalSystem`, hoy solo `MRCOMANDA`), con el nombre externo opcional. Un local tiene a lo más uno por sistema y un identificador nunca apunta a dos locales. **Sin uso desde SPRINT-4A-T17**: el local se identifica por `stores.subway_store_id`; se conserva por compatibilidad. |
 | `payment_method_aliases` | Alias externo de un medio del catálogo (`T. DEBITO` → `DEBIT_CARD`). Guarda la etiqueta configurada y su forma normalizada; una etiqueta normalizada resuelve un único medio por sistema. El código del medio no cambia. |
 | `sales_imports` | Cabecera por archivo importado: local, fecha de negocio, período y horario del reporte, fecha de emisión (`issued_at`, informativa, desde SPRINT-4R-T10), identificador y nombre externos del local, versión, estado, total del reporte, nombre original, ruta privada, tipo, tamaño, SHA-256, quién lo subió (`uploaded_by_id`, `created_at`) y quién lo confirmó. |
 | `sales_import_lines` | Total por medio de pago dentro de una importación: número de línea, etiqueta original, etiqueta normalizada, medio resuelto, monto CLP entero con signo y porcentaje opcional. |
@@ -490,11 +490,13 @@ Migración `20261108010000_importaciones_ventas_mrcomanda` (con reversa en
 Reglas que garantiza la base (CHECK, índices únicos y triggers):
 
 - **Sin asignaciones por suposición.** Una cabecera solo se inserta si su
-  `external_store_code` está configurado en `store_external_codes` para ese
-  mismo local; una línea solo se inserta si su etiqueta normalizada tiene un
-  alias hacia ese mismo medio. Un texto como «208 - 72597» no resuelve ningún
-  local hasta que el administrador lo configure, y el seed no siembra
-  identificadores de locales.
+  `subway_store_id` es el ID Subway del local (`stores.subway_store_id`;
+  migración `20261110020000_importaciones_id_subway`, SPRINT-4A-T17; antes se
+  exigía `external_store_code` en `store_external_codes`, que queda sin uso);
+  una línea solo se inserta si su etiqueta normalizada tiene un alias hacia
+  ese mismo medio. En «208 - 72597» el ID Subway es 72597 y el 208, número
+  interno de MrComanda, se ignora; `external_store_code` conserva el texto
+  original.
 - **Normalización única.** La función SQL inmutable
   `normalize_external_label` (sin tildes, mayúsculas y espacios colapsados,
   conservando la puntuación) es la misma regla de
@@ -1266,8 +1268,9 @@ Table sales_imports {
   period_start timestamptz [not null]
   period_end timestamptz [not null, note: '> period_start y hasta 24 h (CHECK)']
   issued_at timestamptz [note: 'Emisión del reporte (SPRINT-4R-T10); informativa e inmutable']
-  external_store_code varchar(100) [not null, note: 'Debe estar configurado para store_id (trigger)']
+  external_store_code varchar(100) [not null, note: 'Texto original del encabezado («208 - 72597»)']
   external_store_name varchar(150)
+  subway_store_id varchar(10) [note: 'SPRINT-4A-T17: ID Subway del local (solo dígitos, CHECK); al insertar debe ser el de store_id (trigger). NULL solo en importaciones anteriores. Inmutable']
   version integer [not null, note: '>= 1']
   status SalesImportStatus [not null, default: 'PENDING']
   is_current boolean [note: 'TRUE solo en ACTIVE; NULL en los demás estados']

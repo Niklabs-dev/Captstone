@@ -41,6 +41,8 @@ describe('parseMrComandaReport (SPRINT-4R-T09)', () => {
       expect(report.periodEnd.toISOString()).toBe('2026-03-15T02:59:59.000Z');
       expect(report.externalStoreLabel).toBe(FIXTURE_STORE);
       expect(report.externalStoreCode).toBe('901 - 12345');
+      // El 901 es el número interno de MrComanda: solo se extrae el ID Subway.
+      expect(report.subwayStoreId).toBe('12345');
       expect(report.totalAmount).toBe(FIXTURE_TOTAL);
       expect(report.lines).toEqual([
         {
@@ -76,6 +78,41 @@ describe('parseMrComandaReport (SPRINT-4R-T09)', () => {
           percentage: 0,
         },
       ]);
+    });
+
+    it('extrae el ID Subway del encabezado con y sin el número de MrComanda (SPRINT-4A-T17)', () => {
+      for (const [label, code] of [
+        ['208 - 72597', '208 - 72597'],
+        ['208-72597', '208-72597'],
+        ['208   -   72597', '208 - 72597'],
+        ['72597', '72597'],
+      ]) {
+        const report = parse({
+          filters: FIXTURE_FILTERS.replace(
+            `Local: ${FIXTURE_STORE}`,
+            `Local: ${label}`,
+          ),
+        });
+        expect(report.externalStoreCode).toBe(code);
+        expect(report.subwayStoreId).toBe('72597');
+      }
+    });
+
+    it('un encabezado sin ID Subway reconocible no bloquea la lectura (SPRINT-4A-T17)', () => {
+      for (const label of [
+        'Santa María',
+        'Local Centro',
+        '208 - 12345678901',
+      ]) {
+        const report = parse({
+          filters: FIXTURE_FILTERS.replace(
+            `Local: ${FIXTURE_STORE}`,
+            `Local: ${label}`,
+          ),
+        });
+        expect(report.subwayStoreId).toBeNull();
+        expect(report.totalAmount).toBe(FIXTURE_TOTAL);
+      }
     });
 
     it('toma la fecha del «Período» y no de la fecha de emisión', () => {

@@ -29,6 +29,7 @@ import {
   createSwitchablePrisma,
   type SwitchablePrisma,
 } from './helpers/switchable-prisma.js';
+import { fakeSubwayStoreId } from './helpers/subway-store-id.js';
 
 type App = Parameters<typeof request>[0];
 type Tx = Prisma.TransactionClient;
@@ -67,6 +68,7 @@ interface Fixture {
   tx: Tx;
   storeId: string;
   externalCode: string;
+  subwayStoreId: string;
   admin: AuthUser;
   supervisor: AuthUser;
   accountant: AuthUser;
@@ -177,18 +179,18 @@ describe.skipIf(!databaseUrl)(
     }
 
     async function createFixture(tx: Tx): Promise<Fixture> {
+      // ID Subway ficticio propio de cada corrida (SPRINT-4A-T17); el prefijo
+      // del encabezado es el número interno de MrComanda, que se ignora.
+      const subwayStoreId = fakeSubwayStoreId();
       const store = await tx.store.create({
         data: {
           name: `Subway Importación ${randomUUID()}`,
           city: 'Melipilla',
           address: 'Calle sintética 123',
+          subwayStoreId,
         },
       });
-      // Identificador ficticio propio de cada corrida.
-      const externalCode = `9${randomInt(10, 99)} - ${randomInt(10_000, 99_999)}`;
-      await tx.storeExternalCode.create({
-        data: { system: 'MRCOMANDA', externalCode, storeId: store.id },
-      });
+      const externalCode = `9${randomInt(10, 99)} - ${subwayStoreId}`;
       const methodIds: Record<string, string> = {};
       const aliases = [
         {
@@ -240,6 +242,7 @@ describe.skipIf(!databaseUrl)(
         tx,
         storeId: store.id,
         externalCode,
+        subwayStoreId,
         admin: await createUser(tx, ROLE.ADMINISTRADOR, null),
         supervisor: await createUser(tx, ROLE.SUPERVISOR, store.id),
         accountant: await createUser(tx, ROLE.CONTADOR, null),
@@ -346,9 +349,14 @@ describe.skipIf(!databaseUrl)(
             issues: [],
             businessDate: BUSINESS_DATE,
             externalStoreCode: f.externalCode,
+            subwayStoreId: f.subwayStoreId,
             store: { id: f.storeId },
             totalAmount: 650_000,
             activeImport: null,
+          });
+          expect(preview.import).toMatchObject({
+            externalStoreCode: f.externalCode,
+            subwayStoreId: f.subwayStoreId,
           });
           expect(preview.issuedAt).toBe('2026-03-15T12:30:00.000Z');
           expect(preview.lines.map((line) => line.paymentMethod?.code)).toEqual(
@@ -428,10 +436,11 @@ describe.skipIf(!databaseUrl)(
         });
       });
 
-      it('sin equivalencia de local responde UNRESOLVED sin guardar nada', async () => {
+      it('un ID Subway sin local asignado responde UNRESOLVED sin guardar nada', async () => {
         await withinRollback(async (f) => {
-          await f.tx.storeExternalCode.deleteMany({
-            where: { storeId: f.storeId },
+          await f.tx.store.update({
+            where: { id: f.storeId },
+            data: { subwayStoreId: null },
           });
           const response = await uploadPreview(await excel(f), f.admin).expect(
             200,
@@ -441,6 +450,7 @@ describe.skipIf(!databaseUrl)(
           expect(preview).toMatchObject({
             outcome: 'UNRESOLVED',
             canConfirm: false,
+            subwayStoreId: f.subwayStoreId,
             store: null,
             import: null,
           });
@@ -448,12 +458,101 @@ describe.skipIf(!databaseUrl)(
             expect.objectContaining({
               code: 'STORE_NOT_CONFIGURED',
               externalStoreCode: f.externalCode,
+              subwayStoreId: f.subwayStoreId,
+            }),
+          ]);
+          expect(preview.issues[0].message).toContain(
+            `El ID Subway ${f.subwayStoreId} no está asignado a ningún local`,
+          );
+          expect(
+            await f.tx.salesImport.count({ where: { storeId: f.storeId } }),
+          ).toBe(0);
+          expect(await storedFiles()).toHaveLength(0);
+        });
+      });
+
+      it('identifica el local por el ID Subway aunque cambie el número interno de MrComanda (SPRINT-4A-T17)', async () => {
+        await withinRollback(async (f) => {
+          for (const label of [
+            `111 - ${f.subwayStoreId}`,
+            `${f.subwayStoreId}`,
+            `208-${f.subwayStoreId}`,
+          ]) {
+            const file = await buildReportXlsx([
+              buildReportSheet({
+                filters: ` - Todas las Empresas - Local: ${label} - Todos los Sectores`,
+              }),
+            ]);
+            const response = await uploadPreview(file, f.admin);
+            expect([200, 201]).toContain(response.status);
+            const preview = response.body as SalesImportPreview;
+            expect(preview).toMatchObject({
+              issues: [],
+              subwayStoreId: f.subwayStoreId,
+              store: { id: f.storeId },
+            });
+          }
+        });
+      });
+
+      it('un encabezado sin ID Subway reconocible queda como local no identificado', async () => {
+        await withinRollback(async (f) => {
+          const file = await buildReportXlsx([
+            buildReportSheet({
+              filters:
+                ' - Todas las Empresas - Local: Santa María - Todos los Sectores',
+            }),
+          ]);
+          const response = await uploadPreview(file, f.admin).expect(200);
+          const preview = response.body as SalesImportPreview;
+
+          expect(preview).toMatchObject({
+            outcome: 'UNRESOLVED',
+            canConfirm: false,
+            externalStoreCode: 'SANTA MARIA',
+            subwayStoreId: null,
+            store: null,
+            import: null,
+          });
+          expect(preview.issues).toEqual([
+            expect.objectContaining({
+              code: 'STORE_NOT_IDENTIFIED',
+              subwayStoreId: null,
+            }),
+          ]);
+          expect(await storedFiles()).toHaveLength(0);
+        });
+      });
+
+      it('un ID Subway de un local inactivo responde UNRESOLVED', async () => {
+        await withinRollback(async (f) => {
+          await f.tx.user.updateMany({
+            where: { storeId: f.storeId },
+            data: { isActive: false },
+          });
+          await f.tx.store.update({
+            where: { id: f.storeId },
+            data: { isActive: false },
+          });
+          const response = await uploadPreview(await excel(f), f.admin).expect(
+            200,
+          );
+          const preview = response.body as SalesImportPreview;
+
+          expect(preview).toMatchObject({
+            outcome: 'UNRESOLVED',
+            store: null,
+            import: null,
+          });
+          expect(preview.issues).toEqual([
+            expect.objectContaining({
+              code: 'STORE_INACTIVE',
+              subwayStoreId: f.subwayStoreId,
             }),
           ]);
           expect(
             await f.tx.salesImport.count({ where: { storeId: f.storeId } }),
           ).toBe(0);
-          expect(await storedFiles()).toHaveLength(0);
         });
       });
 
