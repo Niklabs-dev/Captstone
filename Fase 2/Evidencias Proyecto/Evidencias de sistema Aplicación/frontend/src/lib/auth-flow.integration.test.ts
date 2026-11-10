@@ -15,6 +15,16 @@ test('Flujo HTTP con Next.js compilado y contrato de backend simulado', async ()
   let accessToken = 'test-access';
   let refreshToken = 'test-refresh';
   let unavailable = false;
+  // Con el backend caído, la vista autenticada muestra la recuperación de
+  // sesión (200) sin exponer identidad ni contenido privado.
+  const assertSessionUnavailable = async (
+    response: Response,
+  ): Promise<void> => {
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.ok(html.includes('No se pudo verificar tu sesión'));
+    assert.ok(!html.includes(user.email));
+  };
   const backend = createServer(async (request, response) => {
     response.setHeader('Content-Type', 'application/json');
     if (unavailable) {
@@ -214,7 +224,7 @@ test('Flujo HTTP con Next.js compilado y contrato de backend simulado', async ()
       headers: { Cookie: `mf_access=${cookieJar.get('mf_access')}` },
       redirect: 'manual',
     });
-    assert.equal(response.status, 503);
+    await assertSessionUnavailable(response);
     response = await post('/api/auth/login', {
       email: user.email,
       password: 'test-password',
@@ -317,7 +327,7 @@ test('Flujo HTTP con Next.js compilado y contrato de backend simulado', async ()
       headers: { Cookie: `mf_access=${cookieJar.get('mf_access')}` },
       redirect: 'manual',
     });
-    assert.equal(response.status, 503);
+    await assertSessionUnavailable(response);
     unavailable = false;
     response = await post('/api/auth/logout');
     assert.equal(response.status, 200);
