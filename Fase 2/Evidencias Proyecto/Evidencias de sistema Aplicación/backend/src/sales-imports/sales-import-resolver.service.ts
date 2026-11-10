@@ -7,10 +7,10 @@ import type {
 
 // Resolución del reporte leído contra las equivalencias de SPRINT-4R-T08
 // (SPRINT-4R-T09). Solo consulta: nunca asigna IDs a locales ni crea alias.
-// Un local o medio sin equivalencia queda como problema y la importación no
-// se puede confirmar (canConfirm = false); la previsualización de
-// SPRINT-4R-T10 muestra los problemas para que el administrador configure la
-// equivalencia y vuelva a cargar.
+// Un local o medio sin equivalencia queda como problema y la vista previa no
+// guarda nada (canConfirm = false). Desde SPRINT-4A-T18 el problema no
+// bloquea: el administrador elige a mano el local o el medio (o omite una
+// línea en 0) y confirma con POST /sales-imports/confirm-with-resolution.
 //
 // Desde SPRINT-4A-T17 el local se identifica por el ID Subway del encabezado
 // (72597 en «208 - 72597») contra stores.subway_store_id, y debe estar
@@ -106,7 +106,10 @@ export class SalesImportResolverService {
           code: 'PAYMENT_METHOD_NOT_CONFIGURED',
           lineNumber: line.lineNumber,
           originalLabel: line.originalLabel,
-          message: `El medio de pago «${line.originalLabel}» no tiene un alias configurado. Asócialo a un medio del catálogo antes de importar.`,
+          message:
+            line.amount === 0
+              ? `El medio de pago «${line.originalLabel}» no tiene un alias configurado. Elige su medio del catálogo u omítelo (su monto es 0).`
+              : `El medio de pago «${line.originalLabel}» no tiene un alias configurado. Elige su medio del catálogo para confirmar.`,
         });
       }
       return { ...line, paymentMethod };
@@ -131,7 +134,7 @@ export class SalesImportResolverService {
         code: 'STORE_NOT_IDENTIFIED',
         externalStoreCode,
         subwayStoreId,
-        message: `El encabezado del reporte («Local: ${externalStoreLabel}») no trae un ID Subway reconocible, así que no se pudo identificar el local.`,
+        message: `El encabezado del reporte («Local: ${externalStoreLabel}») no trae un ID Subway reconocible, así que no se pudo identificar el local. Elige el local para confirmar.`,
       };
     }
     if (store === null) {
@@ -139,7 +142,7 @@ export class SalesImportResolverService {
         code: 'STORE_NOT_CONFIGURED',
         externalStoreCode,
         subwayStoreId,
-        message: `El ID Subway ${subwayStoreId} no está asignado a ningún local. Asígnalo al local que corresponda en la administración de locales y vuelve a cargar el archivo.`,
+        message: `El ID Subway ${subwayStoreId} no está asignado a ningún local. Elige el local para confirmar; si lo recuerdas, el ID queda asignado para próximas cargas.`,
       };
     }
     if (!store.isActive) {
@@ -147,7 +150,7 @@ export class SalesImportResolverService {
         code: 'STORE_INACTIVE',
         externalStoreCode,
         subwayStoreId,
-        message: `El ID Subway ${subwayStoreId} corresponde al local «${store.name}», que está inactivo. Reactívalo antes de importar sus ventas.`,
+        message: `El ID Subway ${subwayStoreId} corresponde al local «${store.name}», que está inactivo. Reactívalo y vuelve a cargar el archivo, o elige otro local activo para confirmar.`,
       };
     }
     return null;

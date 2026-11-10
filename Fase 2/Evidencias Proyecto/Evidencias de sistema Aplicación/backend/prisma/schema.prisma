@@ -136,6 +136,7 @@ model User {
   paidTipPaymentBatches      TipPaymentBatch[]    @relation("PaidTipPaymentBatches")
   uploadedSalesImports       SalesImport[]        @relation("UploadedSalesImports")
   confirmedSalesImports      SalesImport[]        @relation("ConfirmedSalesImports")
+  resolvedSalesImports       SalesImport[]        @relation("ResolvedSalesImports")
   updatedOperatingSchedules  StoreOperatingSchedule[] @relation("UpdatedOperatingSchedules")
   createdStoreClosures       StoreClosure[]       @relation("CreatedStoreClosures")
   inventoryMovements         InventoryMovement[]  @relation("CreatedInventoryMovements")
@@ -1011,6 +1012,14 @@ enum SalesImportStatus {
   SUPERSEDED
 }
 
+/// Origen de un dato resuelto al importar (SPRINT-4A-T18): AUTOMATIC si salió
+/// de una equivalencia configurada (ID Subway del local o alias del medio) y
+/// MANUAL si lo eligió el administrador en la vista previa.
+enum SalesImportResolution {
+  AUTOMATIC
+  MANUAL
+}
+
 /// Identificador explícito de un local en un sistema externo. Un local tiene
 /// a lo más un identificador por sistema y un identificador nunca apunta a dos
 /// locales. external_code se guarda normalizado (CHECK).
@@ -1099,7 +1108,19 @@ model SalesImport {
   confirmedBy   User?   @relation("ConfirmedSalesImports", fields: [confirmedById], references: [id], onDelete: Restrict)
   confirmedById String? @map("confirmed_by_id") @db.Uuid
 
-  lines SalesImportLine[]
+  /// Cómo se identificó el local (SPRINT-4A-T18): por su ID Subway
+  /// (AUTOMATIC) o elegido a mano por el administrador (MANUAL; el trigger
+  /// exige un local activo y que el ID Subway del archivo no identifique a
+  /// otro local activo). Inmutable desde el INSERT.
+  storeResolution SalesImportResolution @default(AUTOMATIC) @map("store_resolution")
+  /// Quién resolvió a mano algún dato (local o medios) y cuándo; NULL si todo
+  /// se identificó por equivalencias. Van juntos (CHECK) e inmutables.
+  resolvedAt      DateTime?             @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy      User?                 @relation("ResolvedSalesImports", fields: [resolvedById], references: [id], onDelete: Restrict)
+  resolvedById    String?               @map("resolved_by_id") @db.Uuid
+
+  lines        SalesImportLine[]
+  skippedLines SalesImportSkippedLine[]
 
   @@unique([storeId, businessDate, version])
   @@unique([storeId, businessDate, sha256Hash])
@@ -1126,11 +1147,35 @@ model SalesImportLine {
   importId        String        @map("import_id") @db.Uuid
   paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
   paymentMethodId String        @map("payment_method_id") @db.Uuid
+  /// AUTOMATIC si el medio salió de un alias; MANUAL si lo eligió el
+  /// administrador (SPRINT-4A-T18: medio activo y sin alias hacia otro medio).
+  resolution      SalesImportResolution @default(AUTOMATIC)
 
   @@unique([importId, lineNumber])
   @@unique([importId, normalizedLabel])
   @@index([paymentMethodId])
   @@map("sales_import_lines")
+}
+
+/// Línea del reporte omitida a mano al importar (SPRINT-4A-T18): solo con
+/// monto 0 (CHECK) y sin alias configurado para su etiqueta (trigger). Se
+/// conserva para la trazabilidad, pero no es una venta: reportes y panel no
+/// la leen. Inmutable; se elimina solo con su importación PENDING.
+model SalesImportSkippedLine {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lineNumber      Int      @map("line_number")
+  originalLabel   String   @map("original_label") @db.VarChar(100)
+  normalizedLabel String   @map("normalized_label") @db.VarChar(100)
+  amount          BigInt
+  percentage      Decimal? @db.Decimal(5, 2)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  import   SalesImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  importId String      @map("import_id") @db.Uuid
+
+  @@unique([importId, lineNumber])
+  @@unique([importId, normalizedLabel])
+  @@map("sales_import_skipped_lines")
 }
 
 // -------------------------------------------------------------
