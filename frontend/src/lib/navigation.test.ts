@@ -46,7 +46,7 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
     { href: '/admin/reportes-ventas', label: 'Reportes de ventas' },
     { href: '/admin/calendario-locales', label: 'Calendario de locales' },
     { href: '/liquidaciones', label: 'Liquidaciones' },
-    { href: '/propinas/repartos', label: 'Reparto de propinas' },
+    { href: '/propinas', label: 'Propinas' },
   ]);
 });
 
@@ -145,6 +145,48 @@ test('El supervisor consulta los repartos; el trabajador no (SPRINT-4R-T06)', ()
     getPageRedirect('TRABAJADOR', '/propinas/repartos'),
     '/portal?reason=forbidden',
   );
+});
+
+test('Administrador y contador usan /propinas en lugar de los repartos (SPRINT-4A-T07)', () => {
+  for (const role of ROLES) {
+    const manager = role === 'ADMINISTRADOR' || role === 'CONTADOR';
+    const hrefs = getNavigationItems(role).map((item) => item.href);
+    assert.equal(hrefs.includes('/propinas'), manager);
+    if (manager) assert.equal(hrefs.includes('/propinas/repartos'), false);
+    assert.equal(
+      getPageRedirect(role, '/propinas'),
+      manager
+        ? null
+        : role === 'TRABAJADOR'
+          ? '/portal?reason=forbidden'
+          : '/dashboard?reason=forbidden',
+    );
+    if (manager) {
+      assert.equal(getPageRedirect(role, '/propinas/repartos'), '/propinas');
+      assert.equal(
+        getPageRedirect(role, '/propinas/repartos/historico'),
+        '/propinas',
+      );
+    }
+  }
+  assert.deepEqual(getNavigationView('/propinas'), {
+    href: '/propinas',
+    title: 'Propinas',
+  });
+  // Las subrutas conservan su propia vista activa y sus permisos.
+  assert.equal(
+    getNavigationView('/propinas/diarias').href,
+    '/propinas/diarias',
+  );
+  assert.equal(
+    getNavigationView('/propinas/repartos').href,
+    '/propinas/repartos',
+  );
+  assert.equal(
+    getPageRedirect('CONTADOR', '/propinas/diarias'),
+    '/dashboard?reason=forbidden',
+  );
+  assert.equal(getPageRedirect('SUPERVISOR', '/propinas/diarias'), null);
 });
 
 test('La importación de ventas es exclusiva del administrador (SPRINT-4R-T11)', () => {

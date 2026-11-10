@@ -23,11 +23,11 @@ const introductions: Record<
     action: 'Ver usuarios',
   },
   CONTADOR: {
-    title: 'Cada reparto, en orden',
+    title: 'Cada propina, en orden',
     description:
-      'Revisa las propinas, valida el reparto y registra su entrega a los trabajadores.',
-    href: '/propinas/repartos',
-    action: 'Revisar reparto',
+      'Revisa las propinas de cada día, descarga el Excel del período y registra su pago a los trabajadores.',
+    href: '/propinas',
+    action: 'Revisar propinas',
   },
   SUPERVISOR: {
     title: 'Tu jornada, organizada',
@@ -55,6 +55,7 @@ const actionLabels: Partial<Record<NavigationItem['href'], string>> = {
   '/admin/reportes-ventas': 'Consultar reportes de ventas',
   '/admin/calendario-locales': 'Gestionar calendario de locales',
   '/liquidaciones': 'Abrir liquidaciones',
+  '/propinas': 'Revisar propinas',
 };
 
 export function OperationsHome({

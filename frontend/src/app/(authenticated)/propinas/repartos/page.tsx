@@ -12,6 +12,9 @@ export default async function Page() {
     if (session.status === 401) redirect('/session-expired');
     throw Error(session.message);
   }
+  // SPRINT-4A-T07: administrador y contador usan la vista /propinas.
+  if (['CONTADOR', 'ADMINISTRADOR'].includes(session.data.role))
+    redirect('/propinas');
   const supervisor = session.data.role === 'SUPERVISOR';
   if (!['CONTADOR', 'ADMINISTRADOR', 'SUPERVISOR'].includes(session.data.role))
     redirect('/dashboard?reason=forbidden');

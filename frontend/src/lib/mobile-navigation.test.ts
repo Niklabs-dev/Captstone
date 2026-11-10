@@ -41,7 +41,7 @@ test('Más conserva auditoría, alertas, medios de pago, liquidaciones y reparto
       '/admin/reportes-ventas',
       '/admin/calendario-locales',
       '/liquidaciones',
-      '/propinas/repartos',
+      '/propinas',
     ],
   );
 });
