@@ -149,3 +149,24 @@ test('El proxy distingue liquidación existente y no clasifica mensajes internos
     undefined,
   );
 });
+test('El proxy distingue el ID Subway duplicado de un nombre repetido', async (context) => {
+  const mocked = context.mock.method(globalThis, 'fetch', async () =>
+    Response.json(
+      { message: 'Ya existe un local con ese ID Subway' },
+      { status: 409 },
+    ),
+  );
+  const body = await (await proxyBackend('/stores', 'test-only')).json();
+  assert.equal(body.code, 'SUBWAY_STORE_ID_TAKEN');
+  assert.ok(!JSON.stringify(body).includes('Ya existe un local'));
+  mocked.mock.mockImplementation(async () =>
+    Response.json(
+      { message: 'Ya existe un local con ese nombre' },
+      { status: 409 },
+    ),
+  );
+  assert.equal(
+    (await (await proxyBackend('/stores', 'test-only')).json()).code,
+    undefined,
+  );
+});

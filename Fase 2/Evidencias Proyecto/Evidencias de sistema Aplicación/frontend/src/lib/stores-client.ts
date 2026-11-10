@@ -1,8 +1,10 @@
 import {
   parseStore,
+  parseStoreErrorCode,
   parseStores,
   storeErrorMessage,
   type Store,
+  type StoreErrorCode,
   type StoreInput,
   type StoreOperation,
 } from './stores';
@@ -10,8 +12,9 @@ export class StoreError extends Error {
   constructor(
     public readonly status: number,
     operation: StoreOperation = 'save',
+    public readonly code?: StoreErrorCode,
   ) {
-    super(storeErrorMessage(status, operation));
+    super(storeErrorMessage(status, operation, code));
     this.name = 'StoreError';
   }
 }
@@ -41,7 +44,17 @@ async function request(
     if (error instanceof Error && error.name === 'AbortError') throw error;
     throw new StoreError(503, operation);
   }
-  if (!response.ok) throw new StoreError(response.status, operation);
+  if (!response.ok) {
+    // Solo se lee el código seguro del BFF; el mensaje se arma localmente.
+    const body: unknown = await response.json().catch(() => null);
+    throw new StoreError(
+      response.status,
+      operation,
+      typeof body === 'object' && body !== null && 'code' in body
+        ? parseStoreErrorCode(body.code)
+        : undefined,
+    );
+  }
   return response.json().catch(() => {
     throw new StoreError(502, operation);
   });
@@ -76,7 +89,9 @@ export async function saveStore(
     (!previous && !result.isActive) ||
     result.name !== input.name ||
     result.city !== input.city ||
-    result.address !== input.address
+    result.address !== input.address ||
+    (input.subwayStoreId !== undefined &&
+      result.subwayStoreId !== input.subwayStoreId)
   )
     throw new StoreError(502);
   return result;

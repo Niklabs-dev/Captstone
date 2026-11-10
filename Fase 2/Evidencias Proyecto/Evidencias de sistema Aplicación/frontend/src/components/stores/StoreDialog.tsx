@@ -9,8 +9,10 @@ import {
 import {
   STORE_FIELDS,
   STORE_LABELS,
+  SUBWAY_STORE_ID_HELP,
   parseStoreInput,
   storeFieldError,
+  subwayStoreIdError,
   type Store,
   type StoreInput,
   type StoreField,
@@ -30,6 +32,7 @@ export function StoreDialog({
   action,
   busy,
   error,
+  errorField,
   onClose,
   onSave,
   onState,
@@ -37,6 +40,8 @@ export function StoreDialog({
   action: StoreAction;
   busy: boolean;
   error: string;
+  // Campo al que apunta el error del backend (p. ej. ID Subway duplicado).
+  errorField?: StoreField;
   onClose: () => void;
   onSave: (input: StoreInput) => Promise<undefined>;
   onState: () => Promise<undefined>;
@@ -62,9 +67,12 @@ export function StoreDialog({
     };
   }, []);
   useEffect(() => {
-    if (Object.keys(errors).length)
+    if (Object.keys(errors).length || (error && errorField))
       ref.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
-  }, [errors]);
+  }, [errors, error, errorField]);
+  const subwayInvalid = Boolean(
+    errors.subwayStoreId || (error && errorField === 'subwayStoreId'),
+  );
   async function submit(event: FormEvent<HTMLFormElement>): Promise<undefined> {
     event.preventDefault();
     if (busy) return;
@@ -73,6 +81,8 @@ export function StoreDialog({
       name: form.get('name'),
       city: form.get('city'),
       address: form.get('address'),
+      // Siempre se envía: vacío lo deja (o lo vuelve) sin configurar.
+      subwayStoreId: form.get('subwayStoreId') ?? '',
     };
     const input = parseStoreInput(values);
     if (!input) {
@@ -81,6 +91,8 @@ export function StoreDialog({
         const message = storeFieldError(field, values[field]);
         if (message) next[field] = message;
       }
+      const subwayMessage = subwayStoreIdError(values.subwayStoreId);
+      if (subwayMessage) next.subwayStoreId = subwayMessage;
       setErrors(next);
       ref.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
       return;
@@ -113,6 +125,7 @@ export function StoreDialog({
       </div>
       {error && (
         <p
+          id="store-dialog-error"
           role="alert"
           className="mb-4 rounded-lg bg-crit-bg p-3 text-sm text-crit"
         >
@@ -162,9 +175,15 @@ export function StoreDialog({
                 maxLength={field === 'address' ? 200 : 100}
                 disabled={busy}
                 defaultValue={action.kind === 'edit' ? action.store[field] : ''}
-                aria-invalid={Boolean(errors[field])}
+                aria-invalid={Boolean(
+                  errors[field] || (error && errorField === field),
+                )}
                 aria-describedby={
-                  errors[field] ? 'store-error-' + field : undefined
+                  errors[field]
+                    ? 'store-error-' + field
+                    : error && errorField === field
+                      ? 'store-dialog-error'
+                      : undefined
                 }
                 className={`${inputClass} mt-2`}
               />
@@ -178,6 +197,47 @@ export function StoreDialog({
               )}
             </div>
           ))}
+          <div>
+            <label htmlFor="store-subwayStoreId" className={labelClass}>
+              {STORE_LABELS.subwayStoreId}{' '}
+              <span className="font-normal text-muted">(opcional)</span>
+            </label>
+            <input
+              id="store-subwayStoreId"
+              name="subwayStoreId"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={20}
+              placeholder="Ej. 72597"
+              disabled={busy}
+              defaultValue={
+                action.kind === 'edit' ? (action.store.subwayStoreId ?? '') : ''
+              }
+              aria-invalid={subwayInvalid}
+              aria-describedby={[
+                'store-help-subwayStoreId',
+                errors.subwayStoreId
+                  ? 'store-error-subwayStoreId'
+                  : subwayInvalid
+                    ? 'store-dialog-error'
+                    : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              className={`${inputClass} mt-2 font-mono`}
+            />
+            <p id="store-help-subwayStoreId" className="mt-2 text-xs text-ink2">
+              {SUBWAY_STORE_ID_HELP}
+            </p>
+            {errors.subwayStoreId && (
+              <p
+                id="store-error-subwayStoreId"
+                className="mt-2 text-xs text-crit"
+              >
+                {errors.subwayStoreId}
+              </p>
+            )}
+          </div>
           <div className={dialogActionsClass}>
             <button
               type="button"
