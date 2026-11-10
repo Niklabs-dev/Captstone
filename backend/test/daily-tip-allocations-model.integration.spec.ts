@@ -384,6 +384,36 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
+    // SPRINT-4A-T03 (migración 20261110050000_reparto_diario_automatico):
+    // el reparto es obligatorio cuando hay fondo y participantes.
+    it('exige el reparto de una operación con fondo y participantes', async () => {
+      await withinRollback(async (tx) => {
+        const base = await createBase(tx);
+        const day = await createDay(tx, base, 10_000, {});
+        await tx.dailyOperationParticipant.create({
+          data: { operationId: day.operationId, workerId: base.workerId },
+        });
+        await expect(checkDeferred(tx)).rejects.toThrow(
+          /no tiene su reparto de propinas diarias/,
+        );
+      });
+    });
+
+    it('acepta sin reparto el fondo 0 y el fondo sin participantes (histórico)', async () => {
+      await withinRollback(async (tx) => {
+        const base = await createBase(tx);
+        await createDay(tx, base, 0, {});
+        await createDay(
+          tx,
+          base,
+          9_000,
+          {},
+          new Date('2026-03-11T00:00:00.000Z'),
+        );
+        await expect(checkDeferred(tx)).resolves.toBe(0);
+      });
+    });
+
     it('recalcular dentro de la transacción (borrar y crear UNPAID) concilia al final', async () => {
       await withinRollback(async (tx) => {
         const base = await createBase(tx);

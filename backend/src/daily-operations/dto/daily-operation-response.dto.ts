@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { TIP_ALLOCATION_STATUSES } from '../../tips/types/daily-tips.types.js';
 import { VOUCHER_MIME_TYPES } from '../types/daily-operations.types.js';
 
 // DTO de respuesta de la operación diaria (SPRINT-4R-T01). Los montos son
@@ -59,6 +60,36 @@ export class DailyOperationPersonDto {
 
   @ApiProperty({ example: 'María Contreras' })
   name: string;
+}
+
+// Propina del día de un trabajador (SPRINT-4A-T03).
+export class DailyTipAllocationResponseDto {
+  @ApiProperty({
+    description: 'ID de la asignación diaria de propina.',
+    example: 'c1a2b3d4-e5f6-4789-a012-b3c4d5e6f7a8',
+  })
+  id: string;
+
+  @ApiProperty({
+    description: 'Trabajador o supervisor que recibe la propina (id y nombre).',
+    type: DailyOperationPersonDto,
+  })
+  worker: DailyOperationPersonDto;
+
+  @ApiProperty({
+    description:
+      'Monto en CLP entero: el fondo del día dividido en partes iguales; los pesos de residuo van de a $1 según el orden estable documentado.',
+    example: 10_000,
+  })
+  amount: number;
+
+  @ApiProperty({
+    description:
+      'Estado de pago: UNPAID (No pagada) al registrarse; PAID (Pagada) cuando entra en un lote de pago.',
+    enum: TIP_ALLOCATION_STATUSES,
+    example: 'UNPAID',
+  })
+  status: string;
 }
 
 export class DailyOperationResponseDto {
@@ -128,6 +159,15 @@ export class DailyOperationResponseDto {
     type: [DailyOperationPersonDto],
   })
   participants: DailyOperationPersonDto[];
+
+  @ApiProperty({
+    description:
+      'Reparto automático del fondo del día (SPRINT-4A-T03): una propina por ' +
+      'participante, ordenadas por nombre, que suman exactamente ' +
+      'tipFundAmount. Vacío cuando el fondo es 0.',
+    type: [DailyTipAllocationResponseDto],
+  })
+  tipAllocations: DailyTipAllocationResponseDto[];
 
   @ApiProperty({
     description: 'Fecha y hora de creación.',

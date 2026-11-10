@@ -29,6 +29,7 @@ import {
   type EligibleWorkerResponse,
 } from './types/daily-operations.types.js';
 import { isIdenticalDailyOperationRetry } from './utils/daily-operation-retry.util.js';
+import { planDailyTipAllocations } from './utils/daily-tip-allocations.util.js';
 import { STORE_FORBIDDEN_MESSAGE } from '../auth/constants/forbidden-messages.constants.js';
 
 const PERSON_SELECT = {
@@ -64,6 +65,15 @@ const DAILY_OPERATION_SELECT = {
   // (SPRINT-4R-T02/T03): una sola lista ordenada por nombre del trabajador.
   participants: {
     select: { worker: PERSON_SELECT },
+    orderBy: [
+      { worker: { firstName: 'asc' } },
+      { worker: { lastName: 'asc' } },
+      { worker: { id: 'asc' } },
+    ],
+  },
+  // Reparto automático del fondo (SPRINT-4A-T03), en el mismo orden.
+  tipAllocations: {
+    select: { id: true, amount: true, status: true, worker: PERSON_SELECT },
     orderBy: [
       { worker: { firstName: 'asc' } },
       { worker: { lastName: 'asc' } },
@@ -115,6 +125,12 @@ function toDailyOperationResponse(
     participants: operation.participants.map((participant) =>
       toPerson(participant.worker),
     ),
+    tipAllocations: operation.tipAllocations.map((allocation) => ({
+      id: allocation.id,
+      worker: toPerson(allocation.worker),
+      amount: Number(allocation.amount),
+      status: allocation.status,
+    })),
     createdAt: operation.createdAt,
     updatedAt: operation.updatedAt,
   };
@@ -135,6 +151,19 @@ export interface VoucherDownload {
   integrity: 'VALID' | 'ALTERED';
   storeId: string;
   operationId: string;
+}
+
+// Decisión de recalcular el reparto de una corrección (SPRINT-4A-T03): el
+// reparto se rehace solo si cambia el fondo o la selección (o si faltaba);
+// participantIds es la selección resultante.
+interface TipRecalculation {
+  recalculate: boolean;
+  participantIds: string[];
+}
+
+function sameIdSet(a: readonly string[], b: readonly string[]): boolean {
+  const set = new Set(a);
+  return a.length === b.length && b.every((id) => set.has(id));
 }
 
 // Resultado calculado de una corrección (PATCH) antes de persistirla.
@@ -321,6 +350,16 @@ export class DailyOperationsService {
             })),
           });
         }
+        // Reparto automático (SPRINT-4A-T03): en la misma transacción, una
+        // propina No pagada por participante que suma el fondo. Si algo
+        // falla no queda ni la operación ni sus propinas.
+        await this.createTipAllocations(tx, {
+          operationId: created.id,
+          storeId: dto.storeId,
+          businessDate,
+          tipFundAmount: dto.cardTipAmount + dto.cashTipAmount,
+          participantIds,
+        });
         return { operation: await this.read(created.id, tx), created: true };
       });
       // Resolución de un duplicado concurrente idéntico: la operación
@@ -416,6 +455,8 @@ export class DailyOperationsService {
     // dos correcciones simultáneas se serializan y ninguna decide con datos
     // obsoletos (ej. retirar dos veces el mismo voucher).
     const preliminary = this.planCorrection(existing, dto, file);
+    // Con propinas pagadas no se recalcula: 409 antes de guardar el archivo.
+    this.planTipRecalculation(existing, preliminary);
     if (
       preliminary.participantIds !== undefined &&
       preliminary.participantIds.length > 0
@@ -438,6 +479,7 @@ export class DailyOperationsService {
             select: DAILY_OPERATION_SELECT,
           });
           const plan = this.planCorrection(locked, dto, file);
+          const tips = this.planTipRecalculation(locked, plan);
           const existingVoucher = locked.voucher;
 
           let voucherId: string | null = null;
@@ -485,8 +527,24 @@ export class DailyOperationsService {
             });
           }
 
+          // Reparto anterior: se retira antes de cambiar la selección (todas
+          // sus propinas están No pagadas: planTipRecalculation lo exige).
+          if (tips.recalculate) {
+            await tx.dailyTipAllocation.deleteMany({
+              where: { operationId: id },
+            });
+          }
+
+          // La selección solo se reescribe si cambió como conjunto: reenviar
+          // la misma no toca filas (ni choca con propinas ya pagadas).
           const { participantIds } = plan;
-          if (participantIds !== undefined) {
+          const currentIds = locked.participants.map(
+            (participant) => participant.worker.id,
+          );
+          if (
+            participantIds !== undefined &&
+            !sameIdSet(participantIds, currentIds)
+          ) {
             await tx.dailyOperationParticipant.deleteMany({
               where: { operationId: id },
             });
@@ -498,6 +556,17 @@ export class DailyOperationsService {
                 })),
               });
             }
+          }
+
+          // Reparto nuevo sobre el fondo y la selección resultantes.
+          if (tips.recalculate) {
+            await this.createTipAllocations(tx, {
+              operationId: id,
+              storeId: locked.store.id,
+              businessDate: locked.businessDate,
+              tipFundAmount: plan.tipFundAmount,
+              participantIds: tips.participantIds,
+            });
           }
 
           return {
@@ -652,6 +721,80 @@ export class DailyOperationsService {
       select: DAILY_OPERATION_SELECT,
     });
     return toDailyOperationResponse(operation);
+  }
+
+  // Decide si la corrección rehace el reparto del día (SPRINT-4A-T03): solo
+  // cuando cambia el fondo o la selección como conjunto, o cuando la
+  // operación no tenía reparto y ahora corresponde. Corregir solo el motivo,
+  // la diferencia o el voucher no lo toca. Si hay que recalcular y alguna
+  // propina ya está Pagada, la corrección completa se rechaza con 409 sin
+  // cambiar nada; con fondo mayor que 0 se exige al menos un participante
+  // (caso de las operaciones anteriores a la selección de participantes).
+  private planTipRecalculation(
+    record: DailyOperationRecord,
+    plan: CorrectionPlan,
+  ): TipRecalculation {
+    const currentIds = record.participants.map(
+      (participant) => participant.worker.id,
+    );
+    const participantIds = plan.participantIds ?? currentIds;
+    const recalculate =
+      plan.tipFundAmount !== Number(record.tipFundAmount) ||
+      !sameIdSet(participantIds, currentIds) ||
+      (record.tipAllocations.length === 0 &&
+        plan.tipFundAmount > 0 &&
+        participantIds.length > 0);
+    if (!recalculate) {
+      return { recalculate, participantIds };
+    }
+    if (record.tipAllocations.some((tip) => tip.status === 'PAID')) {
+      throw new ConflictException(
+        'La operación diaria tiene propinas pagadas: no se pueden corregir ' +
+          'sus montos ni sus participantes porque cambiaría un reparto ya ' +
+          'pagado. Solo se pueden corregir el motivo, la diferencia de ' +
+          'efectivo o el voucher.',
+      );
+    }
+    if (plan.tipFundAmount > 0 && participantIds.length === 0) {
+      throw new BadRequestException(
+        'Debe participar al menos un trabajador: el fondo de propinas del día es mayor que 0',
+      );
+    }
+    return { recalculate, participantIds };
+  }
+
+  // Guarda el reparto automático del día: una propina No pagada por
+  // participante (planDailyTipAllocations). Con fondo 0 no crea filas. La
+  // base vuelve a exigir al commit que las propinas sumen el fondo y cubran a
+  // todos los participantes (constraint trigger diferido de SPRINT-4A-T02).
+  private async createTipAllocations(
+    tx: Prisma.TransactionClient,
+    operation: {
+      operationId: string;
+      storeId: string;
+      businessDate: Date;
+      tipFundAmount: number;
+      participantIds: readonly string[];
+    },
+  ): Promise<void> {
+    const allocations = planDailyTipAllocations({
+      operationId: operation.operationId,
+      businessDate: formatDbDate(operation.businessDate),
+      tipFundAmount: operation.tipFundAmount,
+      participantIds: operation.participantIds,
+    });
+    if (allocations.length === 0) {
+      return;
+    }
+    await tx.dailyTipAllocation.createMany({
+      data: allocations.map((allocation) => ({
+        operationId: operation.operationId,
+        storeId: operation.storeId,
+        businessDate: operation.businessDate,
+        workerId: allocation.workerId,
+        amount: BigInt(allocation.amount),
+      })),
+    });
   }
 
   // Calcula el resultado de una corrección sobre el estado registrado y

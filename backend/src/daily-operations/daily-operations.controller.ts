@@ -89,6 +89,26 @@ function normalizeParticipantIdsForAudit(req: Request): void {
   }
 }
 
+// Detalle de auditoría del reparto automático (SPRINT-4A-T03), con lista
+// blanca explícita: IDs de cada propina y de su trabajador, monto, estado y
+// el total. Nunca nombres ni otros datos personales (Ley N°21.719).
+function tipAllocationsAuditDetail(
+  operation: DailyOperationResponse,
+): Record<string, unknown> {
+  return {
+    tipAllocations: operation.tipAllocations.map((allocation) => ({
+      id: allocation.id,
+      workerId: allocation.worker.id,
+      amount: allocation.amount,
+      status: allocation.status,
+    })),
+    tipAllocationsTotal: operation.tipAllocations.reduce(
+      (sum, allocation) => sum + allocation.amount,
+      0,
+    ),
+  };
+}
+
 // Operación diaria del local (SPRINT-4R-T01 y SPRINT-4R-T03): un único
 // registro por local y fecha de negocio con la propina de tarjeta (y su
 // voucher fotográfico privado), la propina en efectivo, la diferencia de
@@ -135,13 +155,21 @@ export class DailyOperationsController {
       'GET /daily-operations/{id}/voucher. Con fondo de propinas (tarjeta + ' +
       'efectivo) mayor que 0 se exige al menos un participantIds (campo ' +
       'repetido, IDs del catálogo GET /daily-operations/eligible-workers) y ' +
-      'propinas y selección se guardan en la misma transacción. Un reintento ' +
+      'propinas y selección se guardan en la misma transacción. En esa misma ' +
+      'transacción el sistema reparte el fondo en partes iguales y guarda una ' +
+      'propina No pagada (UNPAID) por participante en tipAllocations ' +
+      '(SPRINT-4A-T03): los pesos de residuo van de a $1 a los primeros ' +
+      'participantes ordenados por ID, comenzando en la posición (días desde ' +
+      '1970-01-01) mod n, y la suma siempre es el fondo (ej. $40.000 entre 4 ' +
+      '→ $10.000 c/u; $10.000 entre 3 → $3.334, $3.333 y $3.333). Con fondo ' +
+      '0 no hay propinas. Un reintento ' +
       'idéntico (mismos montos, motivo, mismo voucher por su hash y misma ' +
       'selección sin importar el orden) devuelve la operación existente con ' +
       '200; un contenido distinto responde 409 con el ID consultable.',
   })
   @ApiCreatedResponse({
-    description: 'Operación diaria registrada con su voucher.',
+    description:
+      'Operación diaria registrada con su voucher y su reparto automático (tipAllocations).',
     type: DailyOperationResponseDto,
   })
   @ApiOkResponse({
@@ -191,6 +219,7 @@ export class DailyOperationsController {
     setAuditContext(res, {
       storeId: result.operation.store.id,
       skipAudit: !result.created,
+      detail: tipAllocationsAuditDetail(result.operation),
     });
     return result.operation;
   }
@@ -236,15 +265,21 @@ export class DailyOperationsController {
       'obligatorio (enviado o ya registrado). Los triggers de la base ' +
       'impiden corregir montos o selección de una operación que alimentó un ' +
       'reparto CONFIRMED o PAID: ese rechazo responde 409 con el mensaje de ' +
-      'la base. El actor de la corrección queda en auditoría.',
+      'la base. Si cambia el fondo o la selección, el reparto automático ' +
+      '(tipAllocations) se recalcula en la misma transacción solo si todas ' +
+      'sus propinas están No pagadas; si alguna está Pagada responde 409 y ' +
+      'no cambia nada. Corregir solo el motivo, la diferencia o el voucher no ' +
+      'toca el reparto. El actor de la corrección y las propinas resultantes ' +
+      '(IDs y montos, sin datos personales) quedan en auditoría.',
   })
   @ApiOkResponse({
-    description: 'Operación diaria corregida con su selección actualizada.',
+    description:
+      'Operación diaria corregida con su selección y su reparto automático actualizados.',
     type: DailyOperationResponseDto,
   })
   @ApiBadRequestResponse({
     description:
-      'Solicitud vacía, campos inválidos, voucher enviado con tarjeta resultante 0, tarjeta mayor que 0 sin voucher registrado, o selección inválida para el fondo resultante (vacía con fondo mayor que 0 o informada con fondo 0).',
+      'Solicitud vacía, campos inválidos, voucher enviado con tarjeta resultante 0, tarjeta mayor que 0 sin voucher registrado, o selección inválida para el fondo resultante (vacía con fondo mayor que 0 o informada con fondo 0, o una operación sin participantes cuyo fondo se corrige sin informar participantIds).',
   })
   @ApiForbiddenResponse({
     description: 'El rol o el local asignado no permite corregir la operación.',
@@ -252,7 +287,7 @@ export class DailyOperationsController {
   @ApiNotFoundResponse({ description: 'Operación diaria no encontrada.' })
   @ApiConflictResponse({
     description:
-      'La operación alimenta un reparto CONFIRMED o PAID: la base rechaza corregir sus montos o su selección.',
+      'La operación tiene propinas pagadas (el reparto cambiaría) o alimenta un reparto histórico CONFIRMED o PAID: no se corrigen sus montos ni su selección.',
   })
   @ApiPayloadTooLargeResponse({
     description: 'El voucher supera los 5 MiB permitidos.',
@@ -265,15 +300,23 @@ export class DailyOperationsController {
     description:
       'La foto del voucher es del tipo correcto pero está dañada o incompleta (por ejemplo, cortada antes de su cierre).',
   })
-  update(
+  async update(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateDailyOperationDto,
     @UploadedFile() file: DailyOperationVoucherFile | undefined,
     @CurrentUser() currentUser: AuthUser,
     @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<DailyOperationResponse> {
     normalizeParticipantIdsForAudit(req);
-    return this.dailyOperations.update(id, dto, file, currentUser);
+    const operation = await this.dailyOperations.update(
+      id,
+      dto,
+      file,
+      currentUser,
+    );
+    setAuditContext(res, { detail: tipAllocationsAuditDetail(operation) });
+    return operation;
   }
 
   @Get()

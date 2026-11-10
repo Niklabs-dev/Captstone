@@ -927,7 +927,9 @@ enum TipAllocationStatus {
 /// por trabajador/día sin joins. La base garantiza: el trabajador es
 /// participante de la operación; las asignaciones de una operación suman
 /// exactamente su fondo (tarjeta + efectivo) y cubren a todos sus
-/// participantes (constraint trigger diferido, al commit); PAID exige lote y
+/// participantes (constraint trigger diferido, al commit; desde SPRINT-4A-T03
+/// el reparto es obligatorio si la operación tiene fondo y participantes, y
+/// la API lo guarda en la misma transacción); PAID exige lote y
 /// UNPAID no lo admite (CHECK); una asignación PAID es inmutable y no se
 /// borra; y mientras una operación tenga asignaciones PAID no cambian sus
 /// montos, fecha, local ni participantes.

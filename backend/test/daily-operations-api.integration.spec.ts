@@ -466,8 +466,17 @@ describe.skipIf(!databaseUrl)(
           cashDifference: -1000,
           differenceReason: 'Faltante por vuelto no registrado',
           voucherSha256: body.voucher?.sha256Hash,
+          // Reparto automático (SPRINT-4A-T03): IDs y montos, sin nombres.
+          tipAllocations: body.tipAllocations.map((tip) => ({
+            id: tip.id,
+            workerId: tip.worker.id,
+            amount: 18051,
+            status: 'UNPAID',
+          })),
+          tipAllocationsTotal: 36102,
         });
         expect(JSON.stringify(audit.detail)).not.toContain(f.worker.email);
+        expect(JSON.stringify(audit.detail)).not.toContain('Participa');
       });
     });
 
@@ -652,6 +661,289 @@ describe.skipIf(!databaseUrl)(
           select: { workerId: true },
         });
         expect(stored).toEqual([{ workerId: f.supervisor.id }]);
+      });
+    });
+
+    describe('reparto automático de propinas (SPRINT-4A-T03)', () => {
+      // La conciliación de la base es un constraint trigger diferido (corre
+      // al commit, que withinRollback nunca alcanza): se fuerza aquí para
+      // probar que lo guardado por la API cumple la regla.
+      function checkDeferred(f: Fixture): Promise<number> {
+        return f.tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
+      }
+
+      function amounts(body: DailyOperationResponse): number[] {
+        return body.tipAllocations.map((tip) => tip.amount);
+      }
+
+      it('POST divide $40.000 entre 4 en $10.000 No pagados para cada uno', async () => {
+        await withinRollback(async (f) => {
+          const fourth = await createUser(f.tx, ROLE.TRABAJADOR, f.storeId, {
+            firstName: 'Dina',
+            lastName: 'Participa',
+          });
+          const participants = [
+            f.worker.id,
+            f.worker2.id,
+            f.supervisor.id,
+            fourth.id,
+          ];
+          const body = (
+            await postMultipart(
+              baseFields(f, { cardTipAmount: 30000, cashTipAmount: 10000 }),
+              { buffer: JPEG, filename: 'voucher.jpg' },
+              f.supervisor,
+              participants,
+            ).expect(201)
+          ).body as DailyOperationResponse;
+
+          expect(body.tipFundAmount).toBe(40000);
+          expect(body.tipAllocations).toEqual([
+            expect.objectContaining({
+              worker: { id: f.worker.id, name: 'Ana Participa' },
+              amount: 10000,
+              status: 'UNPAID',
+            }),
+            expect.objectContaining({
+              worker: { id: f.worker2.id, name: 'Beto Participa' },
+              amount: 10000,
+              status: 'UNPAID',
+            }),
+            expect.objectContaining({
+              worker: { id: fourth.id, name: 'Dina Participa' },
+              amount: 10000,
+              status: 'UNPAID',
+            }),
+            expect.objectContaining({
+              worker: { id: f.supervisor.id, name: 'SUPERVISOR Operación' },
+              amount: 10000,
+              status: 'UNPAID',
+            }),
+          ]);
+          const rows = await f.tx.dailyTipAllocation.findMany({
+            where: { operationId: body.id },
+          });
+          expect(rows.map((row) => row.workerId).sort()).toEqual(
+            [...participants].sort(),
+          );
+          for (const row of rows) {
+            expect(row.amount).toBe(BigInt(10000));
+            expect(row.status).toBe('UNPAID');
+            expect(row.paymentBatchId).toBeNull();
+            expect(row.storeId).toBe(f.storeId);
+          }
+          await expect(checkDeferred(f)).resolves.toBe(0);
+        });
+      });
+
+      it('POST divide $10.000 entre 3 en $3.334, $3.333 y $3.333 sumando el fondo', async () => {
+        await withinRollback(async (f) => {
+          const body = (
+            await postMultipart(
+              baseFields(f, { cardTipAmount: 0, cashTipAmount: 10000 }),
+              null,
+              f.supervisor,
+              [f.worker.id, f.worker2.id, f.supervisor.id],
+            ).expect(201)
+          ).body as DailyOperationResponse;
+
+          expect([...amounts(body)].sort()).toEqual([3333, 3333, 3334]);
+          expect(amounts(body).reduce((sum, value) => sum + value, 0)).toBe(
+            10000,
+          );
+          // El peso de residuo va al participante que indica la regla
+          // documentada (orden por ID rotado según la fecha).
+          const ids = [f.worker.id, f.worker2.id, f.supervisor.id].sort();
+          const epochDay = Date.UTC(2026, 2, 10) / 86_400_000;
+          const winner = ids[epochDay % 3];
+          expect(
+            body.tipAllocations.find((tip) => tip.amount === 3334)?.worker.id,
+          ).toBe(winner);
+          await expect(checkDeferred(f)).resolves.toBe(0);
+        });
+      });
+
+      it('POST con fondo 0 no crea propinas y el día queda en 0', async () => {
+        await withinRollback(async (f) => {
+          const body = (
+            await postMultipart(
+              baseFields(f, {
+                cardTipAmount: 0,
+                cashTipAmount: 0,
+                cashDifference: 0,
+                differenceReason: undefined,
+              }),
+              null,
+              f.supervisor,
+            ).expect(201)
+          ).body as DailyOperationResponse;
+          expect(body.tipFundAmount).toBe(0);
+          expect(body.tipAllocations).toEqual([]);
+          expect(
+            await f.tx.dailyTipAllocation.count({
+              where: { operationId: body.id },
+            }),
+          ).toBe(0);
+          await expect(checkDeferred(f)).resolves.toBe(0);
+        });
+      });
+
+      it('PATCH recalcula el reparto No pagado al cambiar fondo o selección y lo audita', async () => {
+        await withinRollback(async (f) => {
+          const created = (
+            await postMultipart(
+              baseFields(f, { cardTipAmount: 0, cashTipAmount: 10000 }),
+              null,
+              f.supervisor,
+              [f.worker.id, f.worker2.id],
+            ).expect(201)
+          ).body as DailyOperationResponse;
+          expect(amounts(created)).toEqual([5000, 5000]);
+
+          // Cambia el fondo: se rehace con la selección vigente.
+          const byFund = (
+            await patchMultipart(
+              created.id,
+              { cashTipAmount: 9001 },
+              null,
+              f.supervisor,
+            ).expect(200)
+          ).body as DailyOperationResponse;
+          expect([...amounts(byFund)].sort()).toEqual([4500, 4501]);
+
+          // Cambia la selección: se rehace entre los nuevos participantes.
+          const bySelection = (
+            await patchMultipart(
+              created.id,
+              { participantIds: [f.worker.id, f.worker2.id, f.supervisor.id] },
+              null,
+              f.supervisor,
+            ).expect(200)
+          ).body as DailyOperationResponse;
+          expect([...amounts(bySelection)].sort()).toEqual([3000, 3000, 3001]);
+          expect(
+            await f.tx.dailyTipAllocation.count({
+              where: { operationId: created.id },
+            }),
+          ).toBe(3);
+
+          // Corregir solo el motivo no toca el reparto (mismos IDs).
+          const byReason = (
+            await patchMultipart(
+              created.id,
+              { differenceReason: 'Vuelto mal entregado' },
+              null,
+              f.supervisor,
+            ).expect(200)
+          ).body as DailyOperationResponse;
+          expect(byReason.tipAllocations.map((tip) => tip.id)).toEqual(
+            bySelection.tipAllocations.map((tip) => tip.id),
+          );
+          await expect(checkDeferred(f)).resolves.toBe(0);
+
+          // La auditoría de la corrección registra IDs y montos resultantes.
+          const audits = await f.tx.auditLog.findMany({
+            where: {
+              action: AUDIT_ACTION.DAILY_OPERATION_UPDATED,
+              entityId: created.id,
+            },
+            orderBy: { id: 'asc' },
+          });
+          expect(audits).toHaveLength(3);
+          const detail = audits[1].detail as {
+            tipAllocations: unknown;
+            tipAllocationsTotal: unknown;
+          };
+          expect(detail.tipAllocations).toEqual(
+            bySelection.tipAllocations.map((tip) => ({
+              id: tip.id,
+              workerId: tip.worker.id,
+              amount: tip.amount,
+              status: 'UNPAID',
+            })),
+          );
+          expect(detail.tipAllocationsTotal).toBe(9001);
+          expect(JSON.stringify(audits[1].detail)).not.toContain('Participa');
+        });
+      });
+
+      it('PATCH responde 409 y no cambia nada si alguna propina está pagada', async () => {
+        await withinRollback(async (f) => {
+          const created = (
+            await postMultipart(
+              baseFields(f, { cardTipAmount: 0, cashTipAmount: 10000 }),
+              null,
+              f.supervisor,
+              [f.worker.id, f.worker2.id],
+            ).expect(201)
+          ).body as DailyOperationResponse;
+          // Lote de pago del día (el endpoint de pago es SPRINT-4A-T06): se
+          // marca pagada solo una de las dos propinas.
+          const [paid] = created.tipAllocations;
+          const batch = await f.tx.tipPaymentBatch.create({
+            data: {
+              storeId: f.storeId,
+              periodStart: new Date(`${BUSINESS_DATE}T00:00:00.000Z`),
+              periodEnd: new Date(`${BUSINESS_DATE}T00:00:00.000Z`),
+              totalAmount: BigInt(paid.amount),
+              allocationCount: 1,
+              paidById: f.accountant.id,
+              paidAt: new Date(),
+            },
+          });
+          await f.tx.dailyTipAllocation.update({
+            where: { id: paid.id },
+            data: { status: 'PAID', paymentBatchId: batch.id },
+          });
+
+          for (const fields of [
+            { cashTipAmount: 12000 },
+            { participantIds: [f.worker.id] },
+          ]) {
+            const response = await patchMultipart(
+              created.id,
+              fields,
+              null,
+              f.supervisor,
+            ).expect(409);
+            expect(messagesOf(response.body)).toContain('propinas pagadas');
+          }
+
+          // Nada cambió: montos, selección ni propinas.
+          const stored = await f.tx.dailyOperation.findUniqueOrThrow({
+            where: { id: created.id },
+            include: { participants: true, tipAllocations: true },
+          });
+          expect(stored.tipFundAmount).toBe(BigInt(10000));
+          expect(stored.participants).toHaveLength(2);
+          expect(
+            stored.tipAllocations
+              .map((tip) => [tip.id, tip.amount, tip.status])
+              .sort(),
+          ).toEqual(
+            created.tipAllocations
+              .map((tip) => [
+                tip.id,
+                BigInt(tip.amount),
+                tip.id === paid.id ? 'PAID' : 'UNPAID',
+              ])
+              .sort(),
+          );
+
+          // Corregir el motivo sigue permitido (no cambia el reparto).
+          const reason = (
+            await patchMultipart(
+              created.id,
+              { cashDifference: -200, differenceReason: 'Faltante' },
+              null,
+              f.supervisor,
+            ).expect(200)
+          ).body as DailyOperationResponse;
+          expect(reason.tipAllocations.map((tip) => tip.status).sort()).toEqual(
+            ['PAID', 'UNPAID'],
+          );
+          await expect(checkDeferred(f)).resolves.toBe(0);
+        });
       });
     });
 

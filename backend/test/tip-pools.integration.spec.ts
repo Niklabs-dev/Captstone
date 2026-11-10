@@ -866,8 +866,17 @@ describe.skipIf(!databaseUrl)(
           where: { store: storeWhere },
           select: { voucherId: true },
         });
-        // En modo replica las cascadas (triggers de FK) no corren: los
-        // participantes se borran explícitamente antes que su operación.
+        // En modo replica las cascadas (triggers de FK) no corren: las
+        // propinas diarias (SPRINT-4A-T03) y los participantes se borran
+        // explícitamente antes que su operación.
+        await tx.dailyTipAllocation.deleteMany({
+          where: {
+            OR: [
+              { store: storeWhere },
+              { worker: { email: { endsWith: DOMAIN } } },
+            ],
+          },
+        });
         await tx.dailyOperationParticipant.deleteMany({
           where: {
             OR: [

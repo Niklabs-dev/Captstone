@@ -1,4 +1,5 @@
 import { ROLE, type RoleCode } from '../../auth/constants/roles.constants.js';
+import type { TipAllocationStatusCode } from '../../tips/types/daily-tips.types.js';
 
 // Tipos y constantes de la operación diaria (SPRINT-4R-T01). Los montos se
 // validan y entregan como enteros de JavaScript (CLP no usa centavos); la
@@ -44,6 +45,15 @@ export interface DailyOperationVoucherResponse {
   createdAt: Date;
 }
 
+/// Propina del día de un trabajador (SPRINT-4A-T03): la asignación que el
+/// sistema guarda al registrar o corregir la operación, con su estado de pago.
+export interface DailyTipAllocationResponse {
+  id: string;
+  worker: DailyOperationPersonResponse;
+  amount: number;
+  status: TipAllocationStatusCode;
+}
+
 export interface DailyOperationResponse {
   id: string;
   store: { id: string; name: string };
@@ -58,6 +68,9 @@ export interface DailyOperationResponse {
   // Selección compartida por la propina de tarjeta y la de efectivo del
   // mismo local/día (SPRINT-4R-T03); solo id y nombre de cada trabajador.
   participants: DailyOperationPersonResponse[];
+  // Reparto automático del fondo entre los participantes (SPRINT-4A-T03):
+  // una asignación por participante que suma el fondo; vacío con fondo 0.
+  tipAllocations: DailyTipAllocationResponse[];
   createdAt: Date;
   updatedAt: Date;
 }

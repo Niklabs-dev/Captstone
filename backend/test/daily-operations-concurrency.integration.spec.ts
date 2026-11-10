@@ -272,6 +272,18 @@ describe.skipIf(!databaseUrl)(
         }),
       ).toBe(1);
 
+      // El reparto automático quedó commiteado junto con la operación
+      // (SPRINT-4A-T03): una propina No pagada por participante que suma el
+      // fondo; la conciliación diferida de la base corrió en el commit real.
+      const tips = await prisma.dailyTipAllocation.findMany({
+        where: { operationId: operation.id },
+      });
+      expect(tips).toHaveLength(2);
+      expect(tips.every((tip) => tip.status === 'UNPAID')).toBe(true);
+      expect(tips.reduce((sum, tip) => sum + tip.amount, 0n)).toBe(
+        BigInt(36102),
+      );
+
       // Un solo archivo físico: el voucher del perdedor (reintento o carrera
       // P2002) se elimina como mejor esfuerzo.
       expect(await countStoredFiles()).toBe(1);
@@ -411,6 +423,59 @@ describe.skipIf(!databaseUrl)(
       // Solo quedan los archivos de 10-03 y 11-03: ni el voucher retirado ni
       // el de reemplazo quedan huérfanos en el volumen.
       expect(await countStoredFiles()).toBe(2);
+      // El reparto se recalculó en el mismo commit sobre el fondo resultante.
+      const tips = await prisma.dailyTipAllocation.findMany({
+        where: { operationId: operation.id },
+      });
+      expect(tips.reduce((sum, tip) => sum + tip.amount, 0n)).toBe(
+        final.tipFundAmount,
+      );
+    });
+
+    it('si falla el reparto no queda ni la operación ni sus propinas (SPRINT-4A-T03)', async () => {
+      // Falla inyectada solo para el local de esta corrida: un trigger de
+      // prueba rechaza el INSERT de propinas diarias. La transacción real del
+      // POST debe revertir operación, selección, voucher y propinas.
+      const fn = `test_fail_tips_${storeId.replace(/-/g, '')}`;
+      await prisma.$executeRawUnsafe(
+        `CREATE FUNCTION "${fn}"() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN
+           IF NEW."store_id" = '${storeId}'::uuid THEN
+             RAISE EXCEPTION 'falla inyectada en el reparto' USING ERRCODE = 'check_violation';
+           END IF;
+           RETURN NEW;
+         END; $$`,
+      );
+      await prisma.$executeRawUnsafe(
+        `CREATE TRIGGER "${fn}" BEFORE INSERT ON "daily_tip_allocations"
+         FOR EACH ROW EXECUTE FUNCTION "${fn}"()`,
+      );
+      try {
+        const response = await post({
+          businessDate: '2026-03-20',
+          cardTipAmount: 31602,
+          cashTipAmount: 4500,
+          cashDifference: 0,
+        });
+        expect(response.status).toBe(409);
+        const where = {
+          storeId,
+          businessDate: new Date('2026-03-20T00:00:00.000Z'),
+        };
+        expect(await prisma.dailyOperation.count({ where })).toBe(0);
+        expect(
+          await prisma.dailyTipAllocation.count({
+            where: { storeId, businessDate: where.businessDate },
+          }),
+        ).toBe(0);
+        // El voucher guardado antes de la transacción se retira del volumen.
+        expect(await countStoredFiles()).toBe(2);
+      } finally {
+        await prisma.$executeRawUnsafe(
+          `DROP TRIGGER "${fn}" ON "daily_tip_allocations"`,
+        );
+        await prisma.$executeRawUnsafe(`DROP FUNCTION "${fn}"()`);
+      }
     });
   },
 );
