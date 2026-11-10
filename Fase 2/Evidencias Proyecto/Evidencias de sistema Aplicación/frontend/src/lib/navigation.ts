@@ -17,6 +17,7 @@ export interface NavigationItem {
     | '/admin/reportes-ventas'
     | '/admin/calendario-locales'
     | '/liquidaciones'
+    | '/propinas'
     | '/propinas/diarias'
     | '/propinas/repartos'
     | '/portal/liquidaciones'
@@ -43,6 +44,8 @@ export function getNavigationView(pathname: string): {
     { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
     { href: '/propinas/repartos', title: 'Reparto de propinas' },
     { href: '/propinas/diarias', title: 'Operación diaria' },
+    // Después de las subrutas: /propinas solo coincide consigo misma.
+    { href: '/propinas', title: 'Propinas' },
     { href: '/dashboard', title: 'Inicio' },
     { href: '/admin/usuarios', title: 'Usuarios y roles' },
     { href: '/admin/locales', title: 'Locales' },
@@ -61,6 +64,10 @@ const MY_TIPS: NavigationItem = {
   href: '/portal/propinas',
   label: 'Mis propinas',
 };
+
+// SPRINT-4A-T07: propinas diarias y pago por período de ADMINISTRADOR y
+// CONTADOR; reemplaza a /propinas/repartos para ambos roles.
+const TIPS: NavigationItem = { href: '/propinas', label: 'Propinas' };
 
 // Una sola fuente de enlaces para todas las vistas; los permisos siguen en el servidor.
 export function getNavigationItems(
@@ -97,14 +104,10 @@ export function getNavigationItems(
         { href: '/admin/reportes-ventas', label: 'Reportes de ventas' },
         { href: '/admin/calendario-locales', label: 'Calendario de locales' },
         { href: '/liquidaciones', label: 'Liquidaciones' },
-        { href: '/propinas/repartos', label: 'Reparto de propinas' },
+        TIPS,
       ]
     : role === 'CONTADOR'
-      ? [
-          home,
-          { href: '/liquidaciones', label: 'Liquidaciones' },
-          { href: '/propinas/repartos', label: 'Reparto de propinas' },
-        ]
+      ? [home, { href: '/liquidaciones', label: 'Liquidaciones' }, TIPS]
       : [home];
 }
 
@@ -139,13 +142,17 @@ export function getPageRedirect(role: Role, pathname: string): string | null {
     role !== 'CONTADOR'
   )
     return '/dashboard?reason=forbidden';
-  if (
-    (pathname === '/propinas/repartos' ||
-      pathname.startsWith('/propinas/repartos/')) &&
-    role !== 'CONTADOR' &&
-    role !== 'ADMINISTRADOR' &&
-    role !== 'SUPERVISOR'
-  )
+  if (pathname === TIPS.href)
+    return role === 'ADMINISTRADOR' || role === 'CONTADOR'
+      ? null
+      : '/dashboard?reason=forbidden';
+  const inPoolHistory =
+    pathname === '/propinas/repartos' ||
+    pathname.startsWith('/propinas/repartos/');
+  // El reparto por período quedó solo para el supervisor (lo retira T08).
+  if (inPoolHistory && (role === 'ADMINISTRADOR' || role === 'CONTADOR'))
+    return TIPS.href;
+  if (inPoolHistory && role !== 'SUPERVISOR')
     return '/dashboard?reason=forbidden';
   const inAdmin = pathname === '/admin' || pathname.startsWith('/admin/');
   if (inAdmin && role !== 'ADMINISTRADOR') return '/dashboard?reason=forbidden';

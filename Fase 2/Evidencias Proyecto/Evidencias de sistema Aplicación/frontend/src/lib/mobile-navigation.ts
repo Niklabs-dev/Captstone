@@ -36,6 +36,7 @@ export function getNavigationIcon(href: NavigationItem['href']) {
     '/admin/reportes-ventas': 'audit',
     '/admin/calendario-locales': 'calendar',
     '/liquidaciones': 'wallet',
+    '/propinas': 'tips',
     '/propinas/diarias': 'tips',
     '/propinas/repartos': 'tips',
     '/portal/propinas': 'tips',
