@@ -22,6 +22,15 @@ export class StoreResponseDto implements StoreResponse {
 
   @ApiProperty({
     description:
+      'ID del local asignado por Subway (solo dígitos, único); null si no está configurado.',
+    example: '72597',
+    type: String,
+    nullable: true,
+  })
+  subwayStoreId: string | null;
+
+  @ApiProperty({
+    description:
       'Indica si el local puede recibir asignaciones y operaciones nuevas.',
     example: true,
   })

@@ -776,6 +776,7 @@ Table stores {
   name varchar(100) [not null]
   city varchar(100) [not null]
   address varchar(200) [not null]
+  subway_store_id varchar(10) [unique, note: 'ID del local asignado por Subway (SPRINT-4A-T15): opcional, solo dígitos 1 a 10 (CHECK stores_subway_store_id_digits). No guarda el número interno de MrComanda']
   is_active boolean [not null, default: true]
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null]

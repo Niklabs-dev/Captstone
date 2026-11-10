@@ -63,26 +63,34 @@ export class StoresController {
     entityIdFrom: 'response.id',
     detailFromBody: ['name', 'city', 'address'],
   })
-  @ApiOperation({ summary: 'Crea un local activo' })
+  @ApiOperation({
+    summary: 'Crea un local activo, con su ID Subway opcional',
+  })
   @ApiCreatedResponse({ description: 'Local creado.', type: StoreResponseDto })
-  @ApiBadRequestResponse({ description: 'Datos obligatorios inválidos.' })
+  @ApiBadRequestResponse({
+    description:
+      'Datos obligatorios inválidos o ID Subway con formato inválido (solo dígitos, de 1 a 10).',
+  })
   @ApiForbiddenResponse({
     description: 'Solo ADMINISTRADOR puede crear locales.',
   })
-  @ApiConflictResponse({ description: 'Ya existe un local con ese nombre.' })
+  @ApiConflictResponse({
+    description: 'Ya existe un local con ese nombre o con ese ID Subway.',
+  })
   async create(
     @Body() dto: CreateStoreDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StoreResponse> {
     const store = await this.storesService.create(dto);
-    setAuditContext(res, {
-      storeId: store.id,
-      detail: {
-        name: store.name,
-        city: store.city,
-        address: store.address,
-      },
-    });
+    const detail: Record<string, string> = {
+      name: store.name,
+      city: store.city,
+      address: store.address,
+    };
+    if (store.subwayStoreId !== null) {
+      detail.subwayStoreId = store.subwayStoreId;
+    }
+    setAuditContext(res, { storeId: store.id, detail });
     return store;
   }
 
@@ -158,27 +166,37 @@ export class StoresController {
     detailFromBody: ['name', 'city', 'address'],
   })
   @ApiOperation({
-    summary: 'Edita el nombre, la ciudad o la dirección de un local',
+    summary:
+      'Edita el nombre, la ciudad, la dirección o el ID Subway de un local',
   })
   @ApiOkResponse({ description: 'Local actualizado.', type: StoreResponseDto })
   @ApiBadRequestResponse({
-    description: 'ID, campos o cuerpo de la actualización inválidos.',
+    description:
+      'ID, campos o cuerpo de la actualización inválidos, o ID Subway con formato inválido (solo dígitos, de 1 a 10).',
   })
   @ApiForbiddenResponse({
     description: 'Solo ADMINISTRADOR puede editar locales.',
   })
   @ApiNotFoundResponse({ description: 'Local no encontrado.' })
-  @ApiConflictResponse({ description: 'Ya existe un local con ese nombre.' })
+  @ApiConflictResponse({
+    description: 'Ya existe un local con ese nombre o con ese ID Subway.',
+  })
   async update(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateStoreDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StoreResponse> {
-    const store = await this.storesService.update(id, dto);
-    const detail: Record<string, string> = {};
+    const { store, previous } = await this.storesService.update(id, dto);
+    const detail: Record<string, string | null> = {};
     if (dto.name !== undefined) detail.name = store.name;
     if (dto.city !== undefined) detail.city = store.city;
     if (dto.address !== undefined) detail.address = store.address;
+    // El cambio de ID Subway se audita con el valor anterior y el nuevo
+    // (null cuando no estaba configurado o se quitó).
+    if (dto.subwayStoreId !== undefined) {
+      detail.previousSubwayStoreId = previous.subwayStoreId;
+      detail.subwayStoreId = store.subwayStoreId;
+    }
     setAuditContext(res, { storeId: store.id, detail });
     return store;
   }

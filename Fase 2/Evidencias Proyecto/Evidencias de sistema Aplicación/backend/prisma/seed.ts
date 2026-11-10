@@ -1,8 +1,9 @@
 // =============================================================
 // Seed de datos base: roles del sistema, usuario administrador
 // inicial y tipos de documento laboral (SPRINT-1-T05), los tres
-// locales de Moi-food (SPRINT-2-T26), el catálogo base de medios
-// de pago (SPRINT-4-T32) y las fixtures sintéticas del módulo de
+// locales de Moi-food (SPRINT-2-T26) con su ID Subway
+// (SPRINT-4A-T15), el catálogo base de medios de pago
+// (SPRINT-4-T32) y las fixtures sintéticas del módulo de
 // propinas (SPRINT-3-T09): pacto de reparto, entradas diarias,
 // horas trabajadas y un reparto DRAFT con sus fuentes y líneas en
 // el primer local.
@@ -12,8 +13,10 @@
 // sincronizan por `code` (upsert); medios de pago y locales por su
 // clave única con `update: {}` (no revierten cambios administrados
 // por la API, como renombrar, reordenar o desactivar un medio);
-// el administrador solo se crea si el correo no existe, sin
-// sobrescribir la contraseña de un usuario ya registrado. Las
+// el ID Subway de cada local base solo se asigna si el local no
+// tiene uno y ningún otro local lo usa; el administrador solo
+// se crea si el correo no existe, sin sobrescribir la contraseña
+// de un usuario ya registrado. Las
 // fixtures de propinas se siembran solo con SEED_DEMO_DATA=true y
 // usan datos sintéticos (correos .invalid y contraseñas aleatorias
 // no divulgadas); en producción quedan apagadas.
@@ -139,6 +142,17 @@ export const BASE_STORES = [
     city: 'Quillota',
     address: 'Av. Marathon 1450',
   },
+] as const;
+
+// ID Subway de los locales base (SPRINT-4A-T15). Es el número que Subway
+// asigna a cada local y que aparece en el encabezado del reporte de MrComanda
+// («Local: 208 - 72597»; el 208 es interno de MrComanda y no se guarda). El
+// seed lo asigna solo si el local aún no tiene uno y ningún otro local lo usa:
+// nunca pisa un valor configurado por la API ni choca con el índice único.
+export const BASE_STORE_SUBWAY_IDS = [
+  { storeId: BASE_STORES[1].id, subwayStoreId: '74413' }, // Ugalde
+  { storeId: BASE_STORES[0].id, subwayStoreId: '72597' }, // Santa María
+  { storeId: BASE_STORES[2].id, subwayStoreId: '69132' }, // Calera
 ] as const;
 
 // Medios de pago base del catálogo (SPRINT-4-T32), con los mismos códigos del
@@ -414,6 +428,20 @@ export async function seedDatabase(
     storeIds.push(guardado.id);
   }
 
+  // ID Subway de los locales base (SPRINT-4A-T15): updateMany con
+  // subwayStoreId null no toca un local que ya tenga uno configurado.
+  for (const { storeId, subwayStoreId } of BASE_STORE_SUBWAY_IDS) {
+    const enUso = await db.store.findUnique({
+      where: { subwayStoreId },
+      select: { id: true },
+    });
+    if (enUso) continue;
+    await db.store.updateMany({
+      where: { id: storeId, subwayStoreId: null },
+      data: { subwayStoreId },
+    });
+  }
+
   // Catálogo base de medios de pago (SPRINT-4-T32): upsert por código con
   // `update: {}` para no revertir la administración del catálogo (la API puede
   // renombrar, reordenar, reclasificar o desactivar medios y el seed respeta
@@ -644,6 +672,10 @@ async function main(): Promise<void> {
     );
     console.log(
       `Locales sincronizados: ${BASE_STORES.map((s) => s.name).join(', ')}.`,
+    );
+    console.log(
+      `ID Subway de los locales base asignados si faltaban (SPRINT-4A-T15): ` +
+        `${BASE_STORE_SUBWAY_IDS.map((s) => s.subwayStoreId).join(', ')}.`,
     );
     console.log(
       `Catálogo de medios de pago sincronizado (SPRINT-4-T32): ` +

@@ -33,13 +33,17 @@ datasource db {
 
 /// Local de la franquicia (dos en Melipilla y uno en Calera de Tango).
 model Store {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name      String   @db.VarChar(100)
-  city      String   @db.VarChar(100)
-  address   String   @db.VarChar(200)
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String   @db.VarChar(100)
+  city          String   @db.VarChar(100)
+  address       String   @db.VarChar(200)
+  /// ID del local asignado por Subway (SPRINT-4A-T15): opcional, único y solo
+  /// dígitos (1 a 10, CHECK). Identifica el local en el reporte de MrComanda;
+  /// el número interno de MrComanda («208» en «208 - 72597») no se guarda.
+  subwayStoreId String?  @unique @map("subway_store_id") @db.VarChar(10)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   users              User[]
   auditLogs          AuditLog[]
