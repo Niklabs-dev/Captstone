@@ -22,8 +22,9 @@ interface Schema {
 
 // Contrato OpenAPI de la consulta de propinas diarias (SPRINT-4A-T04): JWT,
 // resumen en español, errores completos y DTO de respuesta tipados con
-// description y example en cada campo; y de la exportación a Excel
-// (SPRINT-4A-T05), que documenta el binario .xlsx.
+// description y example en cada campo; de la exportación a Excel
+// (SPRINT-4A-T05), que documenta el binario .xlsx; y del pago por período
+// (SPRINT-4A-T06) con su historial.
 describe('Swagger de la consulta de propinas diarias (SPRINT-4A-T04)', () => {
   let app: INestApplication;
   let document: OpenAPIObject;
@@ -105,6 +106,83 @@ describe('Swagger de la consulta de propinas diarias (SPRINT-4A-T04)', () => {
       'name' in parameter ? parameter.name : '',
     );
     expect(names.sort()).toEqual(['from', 'storeId', 'to']);
+  });
+
+  it('POST y GET /daily-tips/payment-batches documentan JWT, errores y DTO', () => {
+    const post = document.paths['/daily-tips/payment-batches']?.post;
+    if (!post) throw new Error('Falta POST /daily-tips/payment-batches');
+    expect(post.tags).toContain('daily-tips');
+    expect(post.summary).toEqual(expect.any(String));
+    expect(post.security).toEqual(expect.arrayContaining([{ bearer: [] }]));
+    expect(Object.keys(post.responses).sort()).toEqual(
+      ['201', '400', '401', '403', '404', '409'].sort(),
+    );
+    expect(post.responses['201']).toMatchObject({
+      content: {
+        'application/json': {
+          schema: { $ref: '#/components/schemas/TipPaymentBatchResponseDto' },
+        },
+      },
+    });
+    expect(post.responses['409']).toMatchObject({
+      content: {
+        'application/json': {
+          schema: { $ref: '#/components/schemas/TipPaymentConflictDto' },
+        },
+      },
+    });
+    expect(post.requestBody).toMatchObject({
+      content: {
+        'application/json': {
+          schema: { $ref: '#/components/schemas/TipPaymentPeriodDto' },
+        },
+      },
+    });
+
+    const list = operation('/daily-tips/payment-batches');
+    expect(list.tags).toContain('daily-tips');
+    expect(list.security).toEqual(expect.arrayContaining([{ bearer: [] }]));
+    expect(Object.keys(list.responses).sort()).toEqual(
+      ['200', '400', '401', '403', '404'].sort(),
+    );
+    expect(list.responses['200']).toMatchObject({
+      content: {
+        'application/json': {
+          schema: {
+            $ref: '#/components/schemas/TipPaymentBatchListResponseDto',
+          },
+        },
+      },
+    });
+
+    for (const name of [
+      'TipPaymentPeriodDto',
+      'TipPaymentBatchResponseDto',
+      'TipPaymentConflictDto',
+    ]) {
+      for (const [field, property] of Object.entries(schema(name).properties)) {
+        if (property.$ref || property.allOf) continue;
+        expect(property.description, `${name}.${field}`).toEqual(
+          expect.any(String),
+        );
+        expect('example' in property, `${name}.${field}`).toBe(true);
+      }
+    }
+    expect(
+      Object.keys(schema('TipPaymentBatchResponseDto').properties).sort(),
+    ).toEqual(
+      [
+        'id',
+        'store',
+        'periodStart',
+        'periodEnd',
+        'totalAmount',
+        'allocationCount',
+        'workerCount',
+        'paidBy',
+        'paidAt',
+      ].sort(),
+    );
   });
 
   it('documenta los filtros: local, rango y estado', () => {

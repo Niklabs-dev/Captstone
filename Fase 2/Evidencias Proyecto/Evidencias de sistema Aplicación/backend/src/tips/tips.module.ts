@@ -7,6 +7,8 @@ import { MyTipReceiptsService } from './my-tip-receipts.service.js';
 import { StoresModule } from '../stores/stores.module.js';
 import { TipPaymentAlertsController } from './tip-payment-alerts.controller.js';
 import { TipPaymentAlertsService } from './tip-payment-alerts.service.js';
+import { TipPaymentBatchesController } from './tip-payment-batches.controller.js';
+import { TipPaymentBatchesService } from './tip-payment-batches.service.js';
 import { TipPoolsController } from './tip-pools.controller.js';
 import { TipPoolsService } from './tip-pools.service.js';
 import { TipsController } from './tips.controller.js';
@@ -15,12 +17,14 @@ import { TipsService } from './tips.service.js';
 // Registro diario (SPRINT-3-T10), reparto (SPRINT-3-T12) y alerta legal
 // (SPRINT-3-T14): todas se derivan de los registros diarios del mismo módulo.
 // La consulta de propinas diarias por trabajador (SPRINT-4A-T04) vive aquí y
-// se exporta para el pago por período y el portal; la exportación Excel
-// (SPRINT-4A-T05) la reutiliza en DailyTipsExportService.
+// se exporta para el portal; la reutilizan la exportación Excel
+// (SPRINT-4A-T05, DailyTipsExportService) y el pago por período
+// (SPRINT-4A-T06, TipPaymentBatchesService).
 @Module({
   imports: [StoresModule],
   controllers: [
     DailyTipsController,
+    TipPaymentBatchesController,
     MyTipReceiptsController,
     TipsController,
     TipPoolsController,
@@ -29,6 +33,7 @@ import { TipsService } from './tips.service.js';
   providers: [
     DailyTipsService,
     DailyTipsExportService,
+    TipPaymentBatchesService,
     MyTipReceiptsService,
     TipsService,
     TipPoolsService,
