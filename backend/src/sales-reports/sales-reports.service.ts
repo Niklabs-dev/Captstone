@@ -236,6 +236,7 @@ export class SalesReportsService {
             tipFundAmount: true,
             cashDifference: true,
             differenceReason: true,
+            voucherId: true,
           },
         }),
         this.operatingDays.listSalesDays(
@@ -278,6 +279,7 @@ export class SalesReportsService {
         tipFundAmount: toAmount(item.tipFundAmount),
         cashDifference: toAmount(item.cashDifference),
         differenceReason: item.differenceReason,
+        hasVoucher: item.voucherId !== null,
       })),
       salesDays: salesDays.items.map((item) => ({
         storeId: item.store.id,

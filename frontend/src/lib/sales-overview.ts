@@ -62,6 +62,9 @@ export interface DailyOperationFigures {
   cashTipAmount: number;
   tipFundAmount: number;
   cashDifference: CashDifference;
+  // SPRINT-4A-T11: indica si hay foto del voucher; el archivo se revisa en el
+  // detalle de la operación por el BFF autenticado.
+  hasVoucher: boolean;
 }
 export interface CashDifferenceLine {
   store: StoreRef;
@@ -301,7 +304,10 @@ function parseFigures(value: unknown): DailyOperationFigures | null {
     !isUuid(value.operationId) ||
     !count(value.cardTipAmount) ||
     !count(value.cashTipAmount) ||
-    !count(value.tipFundAmount)
+    !count(value.tipFundAmount) ||
+    typeof value.hasVoucher !== 'boolean' ||
+    // La base exige el voucher cuando hay propina con tarjeta.
+    (value.cardTipAmount > 0 && !value.hasVoucher)
   )
     return null;
   const cashDifference = parseCashDifference(value.cashDifference);
@@ -312,6 +318,7 @@ function parseFigures(value: unknown): DailyOperationFigures | null {
         cashTipAmount: value.cashTipAmount,
         tipFundAmount: value.tipFundAmount,
         cashDifference,
+        hasVoucher: value.hasVoucher,
       }
     : null;
 }
@@ -854,6 +861,15 @@ export function cashDifferenceLabel(type: CashDifferenceType): string {
   if (type === 'SOBRANTE') return 'Sobrante';
   if (type === 'FALTANTE') return 'Faltante';
   return 'Sin diferencia';
+}
+// SPRINT-4A-T11: indicador de voucher por operación. Sin propina con tarjeta
+// no corresponde voucher; con ella la base lo exige siempre.
+export function voucherPresentation(figures: DailyOperationFigures): {
+  label: string;
+  tone: StatusTone;
+} {
+  if (figures.hasVoucher) return { label: 'Con voucher', tone: 'ok' };
+  return { label: 'Sin voucher', tone: 'neutral' };
 }
 
 // Días que debían informar ventas y no las tienen: CERRADO e IMPORTADO

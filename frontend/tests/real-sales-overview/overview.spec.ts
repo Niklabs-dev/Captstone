@@ -53,6 +53,11 @@ function slash(date: string): string {
   const [year, month, day] = date.split('-');
   return `${day}/${month}/${year}`;
 }
+// PNG 1x1 real y ficticio para el voucher (SPRINT-4A-T11).
+const png = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
 function money(amount: number): string {
   return '$' + new Intl.NumberFormat('es-CL').format(amount);
 }
@@ -157,11 +162,13 @@ interface Fixture {
   supervisorEmail: string;
   workerId: string;
 }
-// Local con calendario de todos los días desde hace 10 días.
+// Local con calendario de todos los días desde hace 10 días. Sin Excel en la
+// prueba, la equivalencia MrComanda (escrita directo en la base) se omite.
 async function createStore(
   request: APIRequestContext,
   label: string,
   calendar = true,
+  externalCode = true,
 ): Promise<Fixture> {
   const storeName = `${label} T14 ${randomUUID()}`;
   const store = await request.post(backend + '/stores', {
@@ -172,7 +179,7 @@ async function createStore(
   const storeId = idOf(await store.json());
   storeIds.push(storeId);
   const code = `${randomInt(100, 999)} - ${randomInt(10_000, 99_999)}`;
-  linkExternalCode(storeId, code);
+  if (externalCode) linkExternalCode(storeId, code);
   if (calendar)
     expect(
       (
@@ -235,6 +242,7 @@ async function registerOperation(
   cashTip: number,
   difference: number,
   reason: string,
+  cardTip = 0,
 ): Promise<string> {
   const login = await request.post(backend + '/auth/login', {
     data: { email: fixture.supervisorEmail, password },
@@ -248,11 +256,21 @@ async function registerOperation(
     multipart: {
       storeId: fixture.storeId,
       businessDate: date,
-      cardTipAmount: '0',
+      cardTipAmount: String(cardTip),
       cashTipAmount: String(cashTip),
       cashDifference: String(difference),
       differenceReason: reason,
       participantIds: fixture.workerId,
+      // Con propina de tarjeta la foto del voucher es obligatoria.
+      ...(cardTip > 0
+        ? {
+            voucher: {
+              name: 'voucher-ficticio.png',
+              mimeType: 'image/png',
+              buffer: png,
+            },
+          }
+        : {}),
     },
   });
   expect(response.status()).toBe(201);
@@ -432,7 +450,8 @@ test('Panel: datos reales, sin dato, día cerrado, enlaces a cada fuente y carga
     }),
   ).toBeVisible();
   const operation = page.getByRole('main');
-  await expect(operation).toContainText('-' + money(1500) + ' · Faltante');
+  await expect(operation).toContainText('-' + money(1500));
+  await expect(operation).toContainText('Faltante');
   await expect(operation).toContainText(reason);
   await expect(operation).toContainText('No incluye ventas');
   await noOverflow(page);
@@ -629,6 +648,101 @@ test('Reportes: rango y local, medios dinámicos, propinas separadas, vacío y f
     ).toHaveCount(0);
   }
   await noOverflow(page);
+});
+
+test('Voucher: el administrador revisa la foto y la diferencia; otro local recibe 403 (SPRINT-4A-T11)', async ({
+  page,
+  context,
+  baseURL,
+  request,
+}) => {
+  const today = chileToday();
+  const withVoucher = shift(today, -2);
+  const cashOnly = shift(today, -1);
+  const fixture = await createStore(request, 'Voucher', false, false);
+  const foreign = await createStore(request, 'Voucher ajeno', false, false);
+  const reason = 'Faltante de arqueo ' + randomUUID().slice(0, 8);
+  const operationId = await registerOperation(
+    request,
+    fixture,
+    withVoucher,
+    3000,
+    -1200,
+    reason,
+    9000,
+  );
+  await registerOperation(request, fixture, cashOnly, 2000, 800, 'Sobrante');
+  const voucherPath = '/api/daily-operations/' + operationId + '/voucher';
+
+  await login(context, baseURL!, adminEmail, adminPassword);
+  // Lista por local y rango: propinas, diferencia resaltada, voucher y enlace.
+  await page.goto(
+    `/admin/reportes-ventas?from=${shift(today, -3)}&to=${today}&storeId=${fixture.storeId}`,
+  );
+  const days = section(page, 'Detalle por día');
+  const day = (date: string): Locator =>
+    days.getByRole('row').filter({ hasText: display(date) });
+  await expect(day(withVoucher)).toContainText(money(9000));
+  await expect(day(withVoucher)).toContainText(money(3000));
+  await expect(day(withVoucher)).toContainText('-' + money(1200));
+  await expect(day(withVoucher)).toContainText('Faltante');
+  await expect(day(withVoucher)).toContainText(reason);
+  await expect(day(withVoucher)).toContainText('Con voucher');
+  await expect(day(cashOnly)).toContainText('+' + money(800));
+  await expect(day(cashOnly)).toContainText('Sobrante');
+  await expect(day(cashOnly)).toContainText('Sin voucher');
+  await noOverflow(page);
+  await day(withVoucher)
+    .getByRole('link', { name: /^Ver operación diaria/ })
+    .click();
+
+  // Detalle: vista previa y descarga por el BFF, sin URL pública.
+  await expect(
+    page.getByRole('heading', {
+      name: `Operación diaria · ${fixture.storeName} · ${display(withVoucher)}`,
+    }),
+  ).toBeVisible();
+  const main = page.getByRole('main');
+  await expect(main).toContainText('-' + money(1200));
+  await expect(main).toContainText('Faltante');
+  const preview = page.getByRole('img', { name: /^Foto del voucher/ });
+  await expect(preview).toBeVisible();
+  await expect(preview).toHaveAttribute('src', voucherPath);
+  await expect
+    .poll(() =>
+      preview.evaluate((image: HTMLImageElement) => image.naturalWidth),
+    )
+    .toBeGreaterThan(0);
+  const download = page.getByRole('link', { name: /^Descargar voucher de/ });
+  await expect(download).toHaveAttribute('href', voucherPath);
+  const file = await context.request.get(voucherPath);
+  expect(file.status()).toBe(200);
+  expect(file.headers()['content-type']).toBe('image/png');
+  expect(file.headers()['cache-control']).toBe('private, no-store');
+  expect(Buffer.from(await file.body())).toEqual(png);
+  await noOverflow(page);
+
+  // Operación sin propina con tarjeta: sin voucher que revisar.
+  await page.goBack();
+  await day(cashOnly)
+    .getByRole('link', { name: /^Ver operación diaria/ })
+    .click();
+  await expect(page.getByRole('main')).toContainText('Sin voucher:');
+  await expect(page.getByRole('img', { name: /^Foto del voucher/ })).toHaveCount(
+    0,
+  );
+
+  // El supervisor del local lo descarga; el de otro local recibe 403.
+  await login(context, baseURL!, fixture.supervisorEmail, password);
+  expect((await context.request.get(voucherPath)).status()).toBe(200);
+  await login(context, baseURL!, foreign.supervisorEmail, password);
+  expect((await context.request.get(voucherPath)).status()).toBe(403);
+  // El CONTADOR no lo revisa hasta que el PO lo confirme.
+  const accountant = await createAccount(request, 'CONTADOR', null);
+  await login(context, baseURL!, accountant.email, password);
+  expect((await context.request.get(voucherPath)).status()).toBe(403);
+  await context.clearCookies();
+  expect((await context.request.get(voucherPath)).status()).toBe(401);
 });
 
 test('Calendario: revisa la semana y registra o quita un cierre con fecha y motivo', async ({

@@ -20,6 +20,7 @@ import {
 import {
   Amount,
   CashDifferencesTable,
+  DifferenceBadge,
   EmptyState,
   rowClass,
   SalesByMethodTable,
@@ -27,6 +28,7 @@ import {
   StatusBadge,
   SummaryTiles,
   TablePanel,
+  VoucherBadge,
 } from './SalesOverviewParts';
 
 // Reporte por rango y local (SPRINT-4R-T14): ventas del Excel vigente con
@@ -178,6 +180,7 @@ function DaysTable({ stores }: { stores: StoreReport[] }): ReactElement {
           <RightHeading>Propina tarjeta</RightHeading>
           <RightHeading>Propina efectivo</RightHeading>
           <Heading>Diferencia de efectivo</Heading>
+          <Heading>Voucher</Heading>
           <Heading>Fuentes</Heading>
         </tr>
       </thead>
@@ -218,16 +221,32 @@ function DaysTable({ stores }: { stores: StoreReport[] }): ReactElement {
               <td className={`${tableCellClass} min-w-44`}>
                 {difference ? (
                   <>
-                    <span className="font-semibold">
-                      <Amount value={difference.amount} signed />
-                    </span>{' '}
-                    · {cashDifferenceLabel(difference.type)}
+                    {/* SPRINT-4A-T11: sobrantes y faltantes se resaltan. */}
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold">
+                        <Amount value={difference.amount} signed />
+                      </span>
+                      {difference.type === 'SIN_DIFERENCIA' ? (
+                        <span className="text-ink2">
+                          {cashDifferenceLabel(difference.type)}
+                        </span>
+                      ) : (
+                        <DifferenceBadge type={difference.type} />
+                      )}
+                    </span>
                     {difference.reason && (
                       <span className="mt-1 block text-xs break-words text-ink2">
                         Motivo: {difference.reason}
                       </span>
                     )}
                   </>
+                ) : (
+                  <Amount value={null} />
+                )}
+              </td>
+              <td className={`${tableCellClass} whitespace-nowrap`}>
+                {day.dailyOperation ? (
+                  <VoucherBadge figures={day.dailyOperation} />
                 ) : (
                   <Amount value={null} />
                 )}
@@ -365,7 +384,7 @@ export function SalesReportView({
       <TablePanel
         id="report-days-title"
         title="Detalle por día"
-        description="Estado de la importación, ventas y operación diaria de cada día informado, con enlace a cada fuente."
+        description="Estado de la importación, ventas y operación diaria de cada día informado, con indicador de voucher y enlace a cada fuente. La foto del voucher se revisa en el detalle de la operación."
       >
         <DaysTable stores={report.stores} />
       </TablePanel>

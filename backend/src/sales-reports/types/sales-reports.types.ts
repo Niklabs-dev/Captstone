@@ -77,6 +77,10 @@ export interface DailyOperationFigures {
   cashTipAmount: number;
   tipFundAmount: number;
   cashDifference: CashDifference;
+  // Si la operación tiene foto del voucher de propinas de tarjeta
+  // (SPRINT-4A-T11). El archivo se descarga solo por
+  // GET /daily-operations/:id/voucher; aquí nunca viaja su contenido.
+  hasVoucher: boolean;
 }
 
 export interface ImportClosure {

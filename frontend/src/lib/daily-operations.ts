@@ -1,4 +1,4 @@
-import { isRecord } from './auth';
+import { isRecord, type AuthUser } from './auth';
 import { isUuid } from './users';
 import { formatClp, isTipDate } from './tips';
 
@@ -91,6 +91,18 @@ export function isVoucherMimeType(value: unknown): value is VoucherMimeType {
     typeof value === 'string' &&
     (VOUCHER_MIME_TYPES as readonly string[]).includes(value)
   );
+}
+// SPRINT-4A-T11: el voucher privado se descarga por el BFF autenticado; el
+// supervisor solo el de su local (el backend responde 403 para otro local) y
+// el administrador el de cualquier local. El CONTADOR queda fuera hasta que
+// el PO lo confirme, aunque el backend ya le permita la lectura.
+export function canReadDailyVoucher(user: AuthUser): boolean {
+  if (user.role === 'ADMINISTRADOR') return true;
+  return user.role === 'SUPERVISOR' && isUuid(user.storeId);
+}
+// Ruta del BFF que entrega el voucher; nunca una URL pública del archivo.
+export function dailyVoucherHref(operationId: string): string {
+  return `/api/daily-operations/${operationId}/voucher`;
 }
 // Validación compartida entre la interfaz y el proxy del voucher adjunto.
 export function voucherFileError(file: {

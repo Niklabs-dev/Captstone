@@ -359,6 +359,7 @@ describe.skipIf(!databaseUrl)(
             type: 'FALTANTE',
             reason: 'Faltante en el arqueo',
           },
+          hasVoucher: true,
         });
 
         // Local B: ventas sin operación diaria (ausencia de datos = null).

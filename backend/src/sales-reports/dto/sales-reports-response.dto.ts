@@ -221,6 +221,13 @@ export class DailyOperationFiguresDto implements DailyOperationFigures {
     example: EXAMPLE_CASH_DIFFERENCE,
   })
   cashDifference: CashDifferenceDto;
+
+  @ApiProperty({
+    description:
+      'Indica si la operación tiene la foto del voucher de propinas de tarjeta. El archivo se descarga solo por GET /daily-operations/{id}/voucher.',
+    example: true,
+  })
+  hasVoucher: boolean;
 }
 
 export class ImportClosureDto implements ImportClosure {

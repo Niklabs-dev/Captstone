@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server';
 import { hasTrustedOrigin, isRecord } from '@/lib/auth';
 import { callBackend } from '@/lib/auth-backend';
 import { isProxyUuid, readProxyForm } from '@/lib/backend-proxy';
-import { getSupervisorSession } from '@/lib/supervisor-session';
+import {
+  getSupervisorSession,
+  getVoucherReaderSession,
+} from '@/lib/supervisor-session';
 import { isTipDate } from '@/lib/tips';
 import {
   DAILY_STORE_INACTIVE_MESSAGE,
@@ -80,13 +83,50 @@ function sameParticipantIds(
 function invalidVoucherFile(voucher: FormDataEntryValue | null): boolean {
   return voucher !== null && (!(voucher instanceof File) || voucher.size === 0);
 }
+// Descarga privada del voucher (SPRINT-4R-T01, abierta al administrador en
+// SPRINT-4A-T11): reenvía el binario y el estado de integridad. El alcance por
+// local del supervisor lo aplica el backend (403 para otro local).
+async function downloadVoucher(
+  request: Request,
+  operationId: string,
+): Promise<Response> {
+  const session = await getVoucherReaderSession();
+  if (!session.ok) return failure(session.status);
+  if (new URL(request.url).search) return failure(400);
+  const upstream = await callBackend(
+    `/daily-operations/${operationId}/voucher`,
+    {
+      headers: { Authorization: 'Bearer ' + session.token },
+      redirect: 'error',
+    },
+  );
+  if (!upstream) return failure(503);
+  if (upstream.status !== 200) {
+    await upstream.body?.cancel();
+    return failure(upstream.ok ? 502 : upstream.status);
+  }
+  const forwarded = new Headers({ 'X-Content-Type-Options': 'nosniff' });
+  for (const name of [
+    'Content-Type',
+    'Content-Length',
+    'Content-Disposition',
+    'X-Voucher-Integrity',
+  ]) {
+    const value = upstream.headers.get(name);
+    if (value) forwarded.set(name, value);
+  }
+  forwarded.set('Cache-Control', 'private, no-store');
+  return new Response(upstream.body, { status: 200, headers: forwarded });
+}
 export async function GET(
   request: Request,
   context: Context,
 ): Promise<Response> {
+  const { path = [] } = await context.params;
+  if (path.length === 2 && isProxyUuid(path[0]) && path[1] === 'voucher')
+    return downloadVoucher(request, path[0]);
   const session = await getSupervisorSession();
   if (!session.ok) return failure(session.status);
-  const { path = [] } = await context.params;
   const query = new URL(request.url).searchParams;
   if (!path.length) {
     const storeId = query.get('storeId');
@@ -167,33 +207,6 @@ export async function GET(
       session.user.storeId,
     );
     return operation ? respond(operation) : failure(502);
-  }
-  if (path.length === 2 && isProxyUuid(path[0]) && path[1] === 'voucher') {
-    // Descarga privada: reenvía el binario y el estado de integridad del voucher.
-    const upstream = await callBackend(`/daily-operations/${path[0]}/voucher`, {
-      headers: { Authorization: 'Bearer ' + session.token },
-      redirect: 'error',
-    });
-    if (!upstream) return failure(503);
-    if (!upstream.ok) {
-      await upstream.body?.cancel();
-      return failure(upstream.ok ? 502 : upstream.status);
-    }
-    const forwarded = new Headers({ 'X-Content-Type-Options': 'nosniff' });
-    for (const name of [
-      'Content-Type',
-      'Content-Length',
-      'Content-Disposition',
-      'X-Voucher-Integrity',
-    ]) {
-      const value = upstream.headers.get(name);
-      if (value) forwarded.set(name, value);
-    }
-    forwarded.set('Cache-Control', 'private, no-store');
-    return new Response(upstream.body, {
-      status: upstream.status,
-      headers: forwarded,
-    });
   }
   return failure(404);
 }

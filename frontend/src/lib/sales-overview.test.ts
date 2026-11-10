@@ -8,6 +8,7 @@ import {
   formatAmount,
   formatSignedAmount,
   importDetailHref,
+  voucherPresentation,
   methodAmount,
   missingSalesDays,
   operationDetailHref,
@@ -64,6 +65,7 @@ const OPERATION = {
   cashTipAmount: 8000,
   tipFundAmount: 20000,
   cashDifference: { amount: -2500, type: 'FALTANTE', reason: 'Vuelto' },
+  hasVoucher: true,
 };
 const STATUS = {
   status: 'IMPORTADO',
@@ -236,8 +238,47 @@ test('El reporte valida días, medios dinámicos y estados', () => {
   const badStatus = report() as {
     stores: { days: { importStatus: Record<string, unknown> }[] }[];
   };
-  badStatus.stores[0].days[0].importStatus.status = 'FALTANTE';
+  // Copia: CLOSED es compartido y no debe quedar alterado para otras pruebas.
+  badStatus.stores[0].days[0].importStatus = { ...CLOSED, status: 'FALTANTE' };
   assert.equal(parseSalesReport(badStatus), null);
+});
+
+test('El indicador de voucher es obligatorio y coherente con la propina de tarjeta (SPRINT-4A-T11)', () => {
+  const parsed = parseSalesReport(report());
+  const figures = parsed?.stores[0].days[1].dailyOperation;
+  assert.ok(figures);
+  assert.equal(figures.hasVoucher, true);
+  assert.deepEqual(voucherPresentation(figures), {
+    label: 'Con voucher',
+    tone: 'ok',
+  });
+  assert.deepEqual(
+    voucherPresentation({ ...figures, cardTipAmount: 0, hasVoucher: false }),
+    { label: 'Sin voucher', tone: 'neutral' },
+  );
+  // Contrato previo sin el indicador, con propina de tarjeta sin voucher
+  // (la base lo exige) o con un valor no booleano: se rechaza la respuesta.
+  for (const hasVoucher of [undefined, false, 'sí']) {
+    const invalid = report() as {
+      stores: { days: { dailyOperation: unknown }[] }[];
+    };
+    invalid.stores[0].days[1].dailyOperation = { ...OPERATION, hasVoucher };
+    assert.equal(parseSalesReport(invalid), null);
+  }
+  // Sin propina de tarjeta, false es válido.
+  const cashOnly = report() as {
+    stores: { days: { dailyOperation: unknown }[] }[];
+  };
+  cashOnly.stores[0].days[1].dailyOperation = {
+    ...OPERATION,
+    cardTipAmount: 0,
+    tipFundAmount: 8000,
+    hasVoucher: false,
+  };
+  assert.equal(
+    parseSalesReport(cashOnly)?.stores[0].days[1].dailyOperation?.hasVoucher,
+    false,
+  );
 });
 
 test('El estado diario de ventas y el calendario se proyectan al contrato', () => {

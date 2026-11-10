@@ -118,6 +118,14 @@ test(
         request.url?.startsWith('/daily-operations/') &&
         request.url.endsWith('/voucher')
       ) {
+        // El backend acota el local del supervisor: otro local responde 403.
+        if (mode === 'foreign-voucher' || mode === 'missing-voucher') {
+          response.writeHead(mode === 'foreign-voucher' ? 403 : 404, {
+            'Content-Type': 'application/json',
+          });
+          response.end(JSON.stringify({ message: 'SQL /private/vouchers' }));
+          return;
+        }
         const body = Buffer.from('voucher-bytes');
         response.writeHead(200, {
           'Content-Type': 'image/jpeg',
@@ -520,6 +528,65 @@ test(
         Buffer.from(await result.arrayBuffer()),
         Buffer.from('voucher-bytes'),
       );
+      // SPRINT-4A-T11: el administrador revisa el voucher desde el panel por
+      // el mismo BFF privado; CONTADOR y TRABAJADOR siguen sin acceso.
+      result = await send({
+        token: 'admin',
+        target: '/api/daily-operations/' + operationId + '/voucher',
+      });
+      assert.equal(result.status, 200);
+      assert.equal(result.headers.get('Content-Type'), 'image/jpeg');
+      assert.equal(result.headers.get('Cache-Control'), 'private, no-store');
+      assert.equal(result.headers.get('X-Content-Type-Options'), 'nosniff');
+      assert.deepEqual(
+        Buffer.from(await result.arrayBuffer()),
+        Buffer.from('voucher-bytes'),
+      );
+      for (const token of ['worker', 'accountant'])
+        assert.equal(
+          (
+            await send({
+              token,
+              target: '/api/daily-operations/' + operationId + '/voucher',
+            })
+          ).status,
+          403,
+        );
+      for (const token of ['', 'invalid'])
+        assert.equal(
+          (
+            await send({
+              token,
+              target: '/api/daily-operations/' + operationId + '/voucher',
+            })
+          ).status,
+          401,
+        );
+      assert.equal(
+        (
+          await send({
+            token: 'admin',
+            target: '/api/daily-operations/' + operationId + '/voucher',
+            query: '?download=1',
+          })
+        ).status,
+        400,
+      );
+      // Un supervisor de otro local recibe el 403 del backend, sin detalles.
+      mode = 'foreign-voucher';
+      result = await send({
+        target: '/api/daily-operations/' + operationId + '/voucher',
+      });
+      assert.equal(result.status, 403);
+      assert.doesNotMatch(await result.text(), /private/);
+      mode = 'missing-voucher';
+      result = await send({
+        token: 'admin',
+        target: '/api/daily-operations/' + operationId + '/voucher',
+      });
+      assert.equal(result.status, 404);
+      assert.doesNotMatch(await result.text(), /private/);
+      mode = '';
       assert.equal(
         (
           await send({
