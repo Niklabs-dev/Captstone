@@ -13,6 +13,9 @@ export interface NavigationItem {
     | '/admin/alertas-dt'
     | '/admin/medios-pago'
     | '/admin/importacion-ventas'
+    | '/admin/panel-ventas'
+    | '/admin/reportes-ventas'
+    | '/admin/calendario-locales'
     | '/liquidaciones'
     | '/propinas/diarias'
     | '/propinas/repartos'
@@ -34,6 +37,9 @@ export function getNavigationView(pathname: string): {
     { href: '/admin/alertas-dt', title: 'Alertas de registro en la DT' },
     { href: '/admin/medios-pago', title: 'Medios de pago' },
     { href: '/admin/importacion-ventas', title: 'Importar ventas' },
+    { href: '/admin/panel-ventas', title: 'Panel de ventas' },
+    { href: '/admin/reportes-ventas', title: 'Reportes de ventas' },
+    { href: '/admin/calendario-locales', title: 'Calendario de locales' },
     { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
     { href: '/propinas/repartos', title: 'Reparto de propinas' },
     { href: '/propinas/diarias', title: 'Operación diaria' },
@@ -87,6 +93,9 @@ export function getNavigationItems(
         { href: '/admin/alertas-dt', label: 'Alertas DT' },
         { href: '/admin/medios-pago', label: 'Medios de pago' },
         { href: '/admin/importacion-ventas', label: 'Importar ventas' },
+        { href: '/admin/panel-ventas', label: 'Panel de ventas' },
+        { href: '/admin/reportes-ventas', label: 'Reportes de ventas' },
+        { href: '/admin/calendario-locales', label: 'Calendario de locales' },
         { href: '/liquidaciones', label: 'Liquidaciones' },
         { href: '/propinas/repartos', label: 'Reparto de propinas' },
       ]
