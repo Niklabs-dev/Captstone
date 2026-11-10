@@ -48,7 +48,8 @@
     "pg": "^8.23.0",
     "read-excel-file": "9.3.12",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "write-excel-file": "4.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -73,7 +74,6 @@
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.70.1",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^4.1.2",
-    "write-excel-file": "4.1.1"
+    "vitest": "^4.1.2"
   }
 }

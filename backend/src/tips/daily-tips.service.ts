@@ -297,7 +297,9 @@ export class DailyTipsService {
     return toDbDate(parsed);
   }
 
-  private async findStore(storeId: string): Promise<DailyTipStore> {
+  // Local con id y nombre; 404 si no existe. Sin control de acceso: lo
+  // aplica quien la invoca (también la exportación y el pago por período).
+  async findStore(storeId: string): Promise<DailyTipStore> {
     const store = await this.prisma.store.findUnique({
       where: { id: storeId },
       select: { id: true, name: true },

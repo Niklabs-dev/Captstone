@@ -97,3 +97,16 @@ export interface DailyTipAllocationFact {
   status: TipAllocationStatusCode;
   paymentBatchId: string | null;
 }
+
+/// Archivo Excel de propinas del período (GET /daily-tips/export,
+/// SPRINT-4A-T05). workerCount y allocationCount van a la auditoría; los
+/// montos y los datos personales solo viajan en el archivo.
+export interface DailyTipsExportFile {
+  store: DailyTipStore;
+  from: string;
+  to: string;
+  fileName: string;
+  content: Buffer;
+  workerCount: number;
+  allocationCount: number;
+}

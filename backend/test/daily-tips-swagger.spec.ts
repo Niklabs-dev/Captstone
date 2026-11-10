@@ -3,6 +3,7 @@ import type { OpenAPIObject } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module.js';
 import { createSwaggerDocument } from '../src/swagger.js';
+import { XLSX_MIME_TYPE } from '../src/tips/export/daily-tips-workbook.js';
 
 type Operation = NonNullable<OpenAPIObject['paths'][string]['get']>;
 
@@ -21,7 +22,8 @@ interface Schema {
 
 // Contrato OpenAPI de la consulta de propinas diarias (SPRINT-4A-T04): JWT,
 // resumen en español, errores completos y DTO de respuesta tipados con
-// description y example en cada campo.
+// description y example en cada campo; y de la exportación a Excel
+// (SPRINT-4A-T05), que documenta el binario .xlsx.
 describe('Swagger de la consulta de propinas diarias (SPRINT-4A-T04)', () => {
   let app: INestApplication;
   let document: OpenAPIObject;
@@ -77,6 +79,32 @@ describe('Swagger de la consulta de propinas diarias (SPRINT-4A-T04)', () => {
         },
       },
     });
+  });
+
+  it('GET /daily-tips/export documenta el binario .xlsx, su nombre y los errores', () => {
+    const op = operation('/daily-tips/export');
+    expect(op.tags).toContain('daily-tips');
+    expect(op.summary).toEqual(expect.any(String));
+    expect(op.security).toEqual(expect.arrayContaining([{ bearer: [] }]));
+    expect(Object.keys(op.responses).sort()).toEqual(
+      ['200', '400', '401', '403', '404'].sort(),
+    );
+    const ok = op.responses['200'] as {
+      content?: Record<string, { schema?: unknown }>;
+      headers?: Record<string, unknown>;
+    };
+    expect(ok.content?.[XLSX_MIME_TYPE]?.schema).toEqual({
+      type: 'string',
+      format: 'binary',
+    });
+    expect(Object.keys(ok.headers ?? {})).toContain('Content-Disposition');
+    expect(
+      (op.responses['403'] as { description: string }).description,
+    ).toContain('SUPERVISOR');
+    const names = (op.parameters ?? []).map((parameter) =>
+      'name' in parameter ? parameter.name : '',
+    );
+    expect(names.sort()).toEqual(['from', 'storeId', 'to']);
   });
 
   it('documenta los filtros: local, rango y estado', () => {

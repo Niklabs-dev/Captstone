@@ -79,6 +79,10 @@ export const AUDIT_ACTION = {
   STORE_OPERATING_CALENDAR_UPDATED: 'STORE_OPERATING_CALENDAR_UPDATED',
   STORE_CLOSURE_CREATED: 'STORE_CLOSURE_CREATED',
   STORE_CLOSURE_DELETED: 'STORE_CLOSURE_DELETED',
+  // Exportación a Excel de las propinas del período (SPRINT-4A-T05): el
+  // detalle registra local, rango y cantidades, jamás montos ni datos
+  // personales (Ley N°21.719).
+  DAILY_TIPS_EXPORTED: 'DAILY_TIPS_EXPORTED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];
