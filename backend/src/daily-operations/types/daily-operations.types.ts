@@ -1,6 +1,19 @@
+import { ROLE, type RoleCode } from '../../auth/constants/roles.constants.js';
+
 // Tipos y constantes de la operación diaria (SPRINT-4R-T01). Los montos se
 // validan y entregan como enteros de JavaScript (CLP no usa centavos); la
 // base los guarda en BIGINT porque el tope supera el entero de 32 bits.
+
+/// Roles que pueden participar del reparto de propinas del día
+/// (SPRINT-4A-T01): el supervisor también es trabajador del local y recibe su
+/// parte. Debe coincidir con el trigger
+/// daily_operation_participants_validate_worker (migración
+/// 20261110030000_participantes_incluyen_supervisor). ADMINISTRADOR y
+/// CONTADOR son roles globales y nunca participan.
+export const TIP_PARTICIPANT_ROLES: readonly RoleCode[] = [
+  ROLE.TRABAJADOR,
+  ROLE.SUPERVISOR,
+];
 
 export const MAX_DAILY_OPERATION_AMOUNT = 9_999_999_999;
 
@@ -14,8 +27,9 @@ export interface DailyOperationPersonResponse {
   name: string;
 }
 
-// Trabajador elegible para el reparto del día, tal como lo expone el catálogo
-// acotado (GET /daily-operations/eligible-workers): solo id y nombre, nunca
+// Trabajador (TRABAJADOR o SUPERVISOR) elegible para el reparto del día, tal
+// como lo expone el catálogo acotado (GET /daily-operations/eligible-workers):
+// solo id y nombre, nunca
 // RUT, correo, teléfono ni credenciales (Ley N°21.719).
 export type EligibleWorkerResponse = DailyOperationPersonResponse;
 

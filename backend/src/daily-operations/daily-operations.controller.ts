@@ -151,7 +151,7 @@ export class DailyOperationsController {
   })
   @ApiBadRequestResponse({
     description:
-      'Campos inválidos, falta el voucher con propina de tarjeta, voucher enviado sin propina de tarjeta, falta el motivo con diferencia distinta de cero, participantIds vacío con fondo mayor que 0, repetidos, inválidos o no elegibles para el local.',
+      'Campos inválidos, falta el voucher con propina de tarjeta, voucher enviado sin propina de tarjeta, falta el motivo con diferencia distinta de cero, participantIds vacío con fondo mayor que 0, repetidos, inválidos o no elegibles para el local (solo TRABAJADOR o SUPERVISOR activos del mismo local; ADMINISTRADOR, CONTADOR, inactivos y usuarios de otro local se rechazan).',
   })
   @ApiForbiddenResponse({
     description:
@@ -312,14 +312,18 @@ export class DailyOperationsController {
     summary:
       'Lista los trabajadores elegibles para el reparto del local (catálogo acotado)',
     description:
-      'TRABAJADOR activos del local ordenados alfabéticamente. Solo expone ' +
+      'TRABAJADOR y SUPERVISOR activos del local (el supervisor también ' +
+      'recibe su parte, SPRINT-4A-T01), en orden estable por nombre, ' +
+      'apellido e id. ADMINISTRADOR, CONTADOR, inactivos y usuarios de otro ' +
+      'local nunca aparecen. Solo expone ' +
       'id y nombre: jamás RUT, correo, teléfono ni credenciales. Un ' +
       'supervisor solo lista su local; el ADMINISTRADOR (rol global) cualquier ' +
       'local dentro de su alcance. Los IDs devueltos son los únicos válidos ' +
       'para participantIds al crear o corregir la operación diaria.',
   })
   @ApiOkResponse({
-    description: 'Arreglo de trabajadores elegibles (posiblemente vacío).',
+    description:
+      'Arreglo de trabajadores y supervisores elegibles (posiblemente vacío).',
     type: DailyOperationPersonDto,
     isArray: true,
   })

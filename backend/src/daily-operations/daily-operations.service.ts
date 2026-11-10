@@ -7,7 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { parseCalendarDate } from '../audit/utils/business-day.util.js';
-import { ROLE } from '../auth/constants/roles.constants.js';
 import { canAccessStore } from '../auth/policies/store-access.policy.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import {
@@ -22,11 +21,12 @@ import { DailyVoucherStorageService } from './daily-voucher-storage.service.js';
 import type { CreateDailyOperationDto } from './dto/create-daily-operation.dto.js';
 import type { ListDailyOperationsQueryDto } from './dto/list-daily-operations-query.dto.js';
 import type { UpdateDailyOperationDto } from './dto/update-daily-operation.dto.js';
-import type {
-  DailyOperationCreateResult,
-  DailyOperationResponse,
-  DailyOperationVoucherResponse,
-  EligibleWorkerResponse,
+import {
+  TIP_PARTICIPANT_ROLES,
+  type DailyOperationCreateResult,
+  type DailyOperationResponse,
+  type DailyOperationVoucherResponse,
+  type EligibleWorkerResponse,
 } from './types/daily-operations.types.js';
 import { isIdenticalDailyOperationRetry } from './utils/daily-operation-retry.util.js';
 import { STORE_FORBIDDEN_MESSAGE } from '../auth/constants/forbidden-messages.constants.js';
@@ -190,8 +190,9 @@ export class DailyOperationsService {
   ) {}
 
   // Catálogo acotado de trabajadores elegibles para el reparto del día
-  // (SPRINT-4R-T03): los TRABAJADOR activos del local, ordenados
-  // alfabéticamente. Solo expone id y nombre completo: jamás RUT, correo,
+  // (SPRINT-4R-T03): los TRABAJADOR y SUPERVISOR activos del local
+  // (SPRINT-4A-T01: el supervisor también recibe su parte), en orden estable
+  // por nombre, apellido e id. Solo expone id y nombre completo: jamás RUT, correo,
   // teléfono ni credenciales (Ley N°21.719). El alcance por local aplica a
   // SUPERVISOR (el suyo) y ADMINISTRADOR (cualquiera, según la política
   // canAccessStore); el resto de los roles ni siquiera alcanza el endpoint.
@@ -204,7 +205,7 @@ export class DailyOperationsService {
       where: {
         storeId,
         isActive: true,
-        role: { code: ROLE.TRABAJADOR },
+        role: { code: { in: [...TIP_PARTICIPANT_ROLES] } },
       },
       select: { id: true, firstName: true, lastName: true },
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }, { id: 'asc' }],
@@ -760,8 +761,9 @@ export class DailyOperationsService {
   }
 
   // Cada ID debe ser un trabajador activo del local de la operación con rol
-  // TRABAJADOR (la base vuelve a exigirlo al insertar, pero aquí el error es
-  // más claro y llega antes de tocar archivos).
+  // TRABAJADOR o SUPERVISOR (SPRINT-4A-T01; la base vuelve a exigirlo al
+  // insertar, pero aquí el error es más claro y llega antes de tocar
+  // archivos). ADMINISTRADOR y CONTADOR nunca participan.
   private async assertParticipantsEligible(
     participantIds: string[],
     storeId: string,
@@ -772,7 +774,7 @@ export class DailyOperationsService {
         id: { in: participantIds },
         storeId,
         isActive: true,
-        role: { code: ROLE.TRABAJADOR },
+        role: { code: { in: [...TIP_PARTICIPANT_ROLES] } },
       },
       select: { id: true },
     });
@@ -781,7 +783,7 @@ export class DailyOperationsService {
     if (ineligible.length > 0) {
       throw new BadRequestException(
         'participantIds incluye trabajadores no elegibles para este local ' +
-          '(deben ser activos, del local y con rol TRABAJADOR): ' +
+          '(deben ser activos, del local y con rol TRABAJADOR o SUPERVISOR): ' +
           ineligible.join(', '),
       );
     }

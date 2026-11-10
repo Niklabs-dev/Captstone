@@ -851,7 +851,8 @@ model DailyOperationVoucher {
 /// propina de tarjeta y la de efectivo en un solo fondo, así que UNA selección
 /// de participantes cubre ambos medios: no hay selecciones paralelas que
 /// diverjan. La base valida al insertar o cambiar la fila (trigger) que el
-/// trabajador sea del mismo local de la operación, con rol TRABAJADOR y
+/// trabajador sea del mismo local de la operación, con rol TRABAJADOR o
+/// SUPERVISOR (SPRINT-4A-T01: el supervisor también recibe su parte) y
 /// activo; una baja lógica o un cambio de rol/local posteriores NO tocan la
 /// selección: la FK al trabajador es Restrict (no hay borrado) y la validación
 /// solo corre al escribir la participación, de modo que el historial se

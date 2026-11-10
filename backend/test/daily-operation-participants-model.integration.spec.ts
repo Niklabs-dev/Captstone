@@ -3,7 +3,8 @@ import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 
 // Tests de integración del modelo de participantes de la operación diaria
 // (SPRINT-4R-T02) contra PostgreSQL real: sin duplicados, solo trabajadores
-// del mismo local/rol TRABAJADOR activos al insertar, bajas lógicas
+// del mismo local con rol TRABAJADOR o SUPERVISOR (SPRINT-4A-T01) activos al
+// insertar, bajas lógicas
 // posteriores que no borran el historial y una única selección compartida por
 // la propina de tarjeta y la de efectivo del mismo local/día. Se omiten si no
 // se define TEST_DATABASE_URL. Cada rechazo esperado va en su propio
@@ -242,17 +243,81 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
-    it('rechaza al supervisor del local: el rol debe ser TRABAJADOR', async () => {
+    // SPRINT-4A-T01: el supervisor también es trabajador del local y recibe
+    // su parte (migración 20261110030000_participantes_incluyen_supervisor).
+    it('acepta al supervisor activo del mismo local como participante', async () => {
       await withinRollback(async (tx) => {
         const base = await crearBase(tx);
         const operationId = await crearOperacion(tx, base);
-        await expect(
-          tx.dailyOperationParticipant.create({
-            data: { operationId, workerId: base.supervisorId },
-          }),
-        ).rejects.toThrow(/trabajador activo del local/);
+        await tx.dailyOperationParticipant.createMany({
+          data: [
+            { operationId, workerId: base.supervisorId },
+            { operationId, workerId: base.workerId },
+          ],
+        });
+        const participants = await tx.dailyOperationParticipant.findMany({
+          where: { operationId },
+          select: { workerId: true },
+        });
+        expect(participants.map((row) => row.workerId).sort()).toEqual(
+          [base.supervisorId, base.workerId].sort(),
+        );
       });
     });
+
+    // Cada rechazo en su propio withinRollback: el error aborta la
+    // transacción. ADMINISTRADOR y CONTADOR se crean con el local de la
+    // operación para probar que el rol, y no solo el local, los excluye.
+    it.each([
+      {
+        label: 'ADMINISTRADOR',
+        role: 'ADMINISTRADOR',
+        local: 'same',
+        active: true,
+      },
+      { label: 'CONTADOR', role: 'CONTADOR', local: 'same', active: true },
+      {
+        label: 'supervisor inactivo',
+        role: 'SUPERVISOR',
+        local: 'same',
+        active: false,
+      },
+      {
+        label: 'supervisor de otro local',
+        role: 'SUPERVISOR',
+        local: 'other',
+        active: true,
+      },
+    ] as const)(
+      'rechaza al $label como participante',
+      async ({ role, local, active }) => {
+        await withinRollback(async (tx) => {
+          const base = await crearBase(tx);
+          const operationId = await crearOperacion(tx, base);
+          const roleRecord = await tx.role.upsert({
+            where: { code: role },
+            update: {},
+            create: { code: role, name: role },
+          });
+          const user = await tx.user.create({
+            data: {
+              email: `rechazado-${role.toLowerCase()}-${local}-${String(active)}@test.invalid`,
+              passwordHash: '$2b$04$hash-de-prueba',
+              firstName: 'No',
+              lastName: 'Elegible',
+              isActive: active,
+              roleId: roleRecord.id,
+              storeId: local === 'same' ? base.storeId : base.otherStoreId,
+            },
+          });
+          await expect(
+            tx.dailyOperationParticipant.create({
+              data: { operationId, workerId: user.id },
+            }),
+          ).rejects.toThrow(/trabajador activo del local/);
+        });
+      },
+    );
 
     it('rechaza al trabajador inactivo aunque sea del local', async () => {
       await withinRollback(async (tx) => {

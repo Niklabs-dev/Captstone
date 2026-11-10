@@ -567,7 +567,7 @@ describe('DailyOperationsService (SPRINT-4R-T01 y SPRINT-4R-T03)', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('el catálogo de elegibles devuelve solo id y nombre de TRABAJADOR activos del local', async () => {
+  it('el catálogo de elegibles devuelve solo id y nombre de TRABAJADOR y SUPERVISOR activos del local', async () => {
     const { service, prisma } = createService();
     prisma.user.findMany.mockResolvedValue([
       { id: WORKER_2, firstName: 'Ana', lastName: 'Zurita' },
@@ -581,7 +581,8 @@ describe('DailyOperationsService (SPRINT-4R-T01 y SPRINT-4R-T03)', () => {
         where: {
           storeId: STORE_ID,
           isActive: true,
-          role: { code: 'TRABAJADOR' },
+          // SPRINT-4A-T01: el supervisor también participa del reparto.
+          role: { code: { in: ['TRABAJADOR', 'SUPERVISOR'] } },
         },
         orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }, { id: 'asc' }],
         select: { id: true, firstName: true, lastName: true },
