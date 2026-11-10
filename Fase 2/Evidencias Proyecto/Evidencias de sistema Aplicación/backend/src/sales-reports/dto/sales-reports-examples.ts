@@ -94,6 +94,7 @@ export const EXAMPLE_DAILY_OPERATION: DailyOperationFigures = {
   cashTipAmount: 8000,
   tipFundAmount: 20000,
   cashDifference: EXAMPLE_CASH_DIFFERENCE,
+  hasVoucher: true,
 };
 
 export const EXAMPLE_CLOSURE: ImportClosure = {

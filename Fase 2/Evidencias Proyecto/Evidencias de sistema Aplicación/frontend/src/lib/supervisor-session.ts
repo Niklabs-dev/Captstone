@@ -3,7 +3,10 @@ import { cookies } from 'next/headers';
 import { ACCESS_COOKIE, type AuthUser } from './auth';
 import { getSession } from './session';
 import { isUuid } from './users';
-import { dailyOperationErrorMessage } from './daily-operations';
+import {
+  canReadDailyVoucher,
+  dailyOperationErrorMessage,
+} from './daily-operations';
 
 export type SupervisorSession =
   | { ok: true; token: string; user: AuthUser & { storeId: string } }
@@ -33,5 +36,33 @@ export const getSupervisorSession = cache(
       token,
       user: { ...session.data, storeId: session.data.storeId },
     };
+  },
+);
+
+export type VoucherReaderSession =
+  | { ok: true; token: string; user: AuthUser }
+  | { ok: false; status: number; message: string };
+
+// SPRINT-4A-T11: lectores del voucher privado por el BFF. El supervisor
+// conserva su acceso (el backend acota su local) y el administrador lo revisa
+// desde el panel de ventas; cualquier otro rol recibe 403.
+export const getVoucherReaderSession = cache(
+  async (): Promise<VoucherReaderSession> => {
+    const session = await getSession();
+    if (!session.ok) return session;
+    if (!canReadDailyVoucher(session.data))
+      return {
+        ok: false,
+        status: 403,
+        message: dailyOperationErrorMessage(403),
+      };
+    const token = (await cookies()).get(ACCESS_COOKIE)?.value;
+    if (!token)
+      return {
+        ok: false,
+        status: 401,
+        message: dailyOperationErrorMessage(401),
+      };
+    return { ok: true, token, user: session.data };
   },
 );

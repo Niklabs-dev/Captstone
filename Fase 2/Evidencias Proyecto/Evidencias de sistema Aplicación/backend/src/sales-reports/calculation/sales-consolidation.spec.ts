@@ -83,6 +83,8 @@ function operationOf(
     tipFundAmount: card + cash,
     cashDifference,
     differenceReason: cashDifference === 0 ? null : `motivo ${cashDifference}`,
+    // La foto del voucher acompaña siempre a la propina de tarjeta.
+    hasVoucher: card > 0,
   };
 }
 
@@ -236,6 +238,24 @@ describe('consolidateSales (SPRINT-4R-T13)', () => {
         type: 'FALTANTE',
         reason: 'motivo -2500',
       },
+    ]);
+  });
+
+  it('indica por día si la operación tiene voucher, sin exponer el archivo (SPRINT-4A-T11)', () => {
+    const result = consolidateSales(
+      input({
+        operations: [
+          operationOf('a', '2026-11-05', 0, { card: 3000 }),
+          operationOf('a', '2026-11-06', -500, { cash: 1000 }),
+        ],
+      }),
+    );
+    const storeA = result.stores.find((s) => s.store.id === 'a');
+    expect(
+      storeA?.days.map((d) => [d.businessDate, d.dailyOperation?.hasVoucher]),
+    ).toEqual([
+      ['2026-11-05', true],
+      ['2026-11-06', false],
     ]);
   });
 

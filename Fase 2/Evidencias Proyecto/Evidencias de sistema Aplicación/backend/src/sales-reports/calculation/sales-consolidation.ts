@@ -58,6 +58,7 @@ export interface OperationInput {
   tipFundAmount: number;
   cashDifference: number;
   differenceReason: string | null;
+  hasVoucher: boolean;
 }
 
 // Importación cargada sin confirmar (PENDING): nunca es venta, solo se
@@ -191,6 +192,7 @@ function operationFiguresOf(item: OperationInput): DailyOperationFigures {
       item.cashDifference,
       item.differenceReason,
     ),
+    hasVoucher: item.hasVoucher,
   };
 }
 

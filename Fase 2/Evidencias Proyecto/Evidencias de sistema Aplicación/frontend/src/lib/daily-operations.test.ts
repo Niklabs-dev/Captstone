@@ -24,6 +24,8 @@ import {
   parseDailyOperations,
   parseEligibleWorkers,
   voucherFileError,
+  canReadDailyVoucher,
+  dailyVoucherHref,
   type DailyOperationFormFields,
 } from './daily-operations';
 import {
@@ -821,5 +823,34 @@ test('precarga la corrección y explica el 409 de un reparto confirmado', () => 
   assert.equal(
     dailyOperationCorrectionErrorMessage(503),
     dailyOperationErrorMessage(503),
+  );
+});
+
+test('el voucher lo leen el administrador y el supervisor con local por el BFF (SPRINT-4A-T11)', () => {
+  const user = { id: responsibleId, email: 'persona@example.test' };
+  assert.equal(
+    canReadDailyVoucher({ ...user, role: 'ADMINISTRADOR', storeId: null }),
+    true,
+  );
+  assert.equal(
+    canReadDailyVoucher({ ...user, role: 'SUPERVISOR', storeId }),
+    true,
+  );
+  assert.equal(
+    canReadDailyVoucher({ ...user, role: 'SUPERVISOR', storeId: null }),
+    false,
+  );
+  // El CONTADOR queda fuera hasta que el PO lo confirme.
+  assert.equal(
+    canReadDailyVoucher({ ...user, role: 'CONTADOR', storeId: null }),
+    false,
+  );
+  assert.equal(
+    canReadDailyVoucher({ ...user, role: 'TRABAJADOR', storeId }),
+    false,
+  );
+  assert.equal(
+    dailyVoucherHref(operationId),
+    `/api/daily-operations/${operationId}/voucher`,
   );
 });

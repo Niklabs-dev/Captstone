@@ -445,6 +445,8 @@ describe.skipIf(!databaseUrl)(
         const d1 = storeA.days.find((day) => day.businessDate === D1());
         expect(d1?.sales).toBeNull();
         expect(d1?.dailyOperation?.operationId).toBe(ids.operationA1);
+        // Sin propina de tarjeta no hay voucher (SPRINT-4A-T11).
+        expect(d1?.dailyOperation?.hasVoucher).toBe(false);
         const d3 = storeA.days.find((day) => day.businessDate === D3());
         expect(d3).toMatchObject({ sales: null, dailyOperation: null });
 
@@ -585,6 +587,7 @@ describe.skipIf(!databaseUrl)(
             type: 'FALTANTE',
             reason: 'Vuelto mal entregado',
           },
+          hasVoucher: true,
         });
 
         // Local B sin calendario: D2 importado, D1 sin estado informado pero

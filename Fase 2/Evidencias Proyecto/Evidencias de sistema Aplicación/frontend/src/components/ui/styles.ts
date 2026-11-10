@@ -22,6 +22,8 @@ export const badgeClass =
 
 export const alertClass =
   'rounded-lg border border-crit/20 bg-crit-bg px-3.5 py-3 text-sm text-crit';
+export const infoNoticeClass =
+  'rounded-xl border border-line2 bg-tint2 p-4 text-sm text-ink2';
 export const scrollRegionClass =
   'overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink';
 

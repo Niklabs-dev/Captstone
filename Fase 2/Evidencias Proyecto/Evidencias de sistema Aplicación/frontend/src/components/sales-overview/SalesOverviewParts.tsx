@@ -22,7 +22,9 @@ import {
   MISSING_VALUE,
   operationDetailHref,
   salesDayPresentation,
+  voucherPresentation,
   type CashDifferenceLine,
+  type DailyOperationFigures,
   type PaymentMethodAmount,
   type PaymentMethodColumn,
   type SalesDayStatus,
@@ -67,6 +69,17 @@ export function DifferenceBadge({
       {cashDifferenceLabel(type)}
     </span>
   );
+}
+
+// SPRINT-4A-T11: indica si la operación tiene foto del voucher; el archivo
+// se revisa en el detalle de la operación.
+export function VoucherBadge({
+  figures,
+}: {
+  figures: DailyOperationFigures;
+}): ReactElement {
+  const { label, tone } = voucherPresentation(figures);
+  return <span className={`${badgeClass} ${toneClasses[tone]}`}>{label}</span>;
 }
 
 // Un monto confirmado o «Sin dato» atenuado; nunca $0 por ausencia.

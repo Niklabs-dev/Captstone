@@ -4,6 +4,7 @@ import {
   alertClass,
   badgeClass,
   buttonClass,
+  infoNoticeClass,
   tableCellClass,
   tableHeadClass,
   tableHeadingClass,
@@ -36,8 +37,6 @@ import {
 // Panel consolidado del día por local (SPRINT-4R-T14). Cada concepto
 // conserva su fuente: ventas del Excel vigente, propinas y diferencia de la
 // operación diaria del supervisor y alertas legales vigentes hoy.
-const infoClass =
-  'rounded-xl border border-line2 bg-tint2 p-4 text-sm text-ink2';
 const inlineLinkClass =
   'font-semibold text-salmon-ink underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink';
 
@@ -458,7 +457,7 @@ export function SalesDashboardView({
           ]}
         />
         {dashboard.businessDate !== dashboard.alertsAsOf && (
-          <p role="note" className={infoClass}>
+          <p role="note" className={infoNoticeClass}>
             Las alertas legales son las vigentes hoy ({alertsDate}), no las del{' '}
             {day}. Revísalas en{' '}
             <Link
