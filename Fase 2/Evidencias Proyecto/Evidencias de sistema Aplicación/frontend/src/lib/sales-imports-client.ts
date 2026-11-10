@@ -5,6 +5,7 @@ import {
   parseSalesImportPreview,
   salesImportError,
   type SalesImportDetail,
+  type SalesImportResolutionInput,
   type SalesImportPreview,
   type SalesImportSummary,
 } from './sales-imports';
@@ -77,6 +78,20 @@ export function confirmSalesImport(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ expectedActiveImportId }),
     },
+    parseSalesImportDetail,
+  );
+}
+// SPRINT-4A-T18: importa y confirma el mismo archivo con lo elegido a mano.
+export function confirmResolvedSalesImport(
+  file: File,
+  resolution: SalesImportResolutionInput,
+): Promise<SalesImportDetail> {
+  const payload = new FormData();
+  payload.set('file', file);
+  payload.set('resolution', JSON.stringify(resolution));
+  return request(
+    '/confirm-with-resolution',
+    { method: 'POST', body: payload },
     parseSalesImportDetail,
   );
 }

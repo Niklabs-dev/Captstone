@@ -28,9 +28,15 @@ import {
 import { formatSignedClp } from '@/lib/daily-operations';
 import { formatCalendarDate, formatChileDate } from '@/lib/display-date';
 import {
+  buildResolution,
+  chosenStore,
+  effectiveActiveImport,
   fileDateDiffers,
   fileNameDate,
+  initialChoices,
+  isResolvable,
   latestSalesImports,
+  resolvedPreviewLines,
   salesFileError,
   salesImportDifferences,
   salesImportError,
@@ -39,10 +45,13 @@ import {
   type SalesImportDetail,
   type SalesImportDifference,
   type SalesImportLine,
+  type LineChoice,
+  type ResolutionChoices,
   type SalesImportPreview,
   type SalesImportSummary,
 } from '@/lib/sales-imports';
 import {
+  confirmResolvedSalesImport,
   confirmSalesImport,
   discardSalesImport,
   downloadSalesImportFile,
@@ -52,6 +61,7 @@ import {
   SalesImportRequestError,
 } from '@/lib/sales-imports-client';
 import { formatClp } from '@/lib/tips';
+import { SalesImportResolution } from './SalesImportResolution';
 
 const noticeClass =
   'rounded-lg border border-line2 bg-tint2 px-3.5 py-3 text-sm text-ink2';
@@ -77,10 +87,16 @@ function LinesTable({
   lines,
   totalAmount,
   caption,
+  skipped = [],
+  resolvable = false,
 }: {
   lines: SalesImportLine[];
   totalAmount: number;
   caption: string;
+  // Líneas omitidas a mano (monto 0): se listan aparte y no suman.
+  skipped?: readonly { lineNumber: number; originalLabel: string }[];
+  // En una vista previa que se resuelve a mano, lo pendiente es «Por elegir».
+  resolvable?: boolean;
 }): ReactElement {
   return (
     <div
@@ -110,8 +126,17 @@ function LinesTable({
               >
                 {line.paymentMethod?.name ?? line.originalLabel}
                 {!line.paymentMethod && (
-                  <span className="mt-1 block text-xs font-normal text-crit">
-                    Sin equivalencia configurada
+                  <span
+                    className={`mt-1 block text-xs font-normal ${resolvable ? 'text-warn' : 'text-crit'}`}
+                  >
+                    {resolvable
+                      ? 'Por elegir el medio de pago'
+                      : 'Sin equivalencia configurada'}
+                  </span>
+                )}
+                {line.paymentMethod && line.resolution === 'MANUAL' && (
+                  <span className="mt-1 block text-xs font-normal text-ink2">
+                    «{line.originalLabel}» · elegido a mano
                   </span>
                 )}
               </th>
@@ -119,6 +144,24 @@ function LinesTable({
                 className={`${tableCellClass} whitespace-nowrap text-right tabular-nums`}
               >
                 {formatClp(line.amount)}
+              </td>
+            </tr>
+          ))}
+          {skipped.map((line) => (
+            <tr key={line.lineNumber} className="border-b border-line">
+              <th
+                scope="row"
+                className={`${tableCellClass} break-words font-medium text-ink2`}
+              >
+                {line.originalLabel}
+                <span className="mt-1 block text-xs font-normal">
+                  Omitida (monto 0)
+                </span>
+              </th>
+              <td
+                className={`${tableCellClass} whitespace-nowrap text-right tabular-nums text-ink2`}
+              >
+                {formatClp(0)}
               </td>
             </tr>
           ))}
@@ -154,7 +197,14 @@ function DetailCard({
       <dl className="grid min-w-0 grid-cols-1 gap-4 text-sm sm:grid-cols-2 xl:grid-cols-3">
         <div className="min-w-0">
           <dt className="text-xs text-ink2">Local</dt>
-          <dd className="mt-1 break-words font-medium">{detail.store.name}</dd>
+          <dd className="mt-1 break-words font-medium">
+            {detail.store.name}
+            {detail.storeResolution === 'MANUAL' && (
+              <span className="block text-xs font-normal text-ink2">
+                Elegido a mano
+              </span>
+            )}
+          </dd>
         </div>
         <div className="min-w-0">
           <dt className="text-xs text-ink2">Fecha de negocio</dt>
@@ -182,9 +232,18 @@ function DetailCard({
             {formatChileDate(detail.createdAt)}
           </dd>
         </div>
+        {detail.resolvedBy && (
+          <div className="min-w-0">
+            <dt className="text-xs text-ink2">Resuelto a mano por</dt>
+            <dd className="mt-1 break-words font-medium">
+              {detail.resolvedBy.name}
+            </dd>
+          </div>
+        )}
       </dl>
       <LinesTable
         lines={detail.lines}
+        skipped={detail.skippedLines}
         totalAmount={detail.totalAmount}
         caption={`Medios de pago de la versión ${detail.version}`}
       />
@@ -293,6 +352,8 @@ export function SalesImportPanel({
   const [historyRevision, setHistoryRevision] = useState(0);
   const [selectedId, setSelectedId] = useState('');
   const [downloading, setDownloading] = useState(false);
+  // SPRINT-4A-T19: lo elegido a mano en una vista previa UNRESOLVED.
+  const [choices, setChoices] = useState<ResolutionChoices | null>(null);
   const inFlight = useRef(false);
   const detailTitle = useRef<HTMLHeadingElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -319,6 +380,7 @@ export function SalesImportPanel({
   }
   function clearOutcome(): void {
     setPreview(null);
+    setChoices(null);
     setActiveDetail(null);
     setDifferencesError('');
     setReplaceAccepted(false);
@@ -360,8 +422,9 @@ export function SalesImportPanel({
     try {
       const next = await previewSalesImport(file);
       setPreview(next);
+      setChoices(isResolvable(next) ? initialChoices(next) : null);
       setUploadedName(file.name);
-      if (next.activeImport && next.canConfirm) {
+      if (next.activeImport && (next.canConfirm || isResolvable(next))) {
         try {
           setActiveDetail(await loadSalesImport(next.activeImport.id));
         } catch (cause) {
@@ -405,6 +468,66 @@ export function SalesImportPanel({
       inFlight.current = false;
       setBusy('');
     }
+  }
+
+  // La vigente del local elegido a mano se carga para mostrar diferencias.
+  async function loadActiveFor(id: string | null): Promise<undefined> {
+    setActiveDetail(null);
+    setDifferencesError('');
+    setReplaceAccepted(false);
+    if (!id) return;
+    try {
+      setActiveDetail(await loadSalesImport(id));
+    } catch (cause) {
+      setDifferencesError(errorText(cause));
+    }
+  }
+  function chooseStore(storeId: string): undefined {
+    if (!preview || !choices) return;
+    const next = { ...choices, storeId };
+    setChoices(next);
+    void loadActiveFor(effectiveActiveImport(preview, next)?.id ?? null);
+  }
+  function chooseLine(lineNumber: number, next: LineChoice): undefined {
+    setChoices((current) =>
+      current
+        ? { ...current, lines: { ...current.lines, [lineNumber]: next } }
+        : current,
+    );
+  }
+
+  async function confirmResolved(): Promise<undefined> {
+    if (inFlight.current || !preview || !choices || !file) return;
+    const resolution = buildResolution(preview, choices);
+    if (!resolution) return;
+    inFlight.current = true;
+    setFailure('');
+    setBusy('confirm');
+    try {
+      const saved = await confirmResolvedSalesImport(file, resolution);
+      setResult(saved);
+      setNotice(
+        resolution.expectedActiveImportId
+          ? `Corrección confirmada. La versión ${saved.version} quedó vigente.`
+          : 'Importación confirmada. Las ventas del día quedaron vigentes.',
+      );
+      clearOutcome();
+      resetFile();
+      refreshHistory();
+    } catch (cause) {
+      setFailure(errorText(cause));
+      if (cause instanceof SalesImportRequestError && cause.status === 409)
+        setStalePreview(true);
+    } finally {
+      inFlight.current = false;
+      setBusy('');
+    }
+  }
+  function cancelResolution(): undefined {
+    setNotice('Vista previa cancelada. No se registraron ventas.');
+    clearOutcome();
+    resetFile();
+    return undefined;
   }
 
   async function discard(): Promise<undefined> {
@@ -482,16 +605,35 @@ export function SalesImportPanel({
     }
   }
 
+  const resolvable = preview !== null && isResolvable(preview);
+  const resolved =
+    preview && choices && resolvable
+      ? resolvedPreviewLines(preview, choices)
+      : null;
+  const resolution =
+    preview && choices && resolvable ? buildResolution(preview, choices) : null;
+  const replacing =
+    preview && choices && resolvable
+      ? effectiveActiveImport(preview, choices)
+      : (preview?.activeImport ?? null);
+  const isCorrection = Boolean(
+    (preview?.canConfirm || resolvable) && replacing,
+  );
+  // Sin las diferencias a la vista no se puede aceptar el reemplazo.
+  const replaceReady =
+    !isCorrection || (activeDetail !== null && replaceAccepted);
+  const canConfirm =
+    Boolean(preview?.canConfirm) && !stalePreview && replaceReady;
+  const canConfirmResolved =
+    resolution !== null && !stalePreview && replaceReady;
+  const manualStore = preview && choices ? chosenStore(preview, choices) : null;
   const differences =
     preview && activeDetail
-      ? salesImportDifferences(activeDetail.lines, preview.lines)
+      ? salesImportDifferences(
+          activeDetail.lines,
+          resolved ? resolved.lines : preview.lines,
+        )
       : [];
-  const isCorrection = Boolean(preview?.canConfirm && preview.activeImport);
-  // Sin las diferencias a la vista no se puede aceptar el reemplazo.
-  const canConfirm =
-    Boolean(preview?.canConfirm) &&
-    !stalePreview &&
-    (!isCorrection || (activeDetail !== null && replaceAccepted));
   const alreadyActive =
     preview?.outcome === 'EXISTING' && preview.import?.status === 'ACTIVE';
   const superseded =
@@ -591,12 +733,27 @@ export function SalesImportPanel({
               <p className={tableDescriptionClass}>
                 {preview.canConfirm
                   ? 'Revisa los datos antes de confirmar'
-                  : 'Esta carga no se puede confirmar'}
+                  : resolvable
+                    ? 'Elige los datos que no se identificaron para confirmar'
+                    : 'Esta carga no se puede confirmar'}
               </p>
             </div>
           </header>
           <div className="space-y-4 p-5">
-            {preview.outcome === 'UNRESOLVED' && (
+            {resolvable && (
+              <div className={warningClass}>
+                <p className="font-semibold">
+                  Hay datos que el sistema no identificó. Elígelos para
+                  confirmar; todavía no se guardó nada.
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {preview.issues.map((issue) => (
+                    <li key={issue.code + issue.message}>{issue.message}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {preview.outcome === 'UNRESOLVED' && !resolvable && (
               <div role="alert" className={alertClass}>
                 <p className="font-semibold">
                   No se puede confirmar y no se guardó nada.
@@ -643,7 +800,11 @@ export function SalesImportPanel({
                 <dt className="text-xs text-ink2">Local</dt>
                 <dd className="mt-1 break-words font-medium">
                   {preview.store?.name ??
-                    `Sin configurar (${preview.externalStoreCode})`}
+                    (manualStore
+                      ? `${manualStore.name} (elegido a mano)`
+                      : resolvable
+                        ? `Por elegir (${preview.externalStoreCode})`
+                        : `Sin configurar (${preview.externalStoreCode})`)}
                 </dd>
               </div>
               <div className="min-w-0">
@@ -667,8 +828,23 @@ export function SalesImportPanel({
                 </dd>
               </div>
             </dl>
+            {resolvable && choices && (
+              <SalesImportResolution
+                preview={preview}
+                choices={choices}
+                disabled={busy !== '' || stalePreview}
+                onStoreChange={chooseStore}
+                onRememberStoreChange={(rememberStore) => {
+                  setChoices({ ...choices, rememberStore });
+                  return undefined;
+                }}
+                onLineChange={chooseLine}
+              />
+            )}
             <LinesTable
-              lines={preview.lines}
+              lines={resolved ? resolved.lines : preview.lines}
+              skipped={resolved?.skipped}
+              resolvable={resolvable}
               totalAmount={preview.totalAmount}
               caption="Medios de pago del archivo"
             />
@@ -676,9 +852,7 @@ export function SalesImportPanel({
               <div className="space-y-3 rounded-lg border border-line bg-tint p-4 text-sm">
                 <h3 className="font-semibold">
                   Corrección de la versión vigente
-                  {preview.activeImport
-                    ? ` (versión ${preview.activeImport.version})`
-                    : ''}
+                  {replacing ? ` (versión ${replacing.version})` : ''}
                 </h3>
                 {differencesError && (
                   <p role="alert" className={alertClass}>
@@ -709,6 +883,36 @@ export function SalesImportPanel({
                     vigente
                   </span>
                 </label>
+              </div>
+            )}
+            {resolvable && (
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  disabled={!canConfirmResolved || busy !== ''}
+                  onClick={() => void confirmResolved()}
+                  className={primaryButtonClass}
+                >
+                  {busy === 'confirm'
+                    ? 'Confirmando…'
+                    : isCorrection
+                      ? 'Confirmar corrección'
+                      : 'Confirmar importación'}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy !== ''}
+                  onClick={cancelResolution}
+                  className={buttonClass}
+                >
+                  Cancelar
+                </button>
+                {!resolution && (
+                  <p className="basis-full text-sm text-ink2">
+                    Confirmar se habilita cuando elijas todos los datos
+                    pendientes.
+                  </p>
+                )}
               </div>
             )}
             {preview.canConfirm && (

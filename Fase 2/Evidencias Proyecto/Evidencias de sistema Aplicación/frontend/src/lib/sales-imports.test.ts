@@ -2,6 +2,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   MAX_SALES_FILE_BYTES,
+  SKIP_LINE,
+  buildResolution,
+  effectiveActiveImport,
+  initialChoices,
+  isResolvable,
+  parseResolutionBody,
+  resolvedConfirmError,
+  resolvedPreviewLines,
+  storeRememberBlock,
   fileDateDiffers,
   fileNameDate,
   latestSalesImports,
@@ -152,6 +161,7 @@ test('Las diferencias incluyen medios que cambian, aparecen o salen', () => {
     amount,
     percentage: null,
     paymentMethod: { id, code, name: code + ' nombre' },
+    resolution: 'AUTOMATIC',
   });
   assert.deepEqual(
     salesImportDifferences(
@@ -224,4 +234,233 @@ test('La descarga informa un archivo alterado', async () => {
   } finally {
     globalThis.fetch = original;
   }
+});
+
+// SPRINT-4A-T19: vista previa UNRESOLVED con resolución manual. Caso real del
+// 05/11: Santa María sin ID Subway asignado y «N.de Créd.» en 0 sin alias.
+const santaMaria = 'a9000000-0000-4000-8000-000000000010';
+const transfer = 'a9000000-0000-4000-8000-000000000011';
+const unresolved = {
+  ...preview,
+  outcome: 'UNRESOLVED',
+  canConfirm: false,
+  store: null,
+  import: null,
+  subwayStoreId: '72597',
+  externalStoreCode: '208 - 72597',
+  totalAmount: 873_260,
+  lines: [
+    { ...line, amount: 873_260 },
+    {
+      lineNumber: 2,
+      originalLabel: 'N.de Créd.',
+      amount: 0,
+      percentage: 0,
+      paymentMethod: null,
+    },
+  ],
+  issues: [
+    { code: 'STORE_NOT_CONFIGURED', message: 'Elige el local.' },
+    {
+      code: 'PAYMENT_METHOD_NOT_CONFIGURED',
+      message: 'Elige el medio.',
+      lineNumber: 2,
+    },
+  ],
+  resolutionOptions: {
+    stores: [
+      {
+        id: santaMaria,
+        name: 'Santa María',
+        subwayStoreId: null,
+        activeImport: null,
+      },
+      {
+        id: other,
+        name: 'Calera',
+        subwayStoreId: '69132',
+        activeImport: version,
+      },
+    ],
+    paymentMethods: [
+      method,
+      { id: transfer, code: 'TRANSFER', name: 'Transferencia' },
+    ],
+  },
+};
+
+test('Proyecta las opciones de la resolución manual', () => {
+  const parsed = parseSalesImportPreview(unresolved);
+  assert.ok(parsed);
+  assert.equal(isResolvable(parsed), true);
+  assert.equal(parsed.subwayStoreId, '72597');
+  assert.equal(parsed.issues[1].lineNumber, 2);
+  assert.deepEqual(
+    parsed.resolutionOptions?.stores.map((store) => store.name),
+    ['Santa María', 'Calera'],
+  );
+  assert.equal(parsed.resolutionOptions?.stores[1].activeImport?.id, id);
+  for (const bad of [
+    { ...unresolved, subwayStoreId: 'abc' },
+    { ...unresolved, resolutionOptions: { stores: [{ id: 'x' }] } },
+    {
+      ...unresolved,
+      resolutionOptions: { stores: [], paymentMethods: [{ id }] },
+    },
+  ])
+    assert.equal(parseSalesImportPreview(bad), null);
+  const created = parseSalesImportPreview(preview);
+  assert.ok(created);
+  assert.equal(isResolvable(created), false);
+});
+
+test('Confirmar se habilita solo con todo resuelto (05/11: Santa María y N.de Créd. omitida)', () => {
+  const parsed = parseSalesImportPreview(unresolved);
+  assert.ok(parsed);
+  const empty = initialChoices(parsed);
+  assert.deepEqual(empty, {
+    storeId: '',
+    rememberStore: true,
+    lines: { 2: { choice: '', remember: true } },
+  });
+  assert.equal(buildResolution(parsed, empty), null);
+  const storeOnly = { ...empty, storeId: santaMaria };
+  assert.equal(buildResolution(parsed, storeOnly), null);
+  const ready = {
+    ...storeOnly,
+    lines: { 2: { choice: SKIP_LINE, remember: true } },
+  };
+  assert.deepEqual(buildResolution(parsed, ready), {
+    expectedActiveImportId: null,
+    store: { storeId: santaMaria, remember: true },
+    lines: [
+      { lineNumber: 2, action: 'SKIP', paymentMethodId: null, remember: false },
+    ],
+  });
+  // El total sigue cuadrando: la omitida está en 0 y queda aparte.
+  const shown = resolvedPreviewLines(parsed, ready);
+  assert.equal(
+    shown.lines.reduce((sum, item) => sum + item.amount, 0),
+    parsed.totalAmount,
+  );
+  assert.deepEqual(
+    shown.skipped.map((item) => item.originalLabel),
+    ['N.de Créd.'],
+  );
+  const assigned = resolvedPreviewLines(parsed, {
+    ...ready,
+    lines: { 2: { choice: transfer, remember: false } },
+  });
+  assert.equal(assigned.lines[1].paymentMethod?.name, 'Transferencia');
+  assert.equal(assigned.lines[1].resolution, 'MANUAL');
+});
+
+test('No ofrece omitir líneas con monto ni recordar lo que no se puede', () => {
+  const parsed = parseSalesImportPreview({
+    ...unresolved,
+    lines: [
+      { ...line, amount: 800_000 },
+      {
+        lineNumber: 2,
+        originalLabel: 'N.de Créd.',
+        amount: 73_260,
+        percentage: null,
+        paymentMethod: null,
+      },
+    ],
+  });
+  assert.ok(parsed);
+  assert.equal(
+    buildResolution(parsed, {
+      storeId: santaMaria,
+      rememberStore: true,
+      lines: { 2: { choice: SKIP_LINE, remember: false } },
+    }),
+    null,
+  );
+  const calera = parsed.resolutionOptions?.stores[1] ?? null;
+  assert.match(storeRememberBlock(parsed, calera) ?? '', /no se sobrescribe/);
+  assert.equal(
+    storeRememberBlock(parsed, parsed.resolutionOptions?.stores[0] ?? null),
+    null,
+  );
+  // Un local con ID propio se elige sin recordar y reemplaza su vigente.
+  const choices = {
+    storeId: other,
+    rememberStore: true,
+    lines: { 2: { choice: transfer, remember: true } },
+  };
+  assert.equal(effectiveActiveImport(parsed, choices)?.id, id);
+  assert.deepEqual(buildResolution(parsed, choices), {
+    expectedActiveImportId: id,
+    store: { storeId: other, remember: false },
+    lines: [
+      {
+        lineNumber: 2,
+        action: 'ASSIGN',
+        paymentMethodId: transfer,
+        remember: true,
+      },
+    ],
+  });
+  const noId = parseSalesImportPreview({ ...unresolved, subwayStoreId: null });
+  assert.ok(noId);
+  assert.match(storeRememberBlock(noId, null) ?? '', /no trae un ID Subway/);
+});
+
+test('El BFF solo reenvía una resolución con el contrato exacto', () => {
+  const valid = {
+    expectedActiveImportId: null,
+    store: { storeId: santaMaria, remember: true },
+    lines: [{ lineNumber: 2, action: 'SKIP', remember: false }],
+  };
+  assert.deepEqual(parseResolutionBody(valid), {
+    ...valid,
+    lines: [
+      { lineNumber: 2, action: 'SKIP', paymentMethodId: null, remember: false },
+    ],
+  });
+  for (const bad of [
+    { ...valid, extra: true },
+    { ...valid, expectedActiveImportId: 'x' },
+    { ...valid, store: { storeId: santaMaria } },
+    { ...valid, lines: [{ lineNumber: 2, action: 'SKIP', remember: true }] },
+    {
+      ...valid,
+      lines: [
+        { lineNumber: 2, action: 'SKIP', paymentMethodId: id, remember: false },
+      ],
+    },
+    { ...valid, lines: [{ lineNumber: 2, action: 'ASSIGN', remember: false }] },
+    { ...valid, lines: [{ lineNumber: 0, action: 'SKIP', remember: false }] },
+    { ...valid, lines: 'x' },
+  ])
+    assert.equal(parseResolutionBody(bad), null);
+  assert.match(resolvedConfirmError(400), /datos elegidos/);
+  assert.match(resolvedConfirmError(409), /Vuelve a subir/);
+});
+
+test('El detalle conserva lo resuelto a mano y acepta contratos anteriores', () => {
+  const manual = parseSalesImportDetail({
+    ...detail,
+    storeResolution: 'MANUAL',
+    resolvedBy: person,
+    lines: [{ ...line, resolution: 'MANUAL' }],
+    skippedLines: [
+      { lineNumber: 2, originalLabel: 'N.de Créd.', amount: 0, percentage: 0 },
+    ],
+  });
+  assert.ok(manual);
+  assert.equal(manual.storeResolution, 'MANUAL');
+  assert.deepEqual(manual.resolvedBy, { id, name: 'Admin Prueba' });
+  assert.equal(manual.lines[0].resolution, 'MANUAL');
+  assert.equal(manual.skippedLines.length, 1);
+  const legacy = parseSalesImportDetail(detail);
+  assert.ok(legacy);
+  assert.equal(legacy.storeResolution, 'AUTOMATIC');
+  assert.deepEqual(legacy.skippedLines, []);
+  assert.equal(
+    parseSalesImportDetail({ ...detail, storeResolution: 'OTRO' }),
+    null,
+  );
 });
