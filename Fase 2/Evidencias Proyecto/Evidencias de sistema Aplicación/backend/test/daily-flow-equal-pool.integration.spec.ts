@@ -454,7 +454,8 @@ describe.skipIf(!databaseUrl)(
           legacyPoolId,
         );
 
-        // 1. El supervisor ve como elegibles solo a los activos de su local.
+        // 1. El supervisor ve como elegibles solo a los activos de su local,
+        //    incluido él mismo (SPRINT-4A-T01: también recibe su parte).
         const eligible = (
           await server()
             .get(`/daily-operations/eligible-workers?storeId=${f.storeId}`)
@@ -462,7 +463,7 @@ describe.skipIf(!databaseUrl)(
             .expect(200)
         ).body as { id: string }[];
         expect(eligible.map((worker) => worker.id).sort()).toEqual(
-          [f.ana.id, f.beto.id, f.carla.id].sort(),
+          [f.ana.id, f.beto.id, f.carla.id, f.supervisor.id].sort(),
         );
 
         // 2. Día con tarjeta + efectivo ($10.000 entre tres), voucher y

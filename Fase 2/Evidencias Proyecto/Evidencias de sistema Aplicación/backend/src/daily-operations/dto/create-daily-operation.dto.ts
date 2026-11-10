@@ -117,7 +117,8 @@ export class CreateDailyOperationDto {
     description:
       'Trabajadores que participan del reparto del día. Se repite el campo ' +
       '(FormData.append por cada ID) y cada valor debe ser el UUID de un ' +
-      'trabajador activo del local (rol TRABAJADOR), tal como entrega ' +
+      'trabajador activo del local (rol TRABAJADOR o SUPERVISOR), tal como ' +
+      'entrega ' +
       'GET /daily-operations/eligible-workers. Obligatorio (al menos uno) ' +
       'cuando el fondo del día (cardTipAmount + cashTipAmount) es mayor que 0; ' +
       'con fondo 0 la selección debe venir vacía.',

@@ -579,18 +579,21 @@ describe.skipIf(!databaseUrl)(
           f.storeId,
           f.supervisor,
         ).expect(200);
-        // Solo TRABAJADOR activos del local, por firstName, lastName, id:
-        // excluye a la inactiva (Cora), al de otro local (Dario), al
-        // supervisor y al resto de roles. Solo expone id y nombre.
+        // TRABAJADOR y SUPERVISOR activos del local (SPRINT-4A-T01), por
+        // firstName, lastName, id: incluye al supervisor del local y excluye
+        // a la inactiva (Cora), al de otro local (Dario), al supervisor de
+        // otro local y a ADMINISTRADOR/CONTADOR. Solo expone id y nombre.
         expect(response.body).toEqual([
           { id: f.worker.id, name: 'Ana Participa' },
           { id: f.worker2.id, name: 'Beto Participa' },
+          { id: f.supervisor.id, name: 'SUPERVISOR Operación' },
         ]);
         expect(JSON.stringify(response.body)).not.toContain(f.worker.email);
 
         // El ADMINISTRADOR (rol global) lista cualquier local.
         await eligibleWorkers(f, f.otherStoreId, f.admin).expect(200, [
           { id: f.otherWorker.id, name: 'Dario Otro Local' },
+          { id: f.otherSupervisor.id, name: 'SUPERVISOR Operación' },
         ]);
         await eligibleWorkers(f, f.storeId, f.admin).expect(200);
 
@@ -600,6 +603,55 @@ describe.skipIf(!databaseUrl)(
         await eligibleWorkers(f, f.storeId, f.accountant).expect(403);
         await eligibleWorkers(f, f.storeId, null).expect(401);
         await eligibleWorkers(f, 'no-es-uuid', f.supervisor).expect(400);
+      });
+    });
+
+    it('acepta al supervisor del local como participante en POST y PATCH (SPRINT-4A-T01)', async () => {
+      await withinRollback(async (f) => {
+        const response = await postMultipart(
+          baseFields(f),
+          { buffer: JPEG, filename: 'voucher.jpg' },
+          f.supervisor,
+          [f.supervisor.id, f.worker.id],
+        ).expect(201);
+        const body = response.body as DailyOperationResponse;
+        expect(body.participants).toEqual([
+          { id: f.worker.id, name: 'Ana Participa' },
+          { id: f.supervisor.id, name: 'SUPERVISOR Operación' },
+        ]);
+
+        // La corrección también lo acepta (solo el supervisor participa).
+        const corrected = await patchMultipart(
+          body.id,
+          { participantIds: [f.supervisor.id] },
+          null,
+          f.supervisor,
+        ).expect(200);
+        expect((corrected.body as DailyOperationResponse).participants).toEqual(
+          [{ id: f.supervisor.id, name: 'SUPERVISOR Operación' }],
+        );
+
+        // ...y rechaza con 400 a ADMINISTRADOR, CONTADOR, inactivos y
+        // usuarios de otro local sin tocar la selección.
+        for (const ineligible of [
+          f.admin,
+          f.accountant,
+          f.inactiveWorker,
+          f.otherSupervisor,
+        ]) {
+          const rejected = await patchMultipart(
+            body.id,
+            { participantIds: [ineligible.id] },
+            null,
+            f.supervisor,
+          ).expect(400);
+          expect(messagesOf(rejected.body)).toContain(ineligible.id);
+        }
+        const stored = await f.tx.dailyOperationParticipant.findMany({
+          where: { operationId: body.id },
+          select: { workerId: true },
+        });
+        expect(stored).toEqual([{ workerId: f.supervisor.id }]);
       });
     });
 
@@ -655,11 +707,22 @@ describe.skipIf(!databaseUrl)(
           .expect(400);
         expect(messagesOf(invalidUuid.body)).toContain('participantIds');
 
-        // No elegibles: otro local, inactivo y otro rol.
+        // No elegibles: otro local, inactivo y roles globales
+        // (ADMINISTRADOR, CONTADOR); el supervisor de otro local y el
+        // supervisor inactivo también (SPRINT-4A-T01).
+        const inactiveSupervisor = await createUser(
+          f.tx,
+          ROLE.SUPERVISOR,
+          f.storeId,
+          { active: false },
+        );
         for (const ineligible of [
           f.otherWorker,
           f.inactiveWorker,
-          f.supervisor,
+          f.admin,
+          f.accountant,
+          f.otherSupervisor,
+          inactiveSupervisor,
         ]) {
           const response = await postMultipart(
             baseFields(f),

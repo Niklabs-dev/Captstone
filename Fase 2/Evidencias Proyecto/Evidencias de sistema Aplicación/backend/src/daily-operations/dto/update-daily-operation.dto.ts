@@ -109,7 +109,8 @@ export class UpdateDailyOperationDto {
     description:
       'Selección corregida de trabajadores que participan del reparto. Se ' +
       'repite el campo (FormData.append por cada ID) y cada valor debe ser el ' +
-      'UUID de un trabajador activo del local (rol TRABAJADOR), tal como ' +
+      'UUID de un trabajador activo del local (rol TRABAJADOR o SUPERVISOR), ' +
+      'tal como ' +
       'entrega GET /daily-operations/eligible-workers. Reemplaza la selección ' +
       'completa (sin orden); si el fondo resultante es 0 la selección queda ' +
       'vacía. Omitir el campo conserva la selección actual.',
