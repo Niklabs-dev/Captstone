@@ -5,11 +5,13 @@ import { isProxyUuid, readProxyForm, readProxyJson } from '@/lib/backend-proxy';
 import {
   MAX_SALES_FILE_BYTES,
   parseConfirmBody,
+  parseResolutionBody,
   parseSalesImportDetail,
   parseSalesImportList,
   parseSalesImportPreview,
   parseSalesImportSummary,
   reportErrorMessage,
+  resolvedConfirmError,
   SALES_PREVIEW_CONFLICT,
   salesImportError,
 } from '@/lib/sales-imports';
@@ -96,6 +98,8 @@ export async function POST(
   const path = (await context.params).path ?? [];
   if (path.length === 1 && path[0] === 'preview')
     return preview(request, auth.token);
+  if (path.length === 1 && path[0] === 'confirm-with-resolution')
+    return confirmWithResolution(request, auth.token);
   if (path.length === 2 && isProxyUuid(path[0]) && path[1] === 'confirm')
     return confirm(request, auth.token, path[0]);
   return failure(404);
@@ -134,6 +138,57 @@ async function preview(request: Request, token: string): Promise<Response> {
     await upstream.json().catch(() => null),
   );
   return parsed ? respond(parsed, upstream.status) : failure(502);
+}
+
+// SPRINT-4A-T18: el mismo archivo y la resolución manual (JSON acotado y
+// validado) en un solo envío; el servidor vuelve a leer el Excel.
+async function confirmWithResolution(
+  request: Request,
+  token: string,
+): Promise<Response> {
+  const form = await readProxyForm(request, MAX_SALES_FILE_BYTES);
+  if (!form) return failure(413);
+  const file = form.get('file');
+  const raw = form.get('resolution');
+  if (
+    !(file instanceof File) ||
+    file.size === 0 ||
+    typeof raw !== 'string' ||
+    raw.length > 8192 ||
+    [...form.keys()].length !== 2
+  )
+    return failure(400);
+  if (file.size > MAX_SALES_FILE_BYTES) return failure(413);
+  let parsedJson: unknown = null;
+  try {
+    parsedJson = JSON.parse(raw) as unknown;
+  } catch {
+    return failure(400);
+  }
+  const resolution = parseResolutionBody(parsedJson);
+  if (!resolution) return failure(400);
+  const payload = new FormData();
+  payload.set('file', file, file.name);
+  payload.set('resolution', JSON.stringify(resolution));
+  const upstream = await callBackend('/sales-imports/confirm-with-resolution', {
+    method: 'POST',
+    redirect: 'error',
+    headers: bearer(token),
+    body: payload,
+  });
+  if (!upstream) return failure(503);
+  if (!upstream.ok) {
+    const error: unknown = await upstream.json().catch(() => null);
+    // Solo los errores del archivo (código conocido) traen su mensaje; el
+    // resto usa textos propios, nunca el mensaje del servidor.
+    const message =
+      reportErrorMessage(error) ?? resolvedConfirmError(upstream.status);
+    return failure(upstream.status, message);
+  }
+  const parsed = parseSalesImportDetail(
+    await upstream.json().catch(() => null),
+  );
+  return parsed ? respond(parsed) : failure(502);
 }
 
 async function confirm(

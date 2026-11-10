@@ -1,5 +1,4 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { randomInt, randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import writeXlsxFile from 'write-excel-file/node';
@@ -124,9 +123,18 @@ test.beforeAll(async ({ request }, info) => {
   const headers = { Authorization: 'Bearer ' + adminToken };
   const suffix = info.project.name + '-' + randomUUID();
   storeName = 'Importación ' + suffix;
+  // Desde SPRINT-4A-T17 el local se identifica por su ID Subway (los 10
+  // dígitos evitan chocar con los locales base).
+  const subwayStoreId = String(randomInt(1_000_000_000, 9_999_999_999));
+  storeCode = `${randomInt(100, 999)} - ${subwayStoreId}`;
   const store = await request.post(backend + '/stores', {
     headers,
-    data: { name: storeName, city: 'Melipilla', address: 'Av. Pruebas 1100' },
+    data: {
+      name: storeName,
+      city: 'Melipilla',
+      address: 'Av. Pruebas 1100',
+      subwayStoreId,
+    },
   });
   expect(store.status()).toBe(201);
   storeId = idOf(await store.json());
@@ -144,27 +152,6 @@ test.beforeAll(async ({ request }, info) => {
   });
   expect(supervisor.status()).toBe(201);
   accountIds.push(idOf(await supervisor.json()));
-  // Las equivalencias de locales no tienen API: se crean directo en la base.
-  storeCode = `${randomInt(100, 999)} - ${randomInt(10_000, 99_999)}`;
-  execFileSync(
-    'docker',
-    [
-      'compose',
-      '-f',
-      '../docker-compose.yml',
-      '-p',
-      process.env.COMPOSE_PROJECT_NAME ?? 'sprint4r-t11',
-      'exec',
-      '-T',
-      'db',
-      'sh',
-      '-c',
-      'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "$1"',
-      '--',
-      `INSERT INTO store_external_codes (system, external_code, store_id, updated_at) VALUES ('MRCOMANDA', '${storeCode}', '${storeId}', now());`,
-    ],
-    { stdio: 'pipe' },
-  );
 });
 test.afterAll(async ({ request }) => {
   const headers = { Authorization: 'Bearer ' + adminToken };
@@ -211,15 +198,17 @@ test('Administrador: inválidos, sin resolver, confirmación, duplicado y correc
   await expect(main.getByRole('alert').first()).toContainText(/total|suma/i);
   await expect(confirmButton).toHaveCount(0);
 
-  // Local desconocido: explica cómo resolverlo y no guarda nada.
+  // Local desconocido: no se guarda nada y se pide elegirlo (SPRINT-4A-T19;
+  // el recorrido completo está en manual-resolution.spec.ts).
   await upload(
     page,
     'ventas-15-03-2026.xlsx',
     await report({ store: '000 - 00000' }),
   );
-  await expect(main.getByText('no se guardó nada')).toBeVisible();
-  await expect(main.getByText('Sin configurar (000 - 00000)')).toBeVisible();
-  await expect(confirmButton).toHaveCount(0);
+  await expect(main.getByText('todavía no se guardó nada')).toBeVisible();
+  await expect(main.getByText('Por elegir (000 - 00000)')).toBeVisible();
+  await expect(confirmButton).toBeDisabled();
+  await page.getByRole('button', { name: 'Cancelar' }).click();
   await noOverflow(page);
 
   // Válido: muestra local, fecha, emisión, medios, total y la fecha del nombre.
