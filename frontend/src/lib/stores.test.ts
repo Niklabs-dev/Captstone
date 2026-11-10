@@ -7,6 +7,9 @@ import {
   parseStores,
   storeOptions,
   storeFieldError,
+  storeErrorMessage,
+  subwayStoreIdError,
+  SUBWAY_STORE_ID_HELP,
   type Store,
 } from './stores';
 import {
@@ -21,6 +24,7 @@ const store: Store = {
   name: 'Santa María',
   city: 'Melipilla',
   address: 'Av. Santa María 1250',
+  subwayStoreId: '72597',
   isActive: true,
   createdAt: '2026-10-24T12:00:00Z',
   updatedAt: '2026-10-24T12:00:00Z',
@@ -218,4 +222,136 @@ test('El adaptador del servidor usa token privado y rechaza catálogos dañados'
   const invalid = await fetchStores('test-only');
   assert.equal(invalid.ok, false);
   if (!invalid.ok) assert.equal(invalid.status, 502);
+});
+test('El ID Subway admite solo dígitos (1 a 10), vacío equivale a sin configurar y orienta al corregir', () => {
+  for (const value of [
+    '72597',
+    '1',
+    '1234567890',
+    '0042',
+    ' 72597 ',
+    '',
+    '   ',
+    null,
+    undefined,
+  ])
+    assert.equal(subwayStoreIdError(value), null, String(value));
+  assert.match(
+    subwayStoreIdError('208 - 72597') ?? '',
+    /después del guion: 72597/,
+  );
+  assert.match(subwayStoreIdError('208-72597') ?? '', /72597/);
+  assert.match(subwayStoreIdError('12345678901') ?? '', /hasta 10 dígitos/);
+  for (const value of [
+    '72a97',
+    '72 597',
+    '72.597',
+    '-72597',
+    '+72597',
+    '٧٢٥٩٧',
+    '７２５９７',
+    '72597\u200b',
+    72597,
+    true,
+  ])
+    assert.match(
+      subwayStoreIdError(value) ?? '',
+      /solo dígitos/,
+      String(value),
+    );
+  assert.match(SUBWAY_STORE_ID_HELP, /208 - 72597/);
+  assert.match(SUBWAY_STORE_ID_HELP, /MrComanda/);
+});
+test('La entrada del local normaliza el ID Subway y no lo envía si se omite', () => {
+  assert.deepEqual(parseStoreInput({ ...input, subwayStoreId: ' 72597 ' }), {
+    ...input,
+    subwayStoreId: '72597',
+  });
+  assert.deepEqual(parseStoreInput({ ...input, subwayStoreId: '' }), {
+    ...input,
+    subwayStoreId: null,
+  });
+  assert.deepEqual(parseStoreInput({ ...input, subwayStoreId: null }), {
+    ...input,
+    subwayStoreId: null,
+  });
+  const omitted = parseStoreInput(input);
+  assert.ok(omitted);
+  assert.equal('subwayStoreId' in omitted, false);
+  for (const subwayStoreId of ['208 - 72597', '12345678901', 72597, 'abc'])
+    assert.equal(parseStoreInput({ ...input, subwayStoreId }), null);
+});
+test('El catálogo lee el ID Subway configurado, null o ausente y rechaza formatos inválidos', () => {
+  assert.equal(parseStore(store)?.subwayStoreId, '72597');
+  assert.equal(
+    parseStore({ ...store, subwayStoreId: null })?.subwayStoreId,
+    null,
+  );
+  const { subwayStoreId: _omitted, ...legacy } = store;
+  assert.equal(_omitted, '72597');
+  assert.equal(parseStore(legacy)?.subwayStoreId, null);
+  for (const subwayStoreId of [
+    72597,
+    '',
+    ' 72597',
+    '208 - 72597',
+    '1'.repeat(11),
+  ])
+    assert.equal(parseStore({ ...store, subwayStoreId }), null);
+});
+test('Guardar envía el ID Subway, verifica la confirmación y explica el duplicado', async () => {
+  const withSubway = { ...input, subwayStoreId: '72597' };
+  assert.deepEqual(
+    await saveStore(store, withSubway, async (_url, init) => {
+      assert.equal(init?.method, 'PATCH');
+      assert.deepEqual(JSON.parse(String(init?.body)), withSubway);
+      return Response.json(store);
+    }),
+    store,
+  );
+  // Quitarlo envía null explícito para que el backend lo borre.
+  const cleared = { ...input, subwayStoreId: null };
+  assert.equal(
+    (
+      await saveStore(store, cleared, async (_url, init) => {
+        assert.equal(JSON.parse(String(init?.body)).subwayStoreId, null);
+        return Response.json({ ...store, subwayStoreId: null });
+      })
+    ).subwayStoreId,
+    null,
+  );
+  await assert.rejects(
+    saveStore(store, cleared, async () => Response.json(store)),
+    /no pudo verificarse/,
+  );
+  await assert.rejects(
+    saveStore(null, withSubway, async () =>
+      Response.json(
+        { message: 'interno', code: 'SUBWAY_STORE_ID_TAKEN' },
+        { status: 409 },
+      ),
+    ),
+    (error) =>
+      error instanceof StoreError &&
+      error.status === 409 &&
+      error.code === 'SUBWAY_STORE_ID_TAKEN' &&
+      /ID Subway/.test(error.message) &&
+      !/nombre|interno/.test(error.message),
+  );
+  // Un código desconocido no se refleja y mantiene el mensaje del nombre.
+  await assert.rejects(
+    saveStore(null, withSubway, async () =>
+      Response.json({ code: 'SQL secreto' }, { status: 409 }),
+    ),
+    (error) =>
+      error instanceof StoreError &&
+      error.code === undefined &&
+      /otro nombre/.test(error.message) &&
+      !/SQL/.test(error.message),
+  );
+  assert.match(storeErrorMessage(400), /ID Subway/);
+  assert.match(
+    storeErrorMessage(409, 'deactivate', 'SUBWAY_STORE_ID_TAKEN'),
+    /usuarios activos/,
+  );
 });

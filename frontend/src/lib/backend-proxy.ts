@@ -56,6 +56,8 @@ export async function proxyBackend(
           'Ya existe una liquidación de este trabajador para el período o el archivo ya está registrado'
         )
           code = 'PAYROLL_ALREADY_EXISTS';
+        else if (data.message === 'Ya existe un local con ese ID Subway')
+          code = 'SUBWAY_STORE_ID_TAKEN';
       }
     } else await upstream.body?.cancel();
     return proxyError(

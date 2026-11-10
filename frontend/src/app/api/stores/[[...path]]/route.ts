@@ -7,6 +7,7 @@ import { hasSameOrigin, isUuid } from '@/lib/users';
 import { ACCESS_COOKIE } from '@/lib/auth';
 import { proxyBackend } from '@/lib/backend-proxy';
 import {
+  parseStoreErrorCode,
   parseStoreInput,
   parseStore,
   parseStores,
@@ -27,7 +28,13 @@ async function forward(
   collection = false,
 ): Promise<Response> {
   const response = await proxyBackend(path, token, init);
-  if (!response.ok)
+  if (!response.ok) {
+    // proxyBackend ya saneó el error; solo se reenvía su código conocido.
+    const error: unknown = await response.json().catch(() => null);
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? parseStoreErrorCode(error.code)
+        : undefined;
     return respond(
       {
         message: storeErrorMessage(
@@ -37,10 +44,13 @@ async function forward(
             : path.endsWith('/deactivate')
               ? 'deactivate'
               : 'save',
+          code,
         ),
+        ...(code ? { code } : {}),
       },
       response.status,
     );
+  }
   const raw: unknown = await response.json().catch(() => null);
   const data = collection ? parseStores(raw) : parseStore(raw);
   if (data && init.method && init.method !== 'GET') {

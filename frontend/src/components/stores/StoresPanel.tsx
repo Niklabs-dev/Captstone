@@ -7,7 +7,7 @@ import {
   changeStoreState,
   StoreError,
 } from '@/lib/stores-client';
-import { type Store, type StoreInput } from '@/lib/stores';
+import { type Store, type StoreField, type StoreInput } from '@/lib/stores';
 import { StoreDialog, type StoreAction } from './StoreDialog';
 import {
   buttonClass,
@@ -36,6 +36,7 @@ export function StoresPanel(): ReactElement {
   const [status, setStatus] = useState('');
   const [action, setAction] = useState<StoreAction | null>(null);
   const [dialogError, setDialogError] = useState('');
+  const [dialogErrorField, setDialogErrorField] = useState<StoreField>();
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
   const saving = useRef(false);
@@ -73,6 +74,7 @@ export function StoresPanel(): ReactElement {
     saving.current = true;
     setBusy(true);
     setDialogError('');
+    setDialogErrorField(undefined);
     setNotice('');
     try {
       const result =
@@ -104,6 +106,11 @@ export function StoresPanel(): ReactElement {
       router.refresh();
     } catch (cause) {
       setDialogError(fail(cause));
+      setDialogErrorField(
+        cause instanceof StoreError && cause.code === 'SUBWAY_STORE_ID_TAKEN'
+          ? 'subwayStoreId'
+          : undefined,
+      );
     } finally {
       saving.current = false;
       setBusy(false);
@@ -113,13 +120,23 @@ export function StoresPanel(): ReactElement {
   const visible = items.filter(
     (item) =>
       (!status || String(item.isActive) === status) &&
-      `${item.name} ${item.city} ${item.address}`
+      `${item.name} ${item.city} ${item.address} ${item.subwayStoreId ?? ''}`
         .toLocaleLowerCase('es')
         .includes(query),
   );
   function open(next: StoreAction): void {
     setDialogError('');
+    setDialogErrorField(undefined);
     setAction(next);
+  }
+  function renderSubwayStoreId(store: Store): ReactElement {
+    return store.subwayStoreId ? (
+      <span className="font-mono">{store.subwayStoreId}</span>
+    ) : (
+      <span className={`${badgeClass} bg-warn-bg text-warn`}>
+        Sin configurar
+      </span>
+    );
   }
   function renderActions(store: Store): ReactElement {
     return (
@@ -158,7 +175,7 @@ export function StoresPanel(): ReactElement {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               className={`${inputClass} mt-2`}
-              placeholder="Nombre, ciudad o dirección"
+              placeholder="Nombre, ciudad o ID Subway"
             />
           </label>
           <label className={labelClass}>
@@ -238,6 +255,9 @@ export function StoresPanel(): ReactElement {
                         <p className="mt-1 text-sm text-ink2 wrap-anywhere">
                           {store.city} · {store.address}
                         </p>
+                        <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink2">
+                          ID Subway: {renderSubwayStoreId(store)}
+                        </p>
                       </div>
                       <span
                         className={
@@ -262,23 +282,25 @@ export function StoresPanel(): ReactElement {
               tabIndex={0}
               className="hidden min-w-0 max-w-full overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-salmon-ink lg:block"
             >
-              <table className={`${tableClass} min-w-[640px]`}>
+              <table className={`${tableClass} min-w-[720px]`}>
                 <caption className="sr-only">
-                  Nombre, ciudad, dirección, estado y acciones de cada local
+                  Nombre, ciudad, dirección, ID Subway, estado y acciones de
+                  cada local
                 </caption>
                 <thead className={tableHeadClass}>
                   <tr>
-                    {['Local', 'Ciudad', 'Dirección', 'Estado', 'Acciones'].map(
-                      (title) => (
-                        <th
-                          key={title}
-                          scope="col"
-                          className={tableHeadingClass}
-                        >
-                          {title}
-                        </th>
-                      ),
-                    )}
+                    {[
+                      'Local',
+                      'Ciudad',
+                      'Dirección',
+                      'ID Subway',
+                      'Estado',
+                      'Acciones',
+                    ].map((title) => (
+                      <th key={title} scope="col" className={tableHeadingClass}>
+                        {title}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -297,6 +319,9 @@ export function StoresPanel(): ReactElement {
                       </td>
                       <td className={`${tableCellClass} max-w-64 break-words`}>
                         {store.address}
+                      </td>
+                      <td className={tableCellClass}>
+                        {renderSubwayStoreId(store)}
                       </td>
                       <td className={tableCellClass}>
                         <span
@@ -331,6 +356,7 @@ export function StoresPanel(): ReactElement {
           action={action}
           busy={busy}
           error={dialogError}
+          errorField={dialogErrorField}
           onClose={() => {
             if (!saving.current) setAction(null);
           }}
