@@ -10,7 +10,6 @@ import {
 } from '@/lib/my-tip-receipts-client';
 import {
   buttonClass,
-  introClass,
   tablePanelClass,
   tableHeaderClass,
   panelTitleClass,
@@ -109,11 +108,6 @@ export function MyTipReceiptsPanel({ workerId }: { workerId: string }) {
   }
   return (
     <>
-      <p className={introClass}>
-        Consulta las propinas que ya te fueron entregadas y descarga tus
-        constancias. Esta sección es de solo lectura; no muestra repartos
-        pendientes de pago.
-      </p>
       <section
         className={tablePanelClass}
         aria-labelledby="own-tips-title"
@@ -125,6 +119,7 @@ export function MyTipReceiptsPanel({ workerId }: { workerId: string }) {
               Mis constancias de propinas
             </h2>
             <p className="mt-1 text-xs text-muted">
+              Repartos por período ya entregados, con su constancia en PDF.
               Montos en pesos chilenos. Fechas de emisión en hora de Chile.
             </p>
           </div>
