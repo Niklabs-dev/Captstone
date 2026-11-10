@@ -83,6 +83,10 @@ export const AUDIT_ACTION = {
   // detalle registra local, rango y cantidades, jamás montos ni datos
   // personales (Ley N°21.719).
   DAILY_TIPS_EXPORTED: 'DAILY_TIPS_EXPORTED',
+  // Pago por período de las propinas diarias (SPRINT-4A-T06): un lote marca
+  // las propinas No pagadas del local y período. El detalle registra local,
+  // período, total y cantidades; el responsable y la fecha van en el evento.
+  DAILY_TIPS_PAID: 'DAILY_TIPS_PAID',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

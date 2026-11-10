@@ -110,3 +110,22 @@ export interface DailyTipsExportFile {
   workerCount: number;
   allocationCount: number;
 }
+
+/// Lote de pago de propinas de un local y período (SPRINT-4A-T06): POST y
+/// GET /daily-tips/payment-batches. Fechas del período YYYY-MM-DD; montos en
+/// CLP entero; las personas solo con id y nombre.
+export interface TipPaymentBatchResponse {
+  id: string;
+  store: DailyTipStore;
+  periodStart: string;
+  periodEnd: string;
+  totalAmount: number;
+  allocationCount: number;
+  workerCount: number;
+  paidBy: DailyTipPerson;
+  paidAt: Date;
+}
+
+export interface TipPaymentBatchListResponse {
+  batches: TipPaymentBatchResponse[];
+}
