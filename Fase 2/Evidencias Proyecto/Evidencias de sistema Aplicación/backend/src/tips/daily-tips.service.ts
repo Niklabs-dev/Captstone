@@ -35,6 +35,7 @@ import {
   type DailyTipSummaryResponse,
   type TipAllocationStatusCode,
 } from './types/daily-tips.types.js';
+import type { MyTipDay } from './types/my-tips.types.js';
 
 type Client = Prisma.TransactionClient | PrismaService;
 
@@ -263,6 +264,45 @@ export class DailyTipsService {
       orderBy: [{ businessDate: 'asc' }, ...ALLOCATION_ORDER],
     });
     return records.map(toFact);
+  }
+
+  // Propinas de una persona en el rango, en todos los locales donde
+  // participó, con el local y la fecha de pago; de la más reciente a la más
+  // antigua. Sin control de acceso: el portal del trabajador (SPRINT-4A-T09)
+  // la invoca solo con el ID del JWT.
+  async findWorkerAllocations(
+    workerId: string,
+    range: DailyTipsRange,
+  ): Promise<MyTipDay[]> {
+    const records = await this.prisma.dailyTipAllocation.findMany({
+      where: {
+        workerId,
+        businessDate: { gte: range.fromDate, lte: range.toDate },
+      },
+      select: {
+        id: true,
+        businessDate: true,
+        amount: true,
+        status: true,
+        paymentBatchId: true,
+        store: { select: { id: true, name: true } },
+        paymentBatch: { select: { paidAt: true } },
+      },
+      orderBy: [
+        { businessDate: 'desc' },
+        { store: { name: 'asc' } },
+        { id: 'asc' },
+      ],
+    });
+    return records.map((record) => ({
+      id: record.id,
+      businessDate: formatDbDate(record.businessDate),
+      store: record.store,
+      amount: Number(record.amount),
+      status: record.status,
+      paymentBatchId: record.paymentBatchId,
+      paidAt: record.paymentBatch?.paidAt ?? null,
+    }));
   }
 
   // Valida el rango: fechas reales, from no posterior a to y como máximo
