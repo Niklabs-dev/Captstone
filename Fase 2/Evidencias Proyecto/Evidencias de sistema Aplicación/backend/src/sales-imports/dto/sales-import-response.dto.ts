@@ -176,10 +176,20 @@ export class SalesImportSummaryDto {
   issuedAt: Date | null;
 
   @ApiProperty({
-    description: 'Identificador del local en MrComanda.',
+    description:
+      'Texto original del local en el encabezado del reporte; el número interno de MrComanda (208) no identifica al local.',
     example: '208 - 72597',
   })
   externalStoreCode: string;
+
+  @ApiProperty({
+    description:
+      'ID Subway con que se identificó el local; null solo en importaciones anteriores a la identificación por ID Subway.',
+    example: '72597',
+    type: String,
+    nullable: true,
+  })
+  subwayStoreId: string | null;
 
   @ApiProperty({
     description: 'Total de «Medios de pago» en CLP enteros.',
@@ -257,25 +267,42 @@ export class SalesImportDetailDto extends SalesImportSummaryDto {
 
 export class SalesImportIssueDto {
   @ApiProperty({
-    description: 'Tipo de problema que impide confirmar.',
-    enum: ['STORE_NOT_CONFIGURED', 'PAYMENT_METHOD_NOT_CONFIGURED'],
-    example: 'PAYMENT_METHOD_NOT_CONFIGURED',
+    description:
+      'Tipo de problema que impide confirmar: STORE_NOT_IDENTIFIED (el encabezado no trae un ID Subway reconocible), STORE_NOT_CONFIGURED (el ID Subway no está asignado a ningún local), STORE_INACTIVE (el ID Subway es de un local inactivo) o PAYMENT_METHOD_NOT_CONFIGURED.',
+    enum: [
+      'STORE_NOT_IDENTIFIED',
+      'STORE_NOT_CONFIGURED',
+      'STORE_INACTIVE',
+      'PAYMENT_METHOD_NOT_CONFIGURED',
+    ],
+    example: 'STORE_NOT_CONFIGURED',
   })
   code: string;
 
   @ApiProperty({
     description: 'Mensaje accionable para el administrador.',
     example:
-      'El medio de pago «N.de Créd.» no tiene un alias configurado. Asócialo a un medio del catálogo antes de importar.',
+      'El ID Subway 72597 no está asignado a ningún local. Asígnalo al local que corresponda en la administración de locales y vuelve a cargar el archivo.',
   })
   message: string;
 
   @ApiProperty({
-    description: 'Identificador externo del local (solo STORE_NOT_CONFIGURED).',
+    description:
+      'Texto original del local en el encabezado (solo problemas del local: STORE_*).',
     example: '208 - 72597',
     required: false,
   })
   externalStoreCode?: string;
+
+  @ApiProperty({
+    description:
+      'ID Subway extraído del encabezado (solo problemas del local: STORE_*); null en STORE_NOT_IDENTIFIED.',
+    example: '72597',
+    type: String,
+    nullable: true,
+    required: false,
+  })
+  subwayStoreId?: string | null;
 
   @ApiProperty({
     description: 'Línea afectada (solo PAYMENT_METHOD_NOT_CONFIGURED).',
@@ -371,14 +398,24 @@ export class SalesImportPreviewDto {
   issuedAt: Date | null;
 
   @ApiProperty({
-    description: 'Identificador del local en MrComanda.',
+    description:
+      'Texto original del local en el encabezado del reporte; el número interno de MrComanda (208) no identifica al local.',
     example: '208 - 72597',
   })
   externalStoreCode: string;
 
   @ApiProperty({
     description:
-      'Local resuelto; null si el identificador no está configurado.',
+      'ID Subway extraído del encabezado; null si no trae uno reconocible.',
+    example: '72597',
+    type: String,
+    nullable: true,
+  })
+  subwayStoreId: string | null;
+
+  @ApiProperty({
+    description:
+      'Local activo con ese ID Subway; null si no se pudo identificar (ver issues).',
     type: SalesImportStoreDto,
     nullable: true,
   })

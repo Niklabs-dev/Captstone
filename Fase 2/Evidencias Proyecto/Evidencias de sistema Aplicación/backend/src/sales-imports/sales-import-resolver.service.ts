@@ -6,11 +6,16 @@ import type {
 } from './parser/mrcomanda-report.types.js';
 
 // Resolución del reporte leído contra las equivalencias de SPRINT-4R-T08
-// (SPRINT-4R-T09). Solo consulta: nunca crea identificadores de local ni
-// alias. Un local o medio sin equivalencia queda como problema y la
-// importación no se puede confirmar (canConfirm = false); la previsualización
-// de SPRINT-4R-T10 muestra los problemas para que el administrador configure
-// la equivalencia y vuelva a cargar.
+// (SPRINT-4R-T09). Solo consulta: nunca asigna IDs a locales ni crea alias.
+// Un local o medio sin equivalencia queda como problema y la importación no
+// se puede confirmar (canConfirm = false); la previsualización de
+// SPRINT-4R-T10 muestra los problemas para que el administrador configure la
+// equivalencia y vuelva a cargar.
+//
+// Desde SPRINT-4A-T17 el local se identifica por el ID Subway del encabezado
+// (72597 en «208 - 72597») contra stores.subway_store_id, y debe estar
+// activo. El número interno de MrComanda (208) se ignora y
+// store_external_codes ya no se consulta.
 
 export interface ResolvedStore {
   id: string;
@@ -27,8 +32,20 @@ export interface ResolvedPaymentLine extends ParsedPaymentLine {
   paymentMethod: ResolvedPaymentMethod | null;
 }
 
+// Problemas del local (SPRINT-4A-T17):
+// - STORE_NOT_IDENTIFIED: el encabezado no trae un ID Subway reconocible.
+// - STORE_NOT_CONFIGURED: el ID Subway no está asignado a ningún local.
+// - STORE_INACTIVE: el ID Subway es de un local desactivado.
+export type SalesImportStoreIssueCode =
+  'STORE_NOT_IDENTIFIED' | 'STORE_NOT_CONFIGURED' | 'STORE_INACTIVE';
+
 export type SalesImportIssue =
-  | { code: 'STORE_NOT_CONFIGURED'; externalStoreCode: string; message: string }
+  | {
+      code: SalesImportStoreIssueCode;
+      externalStoreCode: string;
+      subwayStoreId: string | null;
+      message: string;
+    }
   | {
       code: 'PAYMENT_METHOD_NOT_CONFIGURED';
       lineNumber: number;
@@ -49,16 +66,14 @@ export class SalesImportResolverService {
   constructor(private readonly prisma: PrismaService) {}
 
   async resolve(report: ParsedMrComandaReport): Promise<ResolvedSalesReport> {
-    const [storeCode, aliases] = await Promise.all([
-      this.prisma.storeExternalCode.findUnique({
-        where: {
-          system_externalCode: {
-            system: 'MRCOMANDA',
-            externalCode: report.externalStoreCode,
-          },
-        },
-        select: { store: { select: { id: true, name: true } } },
-      }),
+    const { subwayStoreId } = report;
+    const [subwayStore, aliases] = await Promise.all([
+      subwayStoreId === null
+        ? Promise.resolve(null)
+        : this.prisma.store.findUnique({
+            where: { subwayStoreId },
+            select: { id: true, name: true, isActive: true },
+          }),
       this.prisma.paymentMethodAlias.findMany({
         where: {
           system: 'MRCOMANDA',
@@ -74,14 +89,12 @@ export class SalesImportResolverService {
     ]);
 
     const issues: SalesImportIssue[] = [];
-    const store = storeCode?.store ?? null;
-    if (!store) {
-      issues.push({
-        code: 'STORE_NOT_CONFIGURED',
-        externalStoreCode: report.externalStoreCode,
-        message: `El local «${report.externalStoreLabel}» de MrComanda no está asociado a ningún local del sistema. Configura su identificador antes de importar.`,
-      });
-    }
+    const storeIssue = this.storeIssue(report, subwayStore);
+    if (storeIssue !== null) issues.push(storeIssue);
+    const store =
+      storeIssue === null && subwayStore !== null
+        ? { id: subwayStore.id, name: subwayStore.name }
+        : null;
 
     const byLabel = new Map(
       aliases.map((alias) => [alias.normalizedLabel, alias.paymentMethod]),
@@ -106,5 +119,37 @@ export class SalesImportResolverService {
       issues,
       canConfirm: issues.length === 0,
     };
+  }
+
+  private storeIssue(
+    report: ParsedMrComandaReport,
+    store: { name: string; isActive: boolean } | null,
+  ): SalesImportIssue | null {
+    const { externalStoreCode, externalStoreLabel, subwayStoreId } = report;
+    if (subwayStoreId === null) {
+      return {
+        code: 'STORE_NOT_IDENTIFIED',
+        externalStoreCode,
+        subwayStoreId,
+        message: `El encabezado del reporte («Local: ${externalStoreLabel}») no trae un ID Subway reconocible, así que no se pudo identificar el local.`,
+      };
+    }
+    if (store === null) {
+      return {
+        code: 'STORE_NOT_CONFIGURED',
+        externalStoreCode,
+        subwayStoreId,
+        message: `El ID Subway ${subwayStoreId} no está asignado a ningún local. Asígnalo al local que corresponda en la administración de locales y vuelve a cargar el archivo.`,
+      };
+    }
+    if (!store.isActive) {
+      return {
+        code: 'STORE_INACTIVE',
+        externalStoreCode,
+        subwayStoreId,
+        message: `El ID Subway ${subwayStoreId} corresponde al local «${store.name}», que está inactivo. Reactívalo antes de importar sus ventas.`,
+      };
+    }
+    return null;
   }
 }

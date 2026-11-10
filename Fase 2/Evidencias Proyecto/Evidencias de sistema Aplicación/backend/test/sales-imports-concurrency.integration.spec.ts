@@ -18,6 +18,7 @@ import {
 } from '../src/sales-imports/sales-import-resolver.service.js';
 import type { SalesImportPreview } from '../src/sales-imports/types/sales-imports.types.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
+import { fakeSubwayStoreId } from './helpers/subway-store-id.js';
 import {
   buildReportSheet,
   buildReportXlsx,
@@ -144,7 +145,9 @@ describe.skipIf(!databaseUrl)(
       });
 
       const run = randomInt(100_000, 999_999);
-      externalCode = `8${randomInt(10, 99)} - ${run}`;
+      // El local se identifica por su ID Subway (SPRINT-4A-T17).
+      const subwayStoreId = fakeSubwayStoreId();
+      externalCode = `8${randomInt(10, 99)} - ${subwayStoreId}`;
       labels = { debit: `T10 DEBITO ${run}`, cash: `T10 EFECTIVO ${run}` };
 
       const store = await prisma.store.create({
@@ -152,12 +155,10 @@ describe.skipIf(!databaseUrl)(
           name: `${STORE_PREFIX} ${randomUUID()}`,
           city: 'Melipilla',
           address: 'Calle sintética 123',
+          subwayStoreId,
         },
       });
       storeId = store.id;
-      await prisma.storeExternalCode.create({
-        data: { system: 'MRCOMANDA', externalCode, storeId },
-      });
       const methods = await prisma.paymentMethod.findMany({
         where: { code: { in: ['DEBIT_CARD', 'CASH'] } },
         select: { id: true, code: true },
@@ -222,7 +223,6 @@ describe.skipIf(!databaseUrl)(
       await prisma.paymentMethodAlias.deleteMany({
         where: { normalizedLabel: { in: [labels.debit, labels.cash] } },
       });
-      await prisma.storeExternalCode.deleteMany({ where: { storeId } });
       await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
       await prisma.store.deleteMany({
         where: { name: { startsWith: STORE_PREFIX } },

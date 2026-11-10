@@ -31,6 +31,7 @@ import {
   createSwitchablePrisma,
   type SwitchablePrisma,
 } from './helpers/switchable-prisma.js';
+import { fakeSubwayStoreId } from './helpers/subway-store-id.js';
 
 type App = Parameters<typeof request>[0];
 type Tx = Prisma.TransactionClient;
@@ -464,10 +465,13 @@ describe.skipIf(!databaseUrl)(
           address: 'Calle sintética 456',
         },
       });
-      const externalCode = `6${randomInt(10, 99)} - ${randomInt(10_000, 99_999)}`;
-      await tx.storeExternalCode.create({
-        data: { system: 'MRCOMANDA', externalCode, storeId: store.id },
+      // El local se identifica por su ID Subway (SPRINT-4A-T17).
+      const subwayStoreId = fakeSubwayStoreId();
+      await tx.store.update({
+        where: { id: store.id },
+        data: { subwayStoreId },
       });
+      const externalCode = `6${randomInt(10, 99)} - ${subwayStoreId}`;
       // Etiquetas propias en el Excel y en sus alias: no se escriben los
       // alias compartidos (EFECTIVO, T. DEBITO, ...), porque la transacción
       // de rollback retendría su bloqueo y provocaría deadlocks con el seed

@@ -11,11 +11,12 @@ import type {
   PaymentMethodBehavior,
   Prisma,
 } from '../../src/generated/prisma/client.js';
+import { fakeSubwayStoreId } from './subway-store-id.js';
 
 // Helpers de los tests de integración del panel y los reportes con ventas
 // importadas (SPRINT-4R-T13). Todo se crea dentro de la transacción de
-// rollback del test con identificadores propios (UUID): locales, códigos
-// externos, medios de pago y alias. Nunca escribe filas compartidas (alias
+// rollback del test con identificadores propios (UUID): locales con su ID
+// Subway, medios de pago y alias. Nunca escribe filas compartidas (alias
 // MrComanda sembrados ni medios del catálogo base), para no retener sus
 // bloqueos y provocar deadlocks con otras suites que corren en paralelo.
 
@@ -25,6 +26,7 @@ export interface TestStore {
   id: string;
   name: string;
   externalCode: string;
+  subwayStoreId: string;
 }
 
 export interface TestMethod {
@@ -78,7 +80,7 @@ export async function createTestUser(
   return { id, email, role, storeId };
 }
 
-// Local con su identificador MrComanda propio (las importaciones lo exigen).
+// Local con su ID Subway propio (las importaciones lo exigen, SPRINT-4A-T17).
 export async function createTestStore(
   tx: Tx,
   label: string,
@@ -86,14 +88,18 @@ export async function createTestStore(
   isActive = true,
 ): Promise<TestStore> {
   const name = `Subway T13 ${label} ${randomUUID()}`;
+  const subwayStoreId = fakeSubwayStoreId();
   const store = await tx.store.create({
-    data: { name, city, address: 'Calle sintética 123', isActive },
+    data: {
+      name,
+      city,
+      address: 'Calle sintética 123',
+      isActive,
+      subwayStoreId,
+    },
   });
-  const externalCode = `T13 ${randomUUID().toUpperCase()}`;
-  await tx.storeExternalCode.create({
-    data: { system: 'MRCOMANDA', externalCode, storeId: store.id },
-  });
-  return { id: store.id, name, externalCode };
+  const externalCode = `913 - ${subwayStoreId}`;
+  return { id: store.id, name, externalCode, subwayStoreId };
 }
 
 // Medio de pago propio con alias MrComanda propio. Se crea activo (el
@@ -156,6 +162,7 @@ export async function createTestImport(
       periodStart: start,
       periodEnd: new Date(start.getTime() + 8 * 3_600_000),
       externalStoreCode: spec.store.externalCode,
+      subwayStoreId: spec.store.subwayStoreId,
       version,
       totalAmount: BigInt(totalAmount),
       fileName: 'ventas.xlsx',

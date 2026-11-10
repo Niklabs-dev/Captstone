@@ -74,6 +74,7 @@ const SUMMARY_SELECT = {
   periodEnd: true,
   issuedAt: true,
   externalStoreCode: true,
+  subwayStoreId: true,
   totalAmount: true,
   fileName: true,
   sizeBytes: true,
@@ -148,6 +149,7 @@ function toSummary(record: SummaryRecord): SalesImportSummary {
     periodEnd: record.periodEnd,
     issuedAt: record.issuedAt,
     externalStoreCode: record.externalStoreCode,
+    subwayStoreId: record.subwayStoreId,
     totalAmount: Number(record.totalAmount),
     fileName: record.fileName,
     sizeBytes: Number(record.sizeBytes),
@@ -259,6 +261,8 @@ export class SalesImportsService {
             periodEnd: report.periodEnd,
             issuedAt: report.issuedAt,
             externalStoreCode: report.externalStoreCode,
+            // El trigger vuelve a exigir que sea el ID Subway del local.
+            subwayStoreId: report.subwayStoreId,
             version: (last._max.version ?? 0) + 1,
             totalAmount: BigInt(report.totalAmount),
             fileName: sanitizeFileName(file.originalname),
@@ -604,6 +608,7 @@ export class SalesImportsService {
       periodEnd: report.periodEnd,
       issuedAt: report.issuedAt,
       externalStoreCode: report.externalStoreCode,
+      subwayStoreId: report.subwayStoreId,
       store: resolution.store,
       totalAmount: report.totalAmount,
       lines: resolution.lines.map((line) => ({

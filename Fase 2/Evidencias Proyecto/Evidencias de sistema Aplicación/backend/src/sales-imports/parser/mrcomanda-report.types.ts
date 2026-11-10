@@ -40,9 +40,14 @@ export interface ParsedMrComandaReport {
   // Fecha de emisión del reporte («Fecha dd/mm/aaaa - hh:mm:ss», hora de
   // Chile); null si el reporte no la trae. Solo informativa (SPRINT-4R-T10).
   issuedAt: Date | null;
-  // Identificador del local tal como aparece en el encabezado y normalizado.
+  // Identificador del local tal como aparece en el encabezado y normalizado
+  // («208 - 72597»). Es el texto original: el número interno de MrComanda
+  // (208) no identifica al local.
   externalStoreLabel: string;
   externalStoreCode: string;
+  // ID Subway extraído del encabezado (72597, SPRINT-4A-T17); null si el
+  // encabezado no trae uno reconocible (local no identificado).
+  subwayStoreId: string | null;
   // Total de la sección «Medios de pago» (coincide con la suma de líneas).
   totalAmount: number;
   lines: ParsedPaymentLine[];

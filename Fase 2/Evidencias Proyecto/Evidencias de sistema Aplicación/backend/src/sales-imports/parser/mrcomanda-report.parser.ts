@@ -7,13 +7,17 @@
 //   ventas-06-11-2026.xlsx porque se emite al día siguiente.
 // - «Horario:» da la hora de inicio y término (puede cruzar la medianoche).
 // - «Local: …» en el encabezado de filtros da el identificador externo. Un
-//   reporte de «Todos los locales» o de varios locales se rechaza.
+//   reporte de «Todos los locales» o de varios locales se rechaza. De ese
+//   texto («208 - 72597») se extrae el ID Subway (72597, SPRINT-4A-T17); si no
+//   trae uno reconocible el reporte se lee igual y el local queda como no
+//   identificado.
 // - La sección «Medios de pago» da el total y una línea por medio, hasta la
 //   primera fila vacía o la siguiente sección. «Venta por depto.» se ignora.
 // Cualquier estructura irreconocible, monto inválido o total que no cuadra
 // lanza MrComandaReportError con un mensaje accionable.
 
 import { parseCalendarDate } from '../../audit/utils/business-day.util.js';
+import { extractSubwayStoreId } from '../normalization/extract-subway-store-id.js';
 import { normalizeExternalLabel } from '../normalization/normalize-external-label.js';
 import { MrComandaReportError } from './mrcomanda-report.errors.js';
 import type {
@@ -584,6 +588,7 @@ export function parseMrComandaReport(
     issuedAt,
     externalStoreLabel: store.label,
     externalStoreCode: store.code,
+    subwayStoreId: extractSubwayStoreId(store.code),
     totalAmount,
     lines,
   };

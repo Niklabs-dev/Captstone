@@ -100,12 +100,15 @@ export class SalesImportsController {
     description:
       'Lee el «Informe de Ventas Diario» (.xlsx, máximo 5 MB; se valida por ' +
       'su contenido): fecha de negocio desde el «Período», emisión, local, ' +
-      'medios de pago y total. Resuelve el local y cada medio con las ' +
-      'equivalencias configuradas. Si todo resuelve, guarda el archivo en el ' +
+      'medios de pago y total. Identifica el local activo por el ID Subway ' +
+      'del encabezado (72597 en «Local: 208 - 72597»; el número interno de ' +
+      'MrComanda se ignora) y cada medio por sus alias configurados. Si todo ' +
+      'resuelve, guarda el archivo en el ' +
       'volumen privado y crea la importación PENDING con su siguiente versión ' +
       '(201, outcome CREATED). El mismo archivo para el mismo local y fecha ' +
       'devuelve la importación existente sin duplicarla (200, EXISTING). Si ' +
-      'falta configurar el local o algún medio responde 200 con outcome ' +
+      'el local no se identifica (sin ID Subway reconocible, ID no asignado ' +
+      'o local inactivo) o falta configurar algún medio responde 200 con outcome ' +
       'UNRESOLVED, la lista de problemas y sin guardar nada. activeImport ' +
       'indica la versión vigente que la confirmación reemplazaría.',
   })

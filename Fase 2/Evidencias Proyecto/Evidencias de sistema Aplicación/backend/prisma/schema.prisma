@@ -922,9 +922,10 @@ enum SalesImportStatus {
 
 /// Identificador explícito de un local en un sistema externo. Un local tiene
 /// a lo más un identificador por sistema y un identificador nunca apunta a dos
-/// locales. Una importación solo se acepta si su identificador externo está
-/// configurado aquí para ese local: nunca se asigna un local por suposición.
-/// external_code se guarda normalizado (CHECK).
+/// locales. external_code se guarda normalizado (CHECK).
+/// Sin uso desde SPRINT-4A-T17: las importaciones identifican el local por
+/// stores.subway_store_id (ni la API ni los triggers leen esta tabla). Se
+/// conserva por compatibilidad; su retiro irá en una migración nueva.
 model StoreExternalCode {
   id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   system       ExternalSystem
@@ -982,6 +983,10 @@ model SalesImport {
   issuedAt          DateTime?         @map("issued_at") @db.Timestamptz(6)
   externalStoreCode String            @map("external_store_code") @db.VarChar(100)
   externalStoreName String?           @map("external_store_name") @db.VarChar(150)
+  /// ID Subway con que se identificó el local (SPRINT-4A-T17): solo dígitos
+  /// (CHECK) e inmutable. El trigger exige al insertar que sea el ID Subway
+  /// del local; NULL solo en importaciones anteriores a la migración.
+  subwayStoreId     String?           @map("subway_store_id") @db.VarChar(10)
   version           Int
   status            SalesImportStatus @default(PENDING)
   isCurrent         Boolean?          @map("is_current")

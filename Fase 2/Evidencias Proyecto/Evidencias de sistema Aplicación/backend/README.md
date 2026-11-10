@@ -531,7 +531,7 @@ SPRINT-4R-T10.
 | --- | --- |
 | Fecha de negocio | Fila «Período:» (un solo día). **No** el nombre del archivo ni la «Fecha» de emisión: el informe del 05/11 se emite el 06/11 y suele llamarse `ventas-06-11-2026.xlsx`. Si el título «Informe de Ventas Diario …» trae otra fecha, se rechaza. |
 | Período (inicio y fin) | Fila «Horario:» en hora de Chile (`America/Santiago`); si termina antes de empezar, cruza la medianoche. |
-| Local | `Local: …` en la fila de filtros del encabezado (ej. «208 - 72597»). Un informe de todos los locales o de varios se rechaza. |
+| Local | `Local: …` en la fila de filtros del encabezado (ej. «208 - 72597»). De ese texto se extrae el **ID Subway** (72597; también acepta «72597» solo y variantes de espacios); el 208 es un número interno de MrComanda que se ignora (SPRINT-4A-T17). Un encabezado sin ID reconocible se lee igual y el local queda como no identificado. Un informe de todos los locales o de varios se rechaza. |
 | Total y medios de pago | Sección «Medios de pago»: total en su misma fila, una línea por medio con importe y «Porcentaje» opcional, hasta la primera fila vacía o la siguiente sección. «Venta por depto.» se ignora. |
 
 Cada línea conserva la etiqueta original (sin el relleno de espacios) y su
@@ -547,9 +547,16 @@ enteros, porcentajes fuera de 0–100, medios repetidos y suma de líneas
 distinta del total del reporte. Las propinas y la diferencia de efectivo no
 se leen: el reporte no las trae y vienen de la operación diaria.
 
-**Resolución.** Un local sin identificador configurado o una etiqueta sin
-alias quedan como `issues` y `canConfirm = false`: nunca se crean
-equivalencias automáticamente. Con el reporte real de ejemplo, «N.de Créd.»
+**Resolución.** El local se identifica por su ID Subway
+(`stores.subway_store_id`, SPRINT-4A-T15) y debe estar activo
+(SPRINT-4A-T17). Un encabezado sin ID Subway reconocible
+(`STORE_NOT_IDENTIFIED`), un ID Subway no asignado a ningún local
+(`STORE_NOT_CONFIGURED`: «El ID Subway 72597 no está asignado a ningún
+local»), un local inactivo (`STORE_INACTIVE`) o una etiqueta sin alias quedan
+como `issues` y `canConfirm = false`: nunca se crean equivalencias
+automáticamente. `store_external_codes` queda sin uso (ni la API ni los
+triggers la leen); se conserva por compatibilidad y su retiro, si
+corresponde, irá en una migración nueva. Con el reporte real de ejemplo, «N.de Créd.»
 queda sin alias hasta que el PO defina su medio equivalente.
 
 **Dependencia XLSX.** `read-excel-file` con versión exacta (9.3.12): solo lee
@@ -562,7 +569,9 @@ exacta); el archivo real no se versiona y sirve de aceptación manual:
 
 ```bash
 MRCOMANDA_SAMPLE_XLSX=/ruta/ventas-06-11-2026.xlsx npx vitest run test/mrcomanda-report-reader.spec.ts
-# esperado: fecha 2026-11-05, local 208 - 72597, 4 líneas que suman $873.260
+# esperado: fecha 2026-11-05, local 208 - 72597 (ID Subway 72597), 4 líneas que suman $873.260
+# con la base de pruebas, identifica el archivo como Santa María (72597):
+MRCOMANDA_SAMPLE_XLSX=/ruta/ventas-06-11-2026.xlsx TEST_DATABASE_URL=... npx vitest run test/sales-import-resolver.integration.spec.ts
 ```
 
 ## Importación diaria de ventas (SPRINT-4R-T10)
