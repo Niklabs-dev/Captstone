@@ -134,16 +134,54 @@ test('Mis propinas solo se enlaza y permite a trabajador y supervisor (SPRINT-4-
   );
 });
 
-test('El supervisor consulta los repartos; el trabajador no (SPRINT-4R-T06)', () => {
-  assert.equal(getPageRedirect('SUPERVISOR', '/propinas/repartos'), null);
-  assert.ok(
-    getNavigationItems('SUPERVISOR').some(
-      (item) => item.href === '/propinas/repartos',
-    ),
-  );
+test('La vista de repartos se retiró: el supervisor vuelve a su inicio y el trabajador a su portal (SPRINT-4A-T08)', () => {
+  for (const path of ['/propinas/repartos', '/propinas/repartos/historico'])
+    assert.equal(getPageRedirect('SUPERVISOR', path), '/dashboard');
+  for (const role of ROLES)
+    assert.equal(
+      getNavigationItems(role).some((item) =>
+        item.href.startsWith('/propinas/repartos'),
+      ),
+      false,
+    );
   assert.equal(
     getPageRedirect('TRABAJADOR', '/propinas/repartos'),
     '/portal?reason=forbidden',
+  );
+  // Ya no tiene vista propia: solo la cubre el prefijo de /propinas.
+  assert.deepEqual(getNavigationView('/propinas/repartos'), {
+    href: '/propinas',
+    title: 'Propinas',
+  });
+});
+
+test('Solo administrador y contador entran al histórico de repartos, sin ítem de menú (SPRINT-4A-T08)', () => {
+  for (const role of ROLES) {
+    const manager = role === 'ADMINISTRADOR' || role === 'CONTADOR';
+    for (const path of [
+      '/propinas/historico',
+      '/propinas/historico/a9000000-0000-4000-8000-000000000001',
+    ])
+      assert.equal(
+        getPageRedirect(role, path),
+        manager
+          ? null
+          : role === 'TRABAJADOR'
+            ? '/portal?reason=forbidden'
+            : '/dashboard?reason=forbidden',
+      );
+    assert.equal(
+      getNavigationItems(role).some(
+        (item) => item.href === '/propinas/historico',
+      ),
+      false,
+    );
+  }
+  assert.deepEqual(
+    getNavigationView(
+      '/propinas/historico/a9000000-0000-4000-8000-000000000001',
+    ),
+    { href: '/propinas/historico', title: 'Repartos anteriores' },
   );
 });
 
@@ -152,7 +190,6 @@ test('Administrador y contador usan /propinas en lugar de los repartos (SPRINT-4
     const manager = role === 'ADMINISTRADOR' || role === 'CONTADOR';
     const hrefs = getNavigationItems(role).map((item) => item.href);
     assert.equal(hrefs.includes('/propinas'), manager);
-    if (manager) assert.equal(hrefs.includes('/propinas/repartos'), false);
     assert.equal(
       getPageRedirect(role, '/propinas'),
       manager
@@ -177,10 +214,6 @@ test('Administrador y contador usan /propinas en lugar de los repartos (SPRINT-4
   assert.equal(
     getNavigationView('/propinas/diarias').href,
     '/propinas/diarias',
-  );
-  assert.equal(
-    getNavigationView('/propinas/repartos').href,
-    '/propinas/repartos',
   );
   assert.equal(
     getPageRedirect('CONTADOR', '/propinas/diarias'),

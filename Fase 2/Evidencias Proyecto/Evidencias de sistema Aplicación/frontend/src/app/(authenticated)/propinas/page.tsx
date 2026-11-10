@@ -10,6 +10,7 @@ import {
   buttonClass,
   filterPanelClass,
   infoNoticeClass,
+  inlineLinkClass,
   inputClass,
   introClass,
   labelClass,
@@ -32,8 +33,9 @@ import { tipBusinessDate } from '@/lib/tips';
 export const metadata: Metadata = { title: 'Propinas | MoiFood' };
 
 // SPRINT-4A-T07: propinas diarias por local y período para ADMINISTRADOR y
-// CONTADOR, con Excel del período y pago por lote. Reemplaza a
-// /propinas/repartos para estos roles.
+// CONTADOR, con Excel del período y pago por lote. Los repartos por período
+// antiguos quedan como histórico de solo lectura en /propinas/historico
+// (SPRINT-4A-T08).
 export default async function TipsPage({
   searchParams,
 }: {
@@ -70,7 +72,16 @@ export default async function TipsPage({
         Consulta las propinas de cada local por día y por trabajador, descarga
         el Excel del período y registra su pago. El período por defecto es la
         semana actual, de lunes a domingo en hora de Chile, y puede abarcar
-        hasta {MAX_DAILY_TIPS_RANGE_DAYS} días.
+        hasta {MAX_DAILY_TIPS_RANGE_DAYS} días. Los repartos por período
+        anteriores y sus constancias se consultan en{' '}
+        <Link
+          href="/propinas/historico"
+          prefetch={false}
+          className={inlineLinkClass}
+        >
+          Repartos anteriores
+        </Link>
+        .
       </p>
       <section aria-labelledby="tips-filter-title" className={filterPanelClass}>
         <h2 id="tips-filter-title" className={panelTitleClass}>

@@ -14,8 +14,9 @@ import { TipPoolsService } from './tip-pools.service.js';
 import { TipsController } from './tips.controller.js';
 import { TipsService } from './tips.service.js';
 
-// Registro diario (SPRINT-3-T10), reparto (SPRINT-3-T12) y alerta legal
-// (SPRINT-3-T14): todas se derivan de los registros diarios del mismo módulo.
+// Registro diario (SPRINT-3-T10), reparto por período (SPRINT-3-T12, histórico
+// de solo lectura desde SPRINT-4A-T08) y alerta legal (SPRINT-3-T14): todas se
+// derivan de los registros diarios del mismo módulo.
 // La consulta de propinas diarias por trabajador (SPRINT-4A-T04) vive aquí y
 // se exporta para el portal; la reutilizan la exportación Excel
 // (SPRINT-4A-T05, DailyTipsExportService) y el pago por período

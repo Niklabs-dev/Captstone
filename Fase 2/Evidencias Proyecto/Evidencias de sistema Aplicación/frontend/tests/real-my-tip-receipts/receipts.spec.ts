@@ -1,12 +1,12 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { randomUUID, createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { mkdir, readFile } from 'node:fs/promises';
 import {
   navigateTo,
   openNavigation,
   getNavigationSurface,
 } from '../helpers/navigation';
+import { seedLegacyPools } from '../helpers/legacy-tip-pools';
 test.skip(
   process.env.TEST_REAL_DISPOSABLE !== 'true',
   'Requiere sistema exclusivo con datos sintéticos.',
@@ -107,100 +107,49 @@ test.beforeAll(async ({ request }, info) => {
     if (key === 'accountant') accountant = account;
     if (key === 'administrator') administrator = account;
   }
-  // Solo pacto y horas son antecedentes SQL en esta base exclusiva. Los estados,
-  // pagos, constancias y descargas se generan por las operaciones reales de T13.
-  const sql =
-    "INSERT INTO tip_agreements (name,rule,valid_from,valid_to,store_id,created_by_id,updated_at) VALUES ('Pacto T16','PROPORTIONAL_TO_HOURS','2026-01-01','2026-12-31',:'store_id',:'supervisor',now()); INSERT INTO work_hours_records (period_start,period_end,hours_worked,store_id,worker_id,recorded_by_id,updated_at) SELECT p.start_date::date,p.end_date::date,w.hours,:'store_id',w.worker::uuid,:'supervisor',now() FROM (VALUES ('2026-01-05','2026-01-11'),('2026-01-12','2026-01-18'),('2026-01-19','2026-01-25')) AS p(start_date,end_date) CROSS JOIN (VALUES (:'worker',40),(:'peer',20),(:'supervisor',20)) AS w(worker,hours);";
-  execFileSync(
-    'docker',
+  // SPRINT-4A-T08: la API ya no calcula, confirma ni paga repartos por
+  // período; los históricos (PAID, CONFIRMED y DRAFT) se siembran en esta
+  // base exclusiva y las constancias y descargas se leen por la API real.
+  const lines = [
+    { userId: worker.id, amount: 12500 },
+    { userId: peer.id, amount: 6250 },
+    { userId: supervisor.id, amount: 6250 },
+  ];
+  [paidPoolId] = seedLegacyPools(
+    process.env.COMPOSE_PROJECT_NAME ?? 'sprint3-t16',
     [
-      'compose',
-      '-f',
-      '../docker-compose.yml',
-      '-p',
-      process.env.COMPOSE_PROJECT_NAME ?? 'sprint3-t16',
-      'exec',
-      '-T',
-      'db',
-      'sh',
-      '-c',
-      'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -v store_id="$1" -v worker="$2" -v peer="$3" -v supervisor="$4"',
-      '--',
-      store.id,
-      worker.id,
-      peer.id,
-      supervisor.id,
-    ],
-    { input: sql, encoding: 'utf8', timeout: 30000 },
+      ['PAID', '2026-01-05', '2026-01-11'],
+      ['CONFIRMED', '2026-01-12', '2026-01-18'],
+      ['DRAFT', '2026-01-19', '2026-01-25'],
+    ].map(([status, periodStart, periodEnd]) => ({
+      storeId: store.id,
+      periodStart,
+      periodEnd,
+      accountantId: accountant.id,
+      status: status as 'PAID' | 'CONFIRMED' | 'DRAFT',
+      paymentDate: '2026-01-12',
+      lines,
+    })),
   );
-  const supAuth = await request.post(backend + '/auth/login', {
-    data: { email: supervisor.email, password },
-  });
-  expect(supAuth.status()).toBe(200);
-  const supToken = (await supAuth.json()).accessToken as string;
   const accAuth = await request.post(backend + '/auth/login', {
     data: { email: accountant.email, password },
   });
   expect(accAuth.status()).toBe(200);
-  const accToken = (await accAuth.json()).accessToken as string;
-  const accHeaders = { Authorization: 'Bearer ' + accToken };
-  for (const [index, start, end] of [
-    [0, '2026-01-05', '2026-01-11'],
-    [1, '2026-01-12', '2026-01-18'],
-    [2, '2026-01-19', '2026-01-25'],
-  ] as const) {
-    expect(
-      (
-        await request.post(backend + '/tips', {
-          headers: { Authorization: 'Bearer ' + supToken },
-          data: {
-            storeId: store.id,
-            businessDate: start,
-            paymentMethod: 'CASH',
-            amount: 25000,
-          },
-        })
-      ).status(),
-    ).toBe(201);
-    const preview = await request.post(backend + '/tip-pools/preview', {
-      headers: accHeaders,
-      data: { storeId: store.id, periodStart: start, periodEnd: end },
-    });
-    expect(preview.status()).toBe(201);
-    const pool = (await preview.json()) as { id: string; version: number };
-    if (index === 0) paidPoolId = pool.id;
-    if (index === 2) continue;
-    const confirm = await request.post(
-      backend + '/tip-pools/' + pool.id + '/confirm',
-      { headers: accHeaders, data: { expectedVersion: pool.version } },
-    );
-    expect(confirm.status()).toBe(200);
-    if (index === 1) continue;
-    const confirmed = (await confirm.json()) as { version: number };
-    expect(
-      (
-        await request.post(backend + '/tip-pools/' + pool.id + '/pay', {
-          headers: accHeaders,
-          data: {
-            expectedVersion: confirmed.version,
-            paymentDate: '2026-01-12',
-          },
-        })
-      ).status(),
-    ).toBe(200);
-    const receipts = await request.get(
-      backend + '/tip-pools/' + pool.id + '/receipts',
-      { headers: accHeaders },
-    );
-    expect(receipts.status()).toBe(200);
-    for (const r of (await receipts.json()) as {
-      id: string;
-      userId: string;
-    }[]) {
-      if (r.userId === worker.id) ownId = r.id;
-      if (r.userId === peer.id) peerId = r.id;
-      if (r.userId === supervisor.id) supervisorReceiptId = r.id;
-    }
+  const accHeaders = {
+    Authorization: 'Bearer ' + ((await accAuth.json()).accessToken as string),
+  };
+  const receipts = await request.get(
+    backend + '/tip-pools/' + paidPoolId + '/receipts',
+    { headers: accHeaders },
+  );
+  expect(receipts.status()).toBe(200);
+  for (const r of (await receipts.json()) as {
+    id: string;
+    userId: string;
+  }[]) {
+    if (r.userId === worker.id) ownId = r.id;
+    if (r.userId === peer.id) peerId = r.id;
+    if (r.userId === supervisor.id) supervisorReceiptId = r.id;
   }
   // El historial propio se conserva aunque el trabajador cambie de local.
   expect(
@@ -548,10 +497,10 @@ for (const role of [
           ).toBe(404);
         }
       } else {
-        // Los roles de gestión conservan el listado y la descarga de otras personas.
+        // Los roles de gestión conservan el listado (API) y la descarga de
+        // otras personas (API y BFF del histórico, SPRINT-4A-T08).
         const management = '/tip-pools/' + paidPoolId + '/receipts';
         for (const response of [
-          await context.request.get('/api' + management),
           await request.get(backend + management, { headers }),
         ]) {
           expect(response.status()).toBe(200);

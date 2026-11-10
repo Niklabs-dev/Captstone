@@ -1,5 +1,4 @@
 import {
-  calculateEqualDailyDistribution,
   epochDay,
   EqualDistributionError,
   splitDailyFund,
@@ -118,112 +117,43 @@ describe('reparto equitativo diario (SPRINT-4R-T04)', () => {
     });
   });
 
-  describe('calculateEqualDailyDistribution', () => {
-    it('suma las asignaciones diarias por trabajador y no divide el período entre la unión', () => {
-      // Día 1: A y B se reparten 10.000. Día 2: solo C recibe 6.000.
-      // Dividir 16.000 entre la unión (A, B, C) daría 5.333 a cada uno: mal.
-      const result = calculateEqualDailyDistribution([
-        day('2026-10-01', 10_000, [A, B]),
-        day('2026-10-02', 6_000, [C]),
-      ]);
-
-      expect(result.lines).toEqual([
-        { userId: A, amount: 5_000 },
-        { userId: B, amount: 5_000 },
-        { userId: C, amount: 6_000 },
-      ]);
-      expect(result.totalAmount).toBe(16_000);
-      expect(result.days.map((item) => item.allocations.length)).toEqual([
-        2, 1,
-      ]);
-    });
-
-    it('un no seleccionado no recibe línea', () => {
-      const result = calculateEqualDailyDistribution([
-        day('2026-10-01', 7_000, [A, C]),
-      ]);
-      expect(result.lines.map((line) => line.userId)).toEqual([A, C]);
-      expect(result.lines.some((line) => line.userId === B)).toBe(false);
-    });
-
+  describe('rotación y conciliación', () => {
     it('la rotación reparte el peso extra entre todos en días consecutivos', () => {
       // Tres días seguidos de $10.000 entre los mismos 3: cada uno recibe el
       // peso extra exactamente una vez.
-      const result = calculateEqualDailyDistribution([
-        day('2026-10-05', 10_000, [A, B, C]),
-        day('2026-10-06', 10_000, [A, B, C]),
-        day('2026-10-07', 10_000, [A, B, C]),
-      ]);
-      expect(result.lines).toEqual([
-        { userId: A, amount: 10_000 },
-        { userId: B, amount: 10_000 },
-        { userId: C, amount: 10_000 },
-      ]);
-    });
-
-    it('un período sin fondo ni participantes queda en 0 sin líneas', () => {
-      const result = calculateEqualDailyDistribution([
-        day('2026-10-01', 0, []),
-      ]);
-      expect(result).toEqual({
-        days: [
-          {
-            operationId: 'op-2026-10-01',
-            businessDate: '2026-10-01',
-            fundAmount: 0,
-            allocations: [],
-          },
-        ],
-        lines: [],
-        totalAmount: 0,
+      const totals = new Map<string, number>();
+      for (const date of ['2026-10-05', '2026-10-06', '2026-10-07']) {
+        for (const share of splitDailyFund(day(date, 10_000, [A, B, C]))) {
+          totals.set(
+            share.userId,
+            (totals.get(share.userId) ?? 0) + share.amount,
+          );
+        }
+      }
+      expect(Object.fromEntries(totals)).toEqual({
+        [A]: 10_000,
+        [B]: 10_000,
+        [C]: 10_000,
       });
     });
 
-    it('rechaza una operación repetida y propaga el día sin participantes', () => {
-      expect(
-        errorCodeOf(() =>
-          calculateEqualDailyDistribution([
-            day('2026-10-01', 10, [A], 'op-1'),
-            day('2026-10-02', 10, [A], 'op-1'),
-          ]),
-        ),
-      ).toBe('DUPLICATED_OPERATION');
-      expect(
-        errorCodeOf(() =>
-          calculateEqualDailyDistribution([
-            day('2026-10-01', 10, [A]),
-            day('2026-10-02', 10, []),
-          ]),
-        ),
-      ).toBe('NO_PARTICIPANTS');
-    });
-
-    it('casos aleatorios: las líneas siempre suman el fondo y nadie difiere en más de $1 por día', () => {
+    it('casos aleatorios: cada día suma su fondo y nadie difiere en más de $1', () => {
       const random = mulberry32(20261107);
       const pool = [A, B, C, D];
-      for (let iteration = 0; iteration < 500; iteration += 1) {
-        const days: EqualDailyShareDay[] = [];
-        for (let index = 0; index < 1 + Math.floor(random() * 15); index += 1) {
-          const participants = pool.filter(() => random() < 0.6);
-          const fund =
-            participants.length === 0 ? 0 : Math.floor(random() * 2_000_000);
-          const date = new Date(Date.UTC(2026, 9, 1 + index))
-            .toISOString()
-            .slice(0, 10);
-          days.push(day(date, fund, participants));
-        }
-        const result = calculateEqualDailyDistribution(days);
-        const fund = days.reduce((sum, item) => sum + item.fundAmount, 0);
-        expect(result.lines.reduce((sum, line) => sum + line.amount, 0)).toBe(
-          fund,
-        );
-        for (const item of result.days) {
-          const values = item.allocations.map((line) => line.amount);
-          if (values.length > 0) {
-            expect(
-              Math.max(...values) - Math.min(...values),
-            ).toBeLessThanOrEqual(1);
-          }
+      for (let iteration = 0; iteration < 2_000; iteration += 1) {
+        const participants = pool.filter(() => random() < 0.6);
+        const fund =
+          participants.length === 0 ? 0 : Math.floor(random() * 2_000_000);
+        const date = new Date(Date.UTC(2026, 9, 1 + (iteration % 365)))
+          .toISOString()
+          .slice(0, 10);
+        const shares = splitDailyFund(day(date, fund, participants));
+        const values = shares.map((share) => share.amount);
+        expect(values.reduce((sum, value) => sum + value, 0)).toBe(fund);
+        if (values.length > 0) {
+          expect(Math.max(...values) - Math.min(...values)).toBeLessThanOrEqual(
+            1,
+          );
         }
       }
     });

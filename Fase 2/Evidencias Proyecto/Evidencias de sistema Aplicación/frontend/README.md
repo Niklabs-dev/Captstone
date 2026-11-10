@@ -355,19 +355,22 @@ Pruebas: `npm run test:daily-operations` (unitarias), `npm run test:daily-operat
   guarda con `PATCH /daily-operations/:id` (mismo ID, sin duplicar). La fecha no
   cambia y el voucher registrado se conserva salvo que se adjunte otro. Los
   participantes que ya no son elegibles se avisan y se quitan al guardar. Un
-  409 informa que la operación ya alimentó un reparto confirmado o pagado.
+  409 informa que la operación ya alimentó un reparto confirmado o pagado o
+  que sus propinas ya se pagaron.
 - **Detalle registrado:** muestra cada participante con su monto del día.
-## Detalle del reparto equitativo (SPRINT-4R-T06)
+## Repartos anteriores: histórico de solo lectura (SPRINT-4A-T08)
 
-`/propinas/repartos` muestra cada beneficiario con la columna destacada **Monto a pagar**, además de fondo total, beneficiarios, suma individual y regla aplicada. La conciliación compara suma individual, fondo y fuentes (operaciones diarias o registros históricos); si no coincide, avisa que los montos no deben usarse y bloquea la validación. Los repartos equitativos no muestran horas ni pacto; los proporcionales históricos los conservan. En «Mis propinas», una constancia equitativa indica que las horas no aplican.
+El flujo de borradores, observación, confirmación y pago del reparto por período (`/propinas/repartos`, SPRINT-4R-T06) se retiró: la propina se reparte al guardar la operación diaria y el contador o el administrador la paga por período en `/propinas`. Pagar un reparto por período dejaba esas propinas sin pagar y permitía pagarlas dos veces.
 
-Si una operación diaria se corrige después del cálculo, el borrador sigue visible como **desactualizado**, con el monto calculado y el actual, y no se puede validar hasta recalcularlo. El **SUPERVISOR** consulta en solo lectura los repartos de su local, sin acciones, alertas ni constancias de otras personas.
+- **`/propinas/historico`** (ADMINISTRADOR y CONTADOR, enlazado desde `/propinas` como «Repartos anteriores»; Server Component sobre `GET /tip-pools`): lista los repartos guardados del más reciente al más antiguo. Los confirmados y pagados van en la tabla principal («Confirmado sin pago», «Pagado»); los borradores van aparte y plegados como «Borrador sin efecto». Incluye la alerta legal de las propinas con tarjeta del registro anterior que quedaron pendientes (`GET /tip-payment-alerts`), que el panel de ventas enlaza.
+- **`/propinas/historico/<id>`**: resumen, montos por trabajador y, si está pagado, las constancias PDF (BFF `/api/tip-pools/<id>/receipts/<userId>/download`). No hay acciones sobre el reparto.
+- `/propinas/repartos` redirige a `/propinas` (administrador y contador) o al inicio (supervisor). El supervisor ya no tiene vista de repartos; sus propinas personales llegan al portal en otra tarea.
 
-Pruebas: `npm run test:tip-pools`, `npm run test:my-tip-receipts` y `TEST_REAL_DISPOSABLE=true npx playwright test --config playwright.tip-pools.config.ts equal-pools`.
+Pruebas: `npm run test:tip-pools` y `TEST_REAL_DISPOSABLE=true COMPOSE_PROJECT_NAME=<stack> npm run test:tip-pools:real` (los repartos históricos se siembran en la base exclusiva del stack, porque la API ya no los crea).
 
 ## Verificación end-to-end del flujo diario y el reparto (SPRINT-4R-T07)
 
-`TEST_REAL_DISPOSABLE=true npm run test:daily-flow:real` recorre con API y base reales, en cuatro anchos, el flujo completo: el supervisor registra los días desde el formulario, el contador calcula, valida y entrega el reparto, y cada trabajador ve su monto en el portal; además comprueba que ya no existe cierre por turno ni captura de ventas o Mercado Pago. El equivalente por HTTP está en `backend/test/daily-flow-equal-pool.integration.spec.ts`. Trazabilidad con la DoD, comandos, conteos y hallazgos: [SPRINT-4R-T07](docs/SPRINT-4R-T07.md).
+`TEST_REAL_DISPOSABLE=true npm run test:daily-flow:real` recorre con API y base reales, en cuatro anchos, el flujo completo: el supervisor registra los días desde el formulario, cada día queda repartido y el contador ve el monto de cada trabajador y paga el período en `/propinas` (desde SPRINT-4A-T08; antes calculaba, validaba y entregaba el reparto por período); además comprueba que ya no existe cierre por turno ni captura de ventas o Mercado Pago. El equivalente por HTTP está en `backend/test/daily-flow-equal-pool.integration.spec.ts`. Trazabilidad con la DoD, comandos, conteos y hallazgos: [SPRINT-4R-T07](docs/SPRINT-4R-T07.md).
 
 ## Importación diaria de ventas (SPRINT-4R-T11)
 

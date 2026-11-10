@@ -7,8 +7,9 @@ import { isRecord } from '../../src/lib/auth';
 // (SPRINT-4R-T07) con API y PostgreSQL reales. A diferencia de los specs por
 // módulo (T05 y T06), aquí las operaciones se registran desde el formulario
 // del supervisor y el mismo dato recorre toda la cadena: operación diaria →
-// cálculo del contador → confirmación y entrega → constancia en el portal de
-// cada trabajador. Cada proyecto usa su propio local y cuentas sintéticas.
+// reparto automático del día → consulta y pago del período por el contador →
+// la operación pagada ya no se corrige (desde SPRINT-4A-T08 no hay reparto
+// por período). Cada proyecto usa su propio local y cuentas sintéticas.
 test.skip(
   process.env.TEST_REAL_DISPOSABLE !== 'true',
   'Requiere API y base exclusivas con datos sintéticos.',
@@ -19,7 +20,6 @@ const lastName = 'Flujo T07';
 const period = { periodStart: '2026-09-14', periodEnd: '2026-09-20' };
 const mixedDay = '2026-09-14';
 const cashDay = '2026-09-15';
-const paymentDate = '2026-09-21';
 // PNG 1x1 real para el voucher.
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -91,12 +91,6 @@ async function login(
       })
     ).status(),
   ).toBe(200);
-}
-async function confirm(page: Page, name: string): Promise<undefined> {
-  const dialog = page.getByRole('dialog');
-  await dialog.getByRole('checkbox').check();
-  await dialog.getByRole('button', { name, exact: true }).click();
-  await expect(dialog).not.toBeVisible();
 }
 async function noOverflow(page: Page): Promise<undefined> {
   expect(
@@ -259,10 +253,10 @@ test('El supervisor tiene una sola operación diaria: sin cierre por turno ni ca
 }) => {
   await login(context, baseURL!, supervisor.email);
   await page.goto('/dashboard');
-  // El menú (visible o colapsado en móvil) ofrece la operación diaria y
-  // ninguna entrada del flujo reemplazado.
+  // El menú (visible o, en móvil, con la etiqueta corta «Operación») ofrece
+  // la operación diaria y ninguna entrada del flujo reemplazado.
   const menu = (await page.getByRole('navigation').allTextContents()).join(' ');
-  expect(menu).toContain('Operación diaria');
+  expect(menu).toContain('Operación');
   expect(menu).not.toMatch(/cierre|turno|venta|mercado pago|concilia/i);
 
   await page.goto('/propinas/diarias');
@@ -304,7 +298,7 @@ test('El supervisor tiene una sola operación diaria: sin cierre por turno ni ca
     ).toBe(404);
 });
 
-test('Flujo completo: el supervisor registra dos días, el contador reparte y entrega, y cada trabajador ve su monto', async ({
+test('Flujo completo: el supervisor registra dos días, cada día queda repartido y el contador paga el período', async ({
   page,
   context,
   baseURL,
@@ -335,9 +329,12 @@ test('Flujo completo: el supervisor registra dos días, el contador reparte y en
   const participants = page.getByRole('group', {
     name: 'Trabajadores participantes del reparto',
   });
-  await expect(participants).toContainText('0 de 3 seleccionados');
-  await participants.getByRole('button', { name: 'Seleccionar todos' }).click();
-  await expect(participants).toContainText('3 de 3 seleccionados');
+  // Desde SPRINT-4A-T01 el supervisor también es elegible: participan los
+  // tres trabajadores.
+  await expect(participants).toContainText('0 de 4 seleccionados');
+  for (const worker of workers)
+    await participants.getByRole('checkbox', { name: worker.name }).check();
+  await expect(participants).toContainText('3 de 4 seleccionados');
   // La vista previa del formulario anticipa el monto exacto de cada uno.
   const preview = page.getByRole('region', {
     name: 'Vista previa del reparto del día',
@@ -396,7 +393,7 @@ test('Flujo completo: el supervisor registra dos días, el contador reparte y en
   });
   await page.getByRole('checkbox', { name: beto.name }).check();
   await page.getByRole('checkbox', { name: carla.name }).check();
-  await expect(participants).toContainText('2 de 3 seleccionados');
+  await expect(participants).toContainText('2 de 4 seleccionados');
   await expect(preview).toContainText('queda $1 de residuo');
   await save(page);
   await expect(registered).toContainText('$6.001');
@@ -405,66 +402,48 @@ test('Flujo completo: el supervisor registra dos días, el contador reparte y en
   await expect(registered.getByRole('table')).not.toContainText(ana.name);
   await page.screenshot({ path: folder + '/dia-2.png', scale: 'css' });
 
-  // 3. El contador calcula el período: cada uno recibe la suma exacta de
-  //    sus asignaciones diarias y el reparto concilia.
+  // 3. Cada día quedó repartido al guardarlo (SPRINT-4A-T03): el contador
+  //    ve en /propinas la suma exacta de cada trabajador y paga el período
+  //    por lote (SPRINT-4A-T06). El reparto por período ya no existe
+  //    (SPRINT-4A-T08).
   await login(context, baseURL!, accountant.email);
-  await page.goto('/propinas/repartos');
-  await page.getByLabel('Local', { exact: true }).selectOption(storeId);
-  await page.getByLabel('Desde', { exact: true }).fill(period.periodStart);
-  await page.getByLabel('Hasta', { exact: true }).fill(period.periodEnd);
-  await page
-    .getByRole('button', { name: 'Calcular reparto', exact: true })
-    .click();
-  await confirm(page, 'Calcular reparto');
-  const distribution = page.getByRole('region', {
-    name: 'Distribución por trabajador',
+  await page.goto(
+    `/propinas?storeId=${storeId}&from=${period.periodStart}&to=${period.periodEnd}`,
+  );
+  const summary = page.getByRole('region', {
+    name: 'Resumen de propinas por trabajador',
   });
-  async function expectDistribution(): Promise<undefined> {
-    for (const worker of workers)
-      await expect(
-        distribution.getByRole('row').filter({ hasText: worker.name }),
-      ).toContainText(money(expected[worker.id]));
+  for (const worker of workers)
     await expect(
-      page.getByText(
-        'Conciliación correcta: suma individual $16.001 · fondo $16.001 · fuentes $16.001 · diferencia con líneas $0 · diferencia con fuentes $0.',
-      ),
-    ).toBeVisible();
-    await expect(
-      distribution.getByRole('columnheader', { name: 'Horas' }),
-    ).toHaveCount(0);
-  }
-  await expectDistribution();
-  await page
-    .getByRole('button', { name: 'Validar reparto', exact: true })
-    .click();
-  await confirm(page, 'Validar reparto');
-  await page
-    .getByRole('button', { name: 'Registrar entrega de propinas', exact: true })
-    .click();
-  await page.getByLabel('Fecha de entrega').fill(paymentDate);
-  await confirm(page, 'Registrar entrega de propinas');
+      summary.getByRole('row').filter({ hasText: worker.name }),
+    ).toContainText(money(expected[worker.id]));
   await expect(
-    page.getByRole('heading', { name: 'Constancias de entrega' }),
+    page.getByRole('button', { name: /Calcular reparto/ }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Marcar como pagado' }).click();
+  const payDialog = page.getByRole('dialog', {
+    name: 'Marcar propinas como pagadas',
+  });
+  await expect(payDialog).toContainText('$16.001');
+  await payDialog.getByRole('button', { name: 'Confirmar pago' }).click();
+  await expect(payDialog).not.toBeVisible();
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'Se registró el pago de $16.001' }),
   ).toBeVisible();
-  await expectDistribution();
   await noOverflow(page);
   await page.screenshot({
-    path: folder + '/reparto-entregado.png',
+    path: folder + '/periodo-pagado.png',
     fullPage: true,
     scale: 'css',
   });
 
-  // 4. Cada trabajador ve en su portal la constancia con su monto exacto.
-  for (const worker of workers) {
-    await login(context, baseURL!, worker.email);
-    await page.goto('/portal/propinas');
-    const main = page.getByRole('main');
-    await expect(main).toContainText(money(expected[worker.id]));
-    await expect(main).toContainText(storeName);
-    await noOverflow(page);
-  }
+  // 4. La vista de repartos retirada lleva al contador a Propinas.
+  await page.goto('/propinas/repartos');
+  await expect(page).toHaveURL(/\/propinas$/);
 
-  // 5. Entregado el reparto, el supervisor ya no puede corregir el día: la
+  // 5. Pagado el período, el supervisor ya no puede corregir el día: la
   //    interfaz explica la causa y la operación queda como estaba.
   await login(context, baseURL!, supervisor.email);
   await page.goto('/propinas/diarias');
@@ -477,7 +456,7 @@ test('Flujo completo: el supervisor registra dos días, el contador reparte y en
     'reparto confirmado o pagado',
   );
   // Con la corrección cancelada, la consulta fresca muestra la operación tal
-  // como quedó en el reparto entregado.
+  // como quedó al pagarse.
   await page.getByRole('button', { name: 'Cancelar corrección' }).click();
   await page.getByRole('button', { name: 'Actualizar consulta' }).click();
   await expect(registered).toContainText('$6.001');

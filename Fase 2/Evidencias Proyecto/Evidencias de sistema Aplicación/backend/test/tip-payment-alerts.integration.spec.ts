@@ -16,8 +16,11 @@ import type {
   TipPaymentAlert,
   TipPaymentAlertCollection,
 } from '../src/tips/types/tip-payment-alerts.types.js';
-import type { TipPoolResponse } from '../src/tips/types/tip-pools.types.js';
 import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
+import {
+  confirmLegacyTipPool,
+  payLegacyTipPool,
+} from './helpers/legacy-tip-pools.js';
 import {
   ensureDefaultPaymentMethods,
   ensurePaymentMethod,
@@ -148,17 +151,6 @@ describe.skipIf(!databaseUrl)(
         select: { id: true },
       });
       return entry.id;
-    }
-
-    function poolAction(
-      poolId: string,
-      action: 'confirm' | 'pay',
-      body: Record<string, unknown>,
-    ) {
-      return server()
-        .post(`/tip-pools/${poolId}/${action}`)
-        .set('Authorization', `Bearer ${tokens.accountant}`)
-        .send(body);
     }
 
     beforeAll(async () => {
@@ -306,7 +298,7 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
-    it('mantiene DRAFT y CONFIRMED, y el pago antes del plazo elimina la alerta del reparto enterado', async () => {
+    it('mantiene DRAFT y CONFIRMED, y un reparto histórico pagado ya no alerta', async () => {
       const entryId = await seedEntry(todayText, 'DEBIT_CARD', 9000);
       const hours = await prisma.workHoursRecord.create({
         data: {
@@ -319,11 +311,11 @@ describe.skipIf(!databaseUrl)(
         },
         select: { id: true },
       });
-      // Desde SPRINT-4R-T04 la vista previa calcula siempre el reparto
-      // equitativo desde las operaciones diarias; las alertas siguen sobre los
-      // registros diarios (tip_entries). El reparto proporcional histórico que
-      // los usa como fuente se construye directamente en la base, como lo
-      // hacía el motor anterior, y se confirma y paga por la API.
+      // Las alertas siguen sobre los registros diarios históricos
+      // (tip_entries). El reparto proporcional que los usa como fuente se
+      // construye directamente en la base, como lo hacía el motor anterior,
+      // y se confirma y paga con el helper de repartos históricos: desde
+      // SPRINT-4A-T08 la API ya no confirma ni paga repartos.
       const agreement = await prisma.tipAgreement.findFirstOrThrow({
         where: { storeId },
         select: { id: true, name: true },
@@ -353,7 +345,7 @@ describe.skipIf(!databaseUrl)(
             },
           },
         },
-        select: { id: true, version: true },
+        select: { id: true },
       });
 
       const draftAlert = (await ownAlerts()).find(
@@ -364,11 +356,7 @@ describe.skipIf(!databaseUrl)(
         pool: { id: created.id, status: 'DRAFT' },
       });
 
-      const confirmed = (
-        await poolAction(created.id, 'confirm', {
-          expectedVersion: created.version,
-        }).expect(200)
-      ).body as TipPoolResponse;
+      await confirmLegacyTipPool(prisma, created.id, ids.accountant);
       const confirmedAlert = (await ownAlerts()).find(
         (alert) => alert.tipEntryId === entryId,
       );
@@ -377,10 +365,7 @@ describe.skipIf(!databaseUrl)(
         pool: { id: created.id, status: 'CONFIRMED' },
       });
 
-      await poolAction(created.id, 'pay', {
-        expectedVersion: confirmed.version,
-        paymentDate: todayText,
-      }).expect(200);
+      await payLegacyTipPool(prisma, created.id, ids.accountant, todayText);
       expect(
         (await ownAlerts()).some((alert) => alert.tipEntryId === entryId),
       ).toBe(false);

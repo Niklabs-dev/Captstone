@@ -228,7 +228,7 @@ cambian; el único cambio de estado posible es a `PUBLISHED`.
 | `tip_entries` | Registro diario agregado por local, día de negocio y medio de pago. Es la **única fuente** que alimenta los repartos; `sales.tip_amount` se reconcilia con ella mediante `sales.tip_entry_id`. |
 | `tip_agreements` | Pacto de reparto vigente en un local (regla, vigencia, creador). `tip_pools` guarda una copia en `agreement_snapshot` para inmutabilidad. |
 | `work_hours_records` | Horas trabajadas por trabajador y período; `tip_pool_lines` referencia su registro fuente y fotografía las horas usadas. |
-| `tip_pools` | Reparto de un local para un período. Contiene el monto total (desde `tip_entries`), el estado, el pacto aplicado y las trazabilidades de cálculo y confirmación. |
+| `tip_pools` | Reparto de un local para un período. Contiene el monto total (desde `tip_entries`), el estado, el pacto aplicado y las trazabilidades de cálculo y confirmación. Histórico de solo lectura desde SPRINT-4A-T08: la API ya no crea ni cambia repartos (el reparto vigente es `daily_tip_allocations`). |
 | `tip_pool_lines` | Línea del reparto por trabajador: horas fotografiadas, monto asignado, trabajador y referencia al registro de horas. |
 | `tip_pool_sources` | Fuente del reparto: vincula un `tip_pool` con el `tip_entry` usado y guarda el monto aplicado. Un registro diario solo puede usarse una vez. |
 | `tip_pool_receipts` | Constancia de pago del reparto para un trabajador: foto con nombres, local, período, horas, monto y detalle; inmutable y solo de un reparto `PAID`. |

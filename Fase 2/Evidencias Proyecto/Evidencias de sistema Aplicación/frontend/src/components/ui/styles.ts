@@ -20,6 +20,10 @@ export const tableDescriptionClass = 'mt-1 text-xs text-muted';
 export const badgeClass =
   'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold';
 
+// Enlace dentro de un párrafo (panel de ventas, propinas).
+export const inlineLinkClass =
+  'font-semibold text-salmon-ink underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink';
+
 export const alertClass =
   'rounded-lg border border-crit/20 bg-crit-bg px-3.5 py-3 text-sm text-crit';
 export const infoNoticeClass =

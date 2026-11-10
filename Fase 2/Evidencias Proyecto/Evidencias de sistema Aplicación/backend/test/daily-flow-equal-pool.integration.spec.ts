@@ -15,11 +15,11 @@ import type { DailyOperationResponse } from '../src/daily-operations/types/daily
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { epochDay } from '../src/tips/calculation/equal-daily-distribution.calculator.js';
-import type { OwnTipReceiptDto } from '../src/tips/dto/own-tip-receipt.dto.js';
 import type {
-  TipPoolReceiptResponse,
-  TipPoolResponse,
-} from '../src/tips/types/tip-pools.types.js';
+  DailyTipSummaryResponse,
+  TipPaymentBatchResponse,
+} from '../src/tips/types/daily-tips.types.js';
+import type { TipPoolRetiredActionBody } from '../src/tips/types/tip-pools.types.js';
 import { minimalJpeg } from './helpers/jpeg.js';
 import { ensureDefaultPaymentMethods } from './helpers/payment-methods.js';
 import {
@@ -31,24 +31,27 @@ type App = Parameters<typeof request>[0];
 type Tx = Prisma.TransactionClient;
 
 // Verificación de punta a punta del flujo diario y el reparto equitativo
-// (SPRINT-4R-T07) contra PostgreSQL real y el pipeline HTTP completo.
+// (SPRINT-4R-T07, con el reparto automático y el pago por período de
+// SPRINT-4A-T03/T06 desde SPRINT-4A-T08) contra PostgreSQL real y el
+// pipeline HTTP completo.
 //
-// A diferencia de los tests por módulo (T01–T06), que siembran las
-// operaciones directo en la base, aquí todo pasa por la API como en el uso
-// real: el supervisor registra tres días (tarjeta + efectivo con voucher y
-// diferencia positiva; solo efectivo con diferencia negativa; un día en cero)
-// con participantes distintos, el contador calcula, el supervisor corrige un
-// día en DRAFT, el contador recalcula, confirma y paga, y cada trabajador ve
-// en su portal exactamente el monto de su línea. Además se comprueba que el
-// cierre por turno y la captura de ventas/vouchers de Mercado Pago ya no
-// existen, y que los cierres y repartos proporcionales históricos no cambian.
+// A diferencia de los tests por módulo, que siembran las operaciones directo
+// en la base, aquí todo pasa por la API como en el uso real: el supervisor
+// registra tres días (tarjeta + efectivo con voucher y diferencia positiva;
+// solo efectivo con diferencia negativa; un día en cero) con participantes
+// distintos y cada día queda repartido al guardarlo; el supervisor corrige un
+// día y su reparto se recalcula; el contador paga el período y desde ahí la
+// operación no se corrige. El reparto por período (vista previa,
+// confirmación y pago) ya no existe: responde 410 y no crea repartos.
+// Además se comprueba que el cierre por turno y la captura de ventas/vouchers
+// de Mercado Pago ya no existen, y que los cierres y repartos proporcionales
+// históricos no cambian.
 //
 // Todo corre en withinRollback: la base se revierte y los vouchers se escriben
 // en una carpeta temporal que se elimina al terminar.
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
-// Período en el pasado: el pago sin fecha usa el día de hoy en Chile, que
-// debe ser posterior al término del período.
+// Período en el pasado, ya cerrado al pagarlo.
 const PERIOD = { start: '2026-09-07', end: '2026-09-13' } as const;
 const DAY_MIXED = '2026-09-07';
 const DAY_CASH = '2026-09-08';
@@ -118,14 +121,8 @@ function addAmounts(
   return total;
 }
 
-function amountsByUser(pool: TipPoolResponse): Record<string, number> {
-  return Object.fromEntries(
-    pool.lines.map((line) => [line.userId, line.amount]),
-  );
-}
-
 describe.skipIf(!databaseUrl)(
-  'Flujo diario y reparto equitativo de punta a punta (SPRINT-4R-T07)',
+  'Flujo diario, reparto automático y pago por período de punta a punta (SPRINT-4R-T07 y SPRINT-4A-T08)',
   { timeout: 90_000 },
   () => {
     let app: INestApplication<App>;
@@ -174,28 +171,19 @@ describe.skipIf(!databaseUrl)(
       return req;
     }
 
-    function preview(f: Fixture, expectedVersion?: number): request.Test {
-      return server()
-        .post('/tip-pools/preview')
-        .set('Authorization', `Bearer ${token(f.accountant)}`)
-        .send({
-          storeId: f.storeId,
-          periodStart: PERIOD.start,
-          periodEnd: PERIOD.end,
-          ...(expectedVersion === undefined ? {} : { expectedVersion }),
-        });
-    }
-
-    function poolAction(
-      f: Fixture,
-      poolId: string,
-      name: 'confirm' | 'pay',
-      expectedVersion: number,
-    ): request.Test {
-      return server()
-        .post(`/tip-pools/${poolId}/${name}`)
-        .set('Authorization', `Bearer ${token(f.accountant)}`)
-        .send({ expectedVersion });
+    // Propinas del período por trabajador según la consulta del contador.
+    async function summaryOf(f: Fixture): Promise<Record<string, number>> {
+      const summary = (
+        await server()
+          .get(
+            `/daily-tips/summary?storeId=${f.storeId}&from=${PERIOD.start}&to=${PERIOD.end}`,
+          )
+          .set('Authorization', `Bearer ${token(f.accountant)}`)
+          .expect(200)
+      ).body as DailyTipSummaryResponse;
+      return Object.fromEntries(
+        summary.workers.map((row) => [row.worker.id, row.totalAmount]),
+      );
     }
 
     // Un rechazo de trigger aborta la transacción de PostgreSQL. En uso real
@@ -213,9 +201,7 @@ describe.skipIf(!databaseUrl)(
         .set('Authorization', `Bearer ${token(f.supervisor)}`)
         .field('cashTipAmount', cashTipAmount)
         .expect(409);
-      expect(JSON.stringify(rejected.body)).toContain(
-        'reparto confirmado o pagado',
-      );
+      expect(JSON.stringify(rejected.body)).toContain('propinas pagadas');
       await f.tx.$executeRaw`ROLLBACK TO SAVEPOINT correccion_rechazada`;
       return undefined;
     }
@@ -444,7 +430,7 @@ describe.skipIf(!databaseUrl)(
       await fs.rm(voucherRoot, { recursive: true, force: true });
     });
 
-    it('registra tres días por la API, calcula, recalcula el DRAFT, confirma, paga y cada trabajador ve su monto', async () => {
+    it('registra tres días por la API, cada día queda repartido, la corrección recalcula y el contador paga el período', async () => {
       await withinRollback(async (f) => {
         const legacyClosingId = await createLegacyClosing(f);
         const legacyPoolId = await createLegacyProportionalPool(f);
@@ -556,112 +542,85 @@ describe.skipIf(!databaseUrl)(
           cashDifference: -1500,
         });
 
-        // 5. El contador calcula: cada uno recibe la suma de sus
-        //    asignaciones diarias y el reparto concilia exacto.
-        const expected = addAmounts(
-          expectedSplit(DAY_MIXED, 10000, everyone),
-          expectedSplit(DAY_CASH, 6001, [f.beto.id, f.carla.id]),
+        // 5. Cada día quedó repartido al guardarlo: el contador ve por
+        //    trabajador la suma de sus propinas diarias, sin calcular nada.
+        const everyoneSplit = expectedSplit(DAY_MIXED, 10000, everyone);
+        expect(await summaryOf(f)).toEqual(
+          addAmounts(
+            everyoneSplit,
+            expectedSplit(DAY_CASH, 6001, [f.beto.id, f.carla.id]),
+          ),
         );
-        const draft = (await preview(f).expect(201)).body as TipPoolResponse;
-        expect(draft).toMatchObject({
-          status: 'DRAFT',
-          version: 1,
-          rule: 'EQUAL_SHARES',
-          totalAmount: 16001,
-          totalHours: null,
-          reconciled: true,
-          sources: [],
-        });
-        expect(amountsByUser(draft)).toEqual(expected);
-        expect(draft.lines.every((line) => line.hoursWorked === null)).toBe(
-          true,
-        );
-        // El día en cero no reparte nada ni genera líneas para nadie.
-        const fundedSources = draft.dailySources.filter(
-          (source) => source.amount > 0,
-        );
+        // El día en cero no reparte nada y la trabajadora inactiva no recibe.
         expect(
-          fundedSources.map((source) => [
-            source.businessDate,
-            source.cardTipAmount,
-            source.cashTipAmount,
-          ]),
-        ).toEqual([
-          [DAY_MIXED, 7000, 3000],
-          [DAY_CASH, 0, 6001],
-        ]);
+          await f.tx.dailyTipAllocation.count({
+            where: { operationId: zero.id },
+          }),
+        ).toBe(0);
         expect(
-          draft.dailySources.reduce((sum, source) => sum + source.amount, 0),
-        ).toBe(draft.totalAmount);
-        expect(draft.lines.some((line) => line.userId === f.cora.id)).toBe(
-          false,
-        );
+          await f.tx.dailyTipAllocation.count({
+            where: { workerId: f.cora.id },
+          }),
+        ).toBe(0);
 
-        // 6. En DRAFT el supervisor aún corrige el día en efectivo; el
-        //    contador recalcula sobre el mismo reparto y sube la versión.
+        // 6. El supervisor corrige el día en efectivo y su reparto No pagado
+        //    se recalcula en la misma transacción.
         await server()
           .patch(`/daily-operations/${cash.id}`)
           .set('Authorization', `Bearer ${token(f.supervisor)}`)
           .field('cashTipAmount', '6002')
           .expect(200);
-        const recalculated = (await preview(f, 1).expect(200))
-          .body as TipPoolResponse;
-        expect(recalculated).toMatchObject({
-          id: draft.id,
-          version: 2,
-          totalAmount: 16002,
-          reconciled: true,
-        });
         const finalExpected = addAmounts(
-          expectedSplit(DAY_MIXED, 10000, everyone),
+          everyoneSplit,
           expectedSplit(DAY_CASH, 6002, [f.beto.id, f.carla.id]),
         );
-        expect(amountsByUser(recalculated)).toEqual(finalExpected);
+        expect(await summaryOf(f)).toEqual(finalExpected);
 
-        // 7. Confirmado, la operación fuente queda congelada.
-        await poolAction(f, draft.id, 'confirm', 2).expect(200);
-        await expectFrozen(f, cash.id, '7000');
-
-        // 8. Pago: una constancia por trabajador con el monto de su línea.
-        const paid = (await poolAction(f, draft.id, 'pay', 3).expect(200))
-          .body as TipPoolResponse;
-        expect(paid).toMatchObject({ status: 'PAID', version: 4 });
-        expect(amountsByUser(paid)).toEqual(finalExpected);
-        const receipts = (
-          await server()
-            .get(`/tip-pools/${draft.id}/receipts`)
-            .set('Authorization', `Bearer ${token(f.accountant)}`)
-            .expect(200)
-        ).body as TipPoolReceiptResponse[];
-        expect(
-          Object.fromEntries(
-            receipts.map((receipt) => [receipt.userId, receipt.amount]),
-          ),
-        ).toEqual(finalExpected);
-
-        // 9. Cada trabajador ve en su portal solo su constancia y su monto.
-        for (const worker of [f.ana, f.beto, f.carla]) {
-          const own = (
-            await server()
-              .get('/my-tip-receipts')
-              .set('Authorization', `Bearer ${token(worker)}`)
-              .expect(200)
-          ).body as OwnTipReceiptDto[];
-          expect(own).toHaveLength(1);
-          expect(own[0]).toMatchObject({
-            userId: worker.id,
-            amount: finalExpected[worker.id],
+        // 7. El reparto por período ya no existe: la vista previa responde
+        //    410 y no crea ningún reparto del período.
+        const retired = await server()
+          .post('/tip-pools/preview')
+          .set('Authorization', `Bearer ${token(f.accountant)}`)
+          .send({
+            storeId: f.storeId,
             periodStart: PERIOD.start,
             periodEnd: PERIOD.end,
-            hoursWorked: null,
-          });
-        }
+          })
+          .expect(410);
+        expect((retired.body as TipPoolRetiredActionBody).statusCode).toBe(410);
+        expect(
+          await f.tx.tipPool.count({
+            where: { storeId: f.storeId, periodStart: new Date(PERIOD.start) },
+          }),
+        ).toBe(0);
 
-        // Pagado, tampoco se puede corregir la operación fuente.
+        // 8. El contador paga el período: un lote con todas las propinas
+        //    No pagadas, que suma el fondo de los tres días.
+        const batch = (
+          await server()
+            .post('/daily-tips/payment-batches')
+            .set('Authorization', `Bearer ${token(f.accountant)}`)
+            .send({ storeId: f.storeId, from: PERIOD.start, to: PERIOD.end })
+            .expect(201)
+        ).body as TipPaymentBatchResponse;
+        expect(batch).toMatchObject({
+          periodStart: PERIOD.start,
+          periodEnd: PERIOD.end,
+          totalAmount: 16002,
+          allocationCount: 5,
+        });
+        expect(
+          await f.tx.dailyTipAllocation.count({
+            where: { storeId: f.storeId, status: 'UNPAID' },
+          }),
+        ).toBe(0);
+
+        // 9. Pagado, ninguna operación del período se puede corregir.
+        await expectFrozen(f, cash.id, '7000');
         await expectFrozen(f, mixed.id, '1');
 
         // 10. Trazabilidad: tres altas (el reintento no se audita), una
-        //     corrección y el ciclo completo del reparto.
+        //     corrección, el pago y ninguna acción de reparto por período.
         const operationAudits = await f.tx.auditLog.findMany({
           where: {
             storeId: f.storeId,
@@ -684,17 +643,19 @@ describe.skipIf(!databaseUrl)(
             (audit) => audit.action === AUDIT_ACTION.DAILY_OPERATION_UPDATED,
           ),
         ).toHaveLength(1);
-        const poolAudits = await f.tx.auditLog.findMany({
-          where: { entityType: 'tip_pools', entityId: draft.id },
-          orderBy: { id: 'asc' },
-          select: { action: true },
-        });
-        expect(poolAudits.map((audit) => audit.action)).toEqual([
-          AUDIT_ACTION.TIP_POOL_CALCULATED,
-          AUDIT_ACTION.TIP_POOL_RECALCULATED,
-          AUDIT_ACTION.TIP_POOL_CONFIRMED,
-          AUDIT_ACTION.TIP_POOL_PAID,
-        ]);
+        expect(
+          await f.tx.auditLog.count({
+            where: {
+              action: AUDIT_ACTION.DAILY_TIPS_PAID,
+              entityId: batch.id,
+            },
+          }),
+        ).toBe(1);
+        expect(
+          await f.tx.auditLog.count({
+            where: { storeId: f.storeId, entityType: 'tip_pools' },
+          }),
+        ).toBe(0);
 
         // 11. Los registros históricos quedaron intactos.
         expect(await legacySnapshot(f, legacyClosingId, legacyPoolId)).toBe(

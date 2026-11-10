@@ -476,13 +476,13 @@ test('Vacío, error, validación y permisos (administrador, supervisor y trabaja
   );
   expect(noOrigin.status()).toBe(403);
 
-  // El supervisor no entra a la vista ni al Excel o al pago; conserva su
-  // consulta de repartos hasta SPRINT-4A-T08.
+  // El supervisor no entra a la vista ni al Excel o al pago, y desde
+  // SPRINT-4A-T08 la vista de repartos lo devuelve a su inicio.
   await login(context, baseURL!, supervisor.email);
   await page.goto('/propinas');
   await expect(page).toHaveURL(/\/dashboard\?reason=forbidden$/);
   await page.goto('/propinas/repartos');
-  await expect(page).toHaveURL(/\/propinas\/repartos$/);
+  await expect(page).toHaveURL(/\/dashboard$/);
   expect(
     (await context.request.get('/api/daily-tips/export?' + range)).status(),
   ).toBe(403);

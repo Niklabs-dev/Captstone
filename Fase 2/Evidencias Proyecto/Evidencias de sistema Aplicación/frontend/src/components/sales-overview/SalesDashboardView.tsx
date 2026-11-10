@@ -5,6 +5,7 @@ import {
   badgeClass,
   buttonClass,
   infoNoticeClass,
+  inlineLinkClass,
   tableCellClass,
   tableHeadClass,
   tableHeadingClass,
@@ -37,9 +38,6 @@ import {
 // Panel consolidado del día por local (SPRINT-4R-T14). Cada concepto
 // conserva su fuente: ventas del Excel vigente, propinas y diferencia de la
 // operación diaria del supervisor y alertas legales vigentes hoy.
-const inlineLinkClass =
-  'font-semibold text-salmon-ink underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-salmon-ink';
-
 function alertsText(counts: AlertCounts): string {
   if (counts.overdue === 0 && counts.upcoming === 0) return 'Sin alertas';
   return `${counts.overdue} vencidas · ${counts.upcoming} por vencer`;
@@ -469,11 +467,11 @@ export function SalesDashboardView({
             </Link>{' '}
             y{' '}
             <Link
-              href="/propinas/repartos"
+              href="/propinas/historico"
               prefetch={false}
               className={inlineLinkClass}
             >
-              Reparto de propinas
+              Repartos anteriores de propinas
             </Link>
             .
           </p>
