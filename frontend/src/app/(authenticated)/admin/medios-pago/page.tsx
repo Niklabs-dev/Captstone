@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import type { ReactElement } from 'react';
 import { getUsersSession } from '@/lib/users-session';
+import { PaymentMethodAliasesPanel } from '@/components/payment-methods/PaymentMethodAliasesPanel';
 import { PaymentMethodsPanel } from '@/components/payment-methods/PaymentMethodsPanel';
 import { introClass } from '@/components/ui/styles';
 
@@ -21,6 +22,8 @@ export default async function PaymentMethodsPage(): Promise<ReactElement> {
         registros nuevos.
       </p>
       <PaymentMethodsPanel />
+      {/* SPRINT-4A-T20: etiquetas del informe de MrComanda de cada medio. */}
+      <PaymentMethodAliasesPanel />
     </>
   );
 }
