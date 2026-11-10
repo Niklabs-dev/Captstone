@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { RoleCode } from '../constants/roles.constants.js';
+import { ROLE_FORBIDDEN_MESSAGE } from '../constants/forbidden-messages.constants.js';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 import { ROLES_KEY } from '../decorators/roles.decorator.js';
 import { hasAnyRole } from '../policies/store-access.policy.js';
@@ -31,9 +32,7 @@ export class RolesGuard implements CanActivate {
 
     const { user } = context.switchToHttp().getRequest<{ user?: AuthUser }>();
     if (!user || !hasAnyRole(user, roles)) {
-      throw new ForbiddenException(
-        'No tienes permisos para realizar esta acción',
-      );
+      throw new ForbiddenException(ROLE_FORBIDDEN_MESSAGE);
     }
     return true;
   }
