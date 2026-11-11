@@ -681,11 +681,16 @@ describe.skipIf(!databaseUrl)(
     it('calcula stock desde movimientos y registra conteo físico con diferencia', async () => {
       await withinRollback(async (tx) => {
         const { user, store } = await crearUsuarioBase(tx);
+        // Caja de 60 panes con 6 bolsas de 10 (SPRINT-5-T01).
         const pan = await tx.product.create({
           data: {
             sku: 'PAN-ITALIANO',
             name: 'Pan italiano',
             unit: UnitOfMeasure.UNIT,
+            packageName: 'bolsa',
+            boxContent: 60,
+            packagesPerBox: 6,
+            packageContent: 10,
           },
         });
 
@@ -720,17 +725,35 @@ describe.skipIf(!databaseUrl)(
         expect(stock).toBe(35);
 
         const conteo = await tx.inventoryCount.create({
-          data: { storeId: store.id, createdById: user.id },
+          data: {
+            storeId: store.id,
+            createdById: user.id,
+            countDate: new Date('2026-11-11T00:00:00.000Z'),
+          },
         });
+        expect(conteo.status).toBe('OPEN');
+        // 0 cajas + 3 bolsas de 10 + 3 sueltos = 33, con la copia del formato.
         const linea = await tx.inventoryCountLine.create({
           data: {
             countId: conteo.id,
             productId: pan.id,
-            systemQuantity: stock,
+            boxes: 0,
+            packages: 3,
+            looseQuantity: 3,
             countedQuantity: 33,
+            systemQuantity: stock,
             difference: -2,
+            productSku: pan.sku,
+            productName: pan.name,
+            unit: pan.unit,
+            packageName: pan.packageName,
+            boxContent: pan.boxContent,
+            packagesPerBox: pan.packagesPerBox,
+            packageContent: pan.packageContent,
+            savedById: user.id,
           },
         });
+        expect(Number(linea.countedQuantity)).toBe(33);
         expect(Number(linea.difference)).toBe(-2);
       });
     });

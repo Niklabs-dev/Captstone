@@ -141,6 +141,8 @@ model User {
   createdStoreClosures       StoreClosure[]       @relation("CreatedStoreClosures")
   inventoryMovements         InventoryMovement[]  @relation("CreatedInventoryMovements")
   inventoryCounts            InventoryCount[]     @relation("CreatedInventoryCounts")
+  finalizedInventoryCounts   InventoryCount[]     @relation("FinalizedInventoryCounts")
+  savedInventoryCountLines   InventoryCountLine[] @relation("SavedInventoryCountLines")
   ownDataRightsRequests      DataRightsRequest[]  @relation("OwnDataRightsRequests")
   resolvedDataRightsRequests DataRightsRequest[]  @relation("ResolvedDataRightsRequests")
 
@@ -1234,35 +1236,99 @@ model StoreClosure {
 }
 
 // -------------------------------------------------------------
-// MÓDULO INVENTARIO: productos, libro mayor de movimientos y
-// conteos físicos para comparar contra el consumo real (mermas).
+// MÓDULO INVENTARIO: productos con su formato de caja y paquete,
+// filas fijas de la plantilla impresa, libro mayor de movimientos y
+// tomas de inventario físico (SPRINT-5-T01, migración
+// 20261111120000_inventario_catalogo_toma).
 // -------------------------------------------------------------
 
+/// Unidad de un producto (SPRINT-5-T01): kilos, litros o unidades. Los kilos y
+/// litros admiten 3 decimales; en UNIT los contenidos y la cantidad suelta son
+/// enteros (CHECK). Se retiraron G, ML y PACK: un pack de 6 bebidas son 6 UNIT.
 enum UnitOfMeasure {
   UNIT
   KG
-  G
   L
-  ML
-  PACK
 }
 
-/// Insumo o producto controlado en inventario.
+/// Insumo o producto controlado en inventario (SPRINT-5-T01). El administrador
+/// lo crea a mano con el SKU del proveedor y su formato:
+///   total = cajas × box_content + paquetes × package_content + suelta
+/// box_content y package_content son independientes: no se exige
+/// box_content = packages_per_box × package_content (Pepperoni: caja de 7,3 kg
+/// con paquetes de 0,93 kg). packages_per_box es solo informativo. CHECK:
+/// contenidos > 0 y packages_per_box >= 1 cuando existen; enteros en UNIT.
+/// Un producto con líneas de toma o movimientos no se borra (FK Restrict).
 model Product {
-  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  sku       String        @unique @db.VarChar(40)
-  name      String        @db.VarChar(120)
-  category  String?       @db.VarChar(60)
-  unit      UnitOfMeasure
-  minStock  Decimal       @default(0) @map("min_stock") @db.Decimal(12, 3)
-  isActive  Boolean       @default(true) @map("is_active")
-  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// SKU que entrega el proveedor: opcional mientras se recopila y único
+  /// cuando existe (PostgreSQL admite varios NULL); nunca vacío (CHECK).
+  sku              String?       @unique @db.VarChar(40)
+  name             String        @db.VarChar(120)
+  /// Otros nombres del mismo producto (un solo SKU), para buscarlo por
+  /// cualquiera de ellos: Carne Fajita, Beef Steak y Carne Queso. Sin
+  /// elementos NULL ni vacíos (CHECK).
+  alternativeNames String[]      @default([]) @map("alternative_names") @db.VarChar(120)
+  category         String?       @db.VarChar(60)
+  unit             UnitOfMeasure
+  /// Nombre del paquete (bolsa, paquete, botella o pack); nunca vacío.
+  packageName      String?       @map("package_name") @db.VarChar(30)
+  /// Contenido de una caja en la unidad del producto (5,000 kg).
+  boxContent       Decimal?      @map("box_content") @db.Decimal(12, 3)
+  /// Paquetes que trae una caja: solo informativo, no entra en el total.
+  packagesPerBox   Int?          @map("packages_per_box")
+  /// Contenido de un paquete en la unidad del producto (2,500 kg).
+  packageContent   Decimal?      @map("package_content") @db.Decimal(12, 3)
+  /// Se cuenta solo como cantidad suelta: sus líneas no admiten cajas ni
+  /// paquetes (CHECK en la línea, sobre la copia del formato).
+  looseOnly        Boolean       @default(false) @map("loose_only")
+  minStock         Decimal       @default(0) @map("min_stock") @db.Decimal(12, 3)
+  isActive         Boolean       @default(true) @map("is_active")
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  movements  InventoryMovement[]
-  countLines InventoryCountLine[]
+  movements   InventoryMovement[]
+  countLines  InventoryCountLine[]
+  templateRow InventoryTemplateRow?
 
   @@map("products")
+}
+
+/// Tipo de fila de la plantilla de inventario (SPRINT-5-T01): artículo (con
+/// nombre o «<Vacío>»), fila sin texto o fila de sección que cierra su grupo.
+enum InventoryTemplateRowKind {
+  ITEM
+  BLANK
+  SECTION
+}
+
+/// Fila de la plantilla impresa de inventario (SPRINT-5-T01). position es el
+/// número de fila de la hoja Excel (la 1 es el encabezado; la 4 es Carne
+/// Fajita y la 45 la primera sección) y es FIJA: el Product Owner copia el
+/// Excel descargado y lo pega en otro cuadre, así que la aplicación nunca
+/// inserta, borra ni reordena filas; solo cambian el texto impreso, la sección
+/// y el producto asignado. Triggers: position, kind e id no se actualizan y
+/// las filas no se borran (DELETE/TRUNCATE). La carga de las filas es el seed
+/// (SPRINT-5-T02).
+/// CHECK: BLANK sin texto, ITEM y SECTION con texto; solo un ITEM lleva
+/// producto, y cada producto ocupa como máximo una fila (FK única).
+model InventoryTemplateRow {
+  id          String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  position    Int                      @unique
+  kind        InventoryTemplateRowKind
+  /// Texto de la columna ARTÍCULO: el nombre del artículo, «<Vacío>» o el
+  /// rótulo de la sección. NULL solo en las filas BLANK.
+  printedText String?                  @map("printed_text") @db.VarChar(120)
+  /// Rótulo de la sección que cierra el grupo de la fila (en una fila
+  /// SECTION, su propio texto).
+  section     String                   @db.VarChar(120)
+  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product   Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productId String?  @unique @map("product_id") @db.Uuid
+
+  @@map("inventory_template_rows")
 }
 
 enum InventoryMovementType {
@@ -1295,43 +1361,98 @@ model InventoryMovement {
   @@map("inventory_movements")
 }
 
+/// Estado de una toma de inventario: OPEN es «En curso» y CONFIRMED es
+/// «Finalizado» (SPRINT-5-T01).
 enum InventoryCountStatus {
   OPEN
   CONFIRMED
 }
 
-/// Toma de inventario físico de un local.
+/// Toma de inventario físico de un local (SPRINT-5-T01). Nace OPEN («En
+/// curso») y pasa una sola vez a CONFIRMED («Finalizado») con el usuario, la
+/// fecha-hora de finalización y la copia de la estructura de la plantilla
+/// (template_snapshot), que se llenan solo al finalizar (CHECK). Una toma
+/// CONFIRMED es inmutable y no se borra (trigger), igual que sus líneas.
+/// Como máximo una toma OPEN por local: índice único parcial
+/// inventory_counts_store_id_open_key (SQL crudo en la migración; Prisma no
+/// expresa índices parciales).
 model InventoryCount {
-  id        String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  status    InventoryCountStatus @default(OPEN)
-  countedAt DateTime             @default(now()) @map("counted_at") @db.Timestamptz(6)
-  notes     String?              @db.VarChar(255)
-  createdAt DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id               String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status           InventoryCountStatus @default(OPEN)
+  /// Fecha de negocio de la toma (la semanal se hace el martes en la noche o
+  /// el miércoles en la mañana).
+  countDate        DateTime             @map("count_date") @db.Date
+  /// Fecha-hora en que se inició la toma (columna de la migración inicial).
+  countedAt        DateTime             @default(now()) @map("counted_at") @db.Timestamptz(6)
+  notes            String?              @db.VarChar(255)
+  finalizedAt      DateTime?            @map("finalized_at") @db.Timestamptz(6)
+  /// Copia de las filas de la plantilla al finalizar (posición, tipo, texto
+  /// impreso, sección y producto): la descarga en Excel de una toma
+  /// finalizada no cambia aunque después se corrija la plantilla.
+  templateSnapshot Json?                @map("template_snapshot")
+  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  store       Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  storeId     String               @map("store_id") @db.Uuid
-  createdBy   User                 @relation("CreatedInventoryCounts", fields: [createdById], references: [id], onDelete: Restrict)
-  createdById String               @map("created_by_id") @db.Uuid
-  lines       InventoryCountLine[]
+  store         Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId       String               @map("store_id") @db.Uuid
+  createdBy     User                 @relation("CreatedInventoryCounts", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById   String               @map("created_by_id") @db.Uuid
+  finalizedBy   User?                @relation("FinalizedInventoryCounts", fields: [finalizedById], references: [id], onDelete: Restrict)
+  finalizedById String?              @map("finalized_by_id") @db.Uuid
+  lines         InventoryCountLine[]
 
+  @@index([storeId, countDate])
+  @@index([finalizedById])
   @@map("inventory_counts")
 }
 
-/// Línea de conteo físico: compara el stock según sistema contra la cantidad
-/// contada, dejando registrada la diferencia (mermas detectadas).
+/// Línea de una toma: lo contado de un producto en cajas, paquetes y cantidad
+/// suelta (SPRINT-5-T01). Una por toma y producto. Copia el SKU, el nombre, la
+/// unidad y el formato que tenía el producto al guardarla, de modo que una
+/// toma finalizada no cambia si después se edita el producto. counted_quantity
+/// guarda el total y la base lo verifica sobre esa copia (CHECK):
+///   counted_quantity = boxes × box_content + packages × package_content
+///                      + loose_quantity
+/// Una línea vacía (producto no contado: la finalización, SPRINT-5-T06, las
+/// inserta ANTES de pasar la toma a CONFIRMED) tiene boxes, packages,
+/// loose_quantity y counted_quantity en NULL. Las líneas de una toma CONFIRMED
+/// no se insertan, modifican ni borran (trigger). system_quantity y difference
+/// quedan reservadas para la comparación contra el stock esperado.
 model InventoryCountLine {
-  id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  systemQuantity  Decimal @map("system_quantity") @db.Decimal(12, 3)
-  countedQuantity Decimal @map("counted_quantity") @db.Decimal(12, 3)
-  difference      Decimal @db.Decimal(12, 3)
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Cajas contadas (entero >= 0).
+  boxes           Int?
+  /// Paquetes contados (entero >= 0); pueden ser más que los de una caja.
+  packages        Int?
+  /// Cantidad suelta en la unidad del producto (>= 0; entera en UNIT).
+  looseQuantity   Decimal?       @map("loose_quantity") @db.Decimal(12, 3)
+  /// Total calculado en el backend con aritmética decimal exacta.
+  countedQuantity Decimal?       @map("counted_quantity") @db.Decimal(12, 3)
+  systemQuantity  Decimal?       @map("system_quantity") @db.Decimal(12, 3)
+  difference      Decimal?       @db.Decimal(12, 3)
+  // Copia del producto y su formato al guardar la línea.
+  productSku      String?        @map("product_sku") @db.VarChar(40)
+  productName     String         @map("product_name") @db.VarChar(120)
+  unit            UnitOfMeasure
+  packageName     String?        @map("package_name") @db.VarChar(30)
+  boxContent      Decimal?       @map("box_content") @db.Decimal(12, 3)
+  packagesPerBox  Int?           @map("packages_per_box")
+  packageContent  Decimal?       @map("package_content") @db.Decimal(12, 3)
+  looseOnly       Boolean        @default(false) @map("loose_only")
+  /// Fecha-hora del último guardado de la línea.
+  savedAt         DateTime       @default(now()) @map("saved_at") @db.Timestamptz(6)
 
   count     InventoryCount @relation(fields: [countId], references: [id], onDelete: Cascade)
   countId   String         @map("count_id") @db.Uuid
   product   Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
   productId String         @map("product_id") @db.Uuid
+  /// Usuario del último guardado de la línea.
+  savedBy   User           @relation("SavedInventoryCountLines", fields: [savedById], references: [id], onDelete: Restrict)
+  savedById String         @map("saved_by_id") @db.Uuid
 
   @@unique([countId, productId])
+  @@index([productId])
+  @@index([savedById])
   @@map("inventory_count_lines")
 }
 
