@@ -50,6 +50,11 @@ export class PaymentMethodAliasesController {
   @Get()
   @ApiOperation({
     summary: 'Lista las etiquetas del informe asociadas a cada medio de pago',
+    description:
+      'Cada alias une una etiqueta del Excel de MrComanda (ej. «T. DEBITO») ' +
+      'con un medio del catálogo; con él la importación reconoce la línea ' +
+      'sola. Incluye los creados aquí, los sembrados y los recordados al ' +
+      'confirmar una vista previa con resolución manual.',
   })
   @ApiOkResponse({
     description:

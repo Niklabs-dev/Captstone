@@ -12,15 +12,15 @@
 | --- | --- | --- |
 | Núcleo | `stores`, `roles`, `users`, `refresh_tokens`, `audit_logs` | Locales, control de acceso por rol y local, autenticación JWT y auditoría inmutable |
 | Gestor Documental | `document_types`, `documents`, `document_versions`, `payslips` | Documentación laboral con hash SHA-256, versionado y conservación por 5 años; liquidaciones de sueldo con estado de publicación |
-| Propinas | `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources`, `tip_pool_receipts`, `tip_pool_daily_operation_sources` | Pacto de reparto (proporcional histórico y equitativo), horas trabajadas, reparto con snapshots (art. 64 CT) y constancias de pago; `tip_entries` conserva la captura histórica por medio (modo lectura desde SPRINT-4R-T01) y `tip_pool_daily_operation_sources` vincula el reparto con la operación diaria (SPRINT-4R-T02) |
-| Ventas y Caja | `payment_methods`, `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries` | **Histórico, modo lectura:** catálogo administrable de medios de pago (se conserva para historial y futura importación Excel), ventas por local (manuales y totales netos MrComanda) y cierre de caja por local, día y turno con conciliación y vouchers. Reemplazado operativamente por la operación diaria |
+| Propinas | `daily_tip_allocations`, `tip_payment_batches`, `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources`, `tip_pool_receipts`, `tip_pool_daily_operation_sources` | **Vigente (SPRINT-4A-T02):** propina diaria por participante, creada al guardar la operación diaria, y lotes de pago por local y período. **Histórico de solo lectura:** pacto de reparto (proporcional histórico y equitativo), horas trabajadas, reparto con snapshots (art. 64 CT) y constancias de pago; `tip_entries` conserva la captura histórica por medio (modo lectura desde SPRINT-4R-T01) y `tip_pool_daily_operation_sources` vincula el reparto con la operación diaria (SPRINT-4R-T02) |
+| Ventas y Caja | `payment_methods`, `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries` | **Histórico, modo lectura:** catálogo administrable de medios de pago (vigente: clasifica las líneas de la importación de ventas), ventas por local (manuales y totales netos MrComanda) y cierre de caja por local, día y turno con conciliación y vouchers. Reemplazado operativamente por la operación diaria |
 | Operación diaria | `daily_operations`, `daily_operation_vouchers`, `daily_operation_participants` | Una operación por local y fecha de negocio (SPRINT-4R-T01): propina tarjeta con voucher fotográfico, propina efectivo, fondo de propinas calculado y diferencia de efectivo con signo y motivo. Fuente operativa de ambos montos de propina y, desde SPRINT-4R-T02, de la selección de participantes del reparto (compartida por tarjeta y efectivo) |
-| Importación de ventas | `store_external_codes`, `payment_method_aliases`, `sales_imports`, `sales_import_lines` | Ventas diarias importadas desde el Excel de MrComanda (SPRINT-4R-T08): equivalencias explícitas de locales y alias de medios de pago, archivo importado con hash SHA-256 y versiones (una vigente por local y fecha) y totales por medio de pago. No guarda propinas ni diferencias de efectivo (vienen de la operación diaria) ni escribe en `sales` |
+| Importación de ventas | `payment_method_aliases`, `sales_imports`, `sales_import_lines`, `sales_import_skipped_lines`, `store_external_codes` | Ventas diarias importadas desde el Excel de MrComanda (SPRINT-4R-T08): el local se identifica por `stores.subway_store_id` (SPRINT-4A-T17; `store_external_codes` queda sin uso), alias de medios de pago, resolución manual de lo no identificado y líneas en 0 omitidas (SPRINT-4A-T18/T21), archivo importado con hash SHA-256 y versiones (una vigente por local y fecha) y totales por medio de pago. No guarda propinas ni diferencias de efectivo (vienen de la operación diaria) ni escribe en `sales` |
 | Calendario de operación | `store_operating_schedules`, `store_closures` | Días semanales en que abre cada local, desde cuándo se exigen ventas y cierres por excepción con motivo (SPRINT-4R-T12). El estado diario de ventas (IMPORTADO / PENDIENTE / ATRASADO / CERRADO) se calcula al consultar, sin tablas de alertas |
 | Inventario | `products`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Stock por libro mayor de movimientos y conteos físicos que detectan mermas |
 | Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
 
-**37 tablas y 16 enums**: el modelo base (27 tablas, hasta SPRINT-4-T32) más la
+**40 tablas y 18 enums**: el modelo base (27 tablas, hasta SPRINT-4-T32) más la
 operación diaria de SPRINT-4R-T01 (`daily_operations` y
 `daily_operation_vouchers`), los participantes y fuentes diarias de
 SPRINT-4R-T02 (`daily_operation_participants` y
@@ -28,8 +28,11 @@ SPRINT-4R-T02 (`daily_operation_participants` y
 SPRINT-4R-T08 (`store_external_codes`, `payment_method_aliases`,
 `sales_imports` y `sales_import_lines`, con los enums `ExternalSystem` y
 `SalesImportStatus`) y el calendario de operación de SPRINT-4R-T12
-(`store_operating_schedules` y `store_closures`; fuente de verdad física:
-`prisma/schema.prisma`).
+(`store_operating_schedules` y `store_closures`), y del Sprint 4A la propina
+diaria y los lotes de pago (`daily_tip_allocations` y `tip_payment_batches`,
+enum `TipAllocationStatus`) y las líneas omitidas de la importación
+(`sales_import_skipped_lines`, enum `SalesImportResolution`). Fuente de verdad
+física: `prisma/schema.prisma`.
 SPRINT-4R-T02 no agrega enums: añade el valor `EQUAL_SHARES` a
 `TipAgreementRule`. El Portal del Trabajador no agrega
 tablas: es una vista
@@ -223,6 +226,11 @@ cambian; el único cambio de estado posible es a `PUBLISHED`.
 
 ## Reparto de propinas (SPRINT-3-T09)
 
+> **Histórico de solo lectura desde SPRINT-4A-T08.** El reparto por período
+> descrito aquí ya no se calcula, confirma ni paga; el reparto vigente es la
+> [propina diaria por trabajador](#propinas-diarias-por-trabajador-y-lotes-de-pago-sprint-4a-t02).
+> Las tablas y sus filas se conservan sin cambios.
+
 | Tabla | Rol |
 | --- | --- |
 | `tip_entries` | Registro diario agregado por local, día de negocio y medio de pago. Es la **única fuente** que alimenta los repartos; `sales.tip_amount` se reconcilia con ella mediante `sales.tip_entry_id`. |
@@ -249,11 +257,52 @@ Reglas clave:
   `EQUAL_SHARES`) y monto fuente (`tip_pool_sources.amount` /
   `tip_pool_daily_operation_sources.amount`).
 
+## Propinas diarias por trabajador y lotes de pago (SPRINT-4A-T02)
+
+Decisión del PO (10/11/2026): la unidad de propina es la **asignación diaria
+por participante**, creada en la misma transacción que la operación diaria
+(SPRINT-4A-T03), y el pago se registra como **lote** por local y período.
+Reemplaza al reparto por período (`tip_pools`), que queda como histórico de
+solo lectura. Migración `20261110040000_propinas_diarias_lotes_pago` (con
+`down.sql`); la generación obligatoria del reparto está en
+`20261110050000_reparto_diario_automatico` y la inclusión del supervisor
+como participante en `20261110030000_participantes_incluyen_supervisor`
+(SPRINT-4A-T01).
+
+| Tabla | Rol |
+| --- | --- |
+| `daily_tip_allocations` | Propina de un participante en una operación diaria: operación, local y fecha (copiados de la operación), trabajador, monto CLP entero (`BIGINT >= 0`), estado `UNPAID`/`PAID` (`TipAllocationStatus`) y lote de pago opcional. Única por `(operation_id, worker_id)`; índices por `(store_id, business_date)` y `(worker_id, business_date)`. |
+| `tip_payment_batches` | Lote de pago: local, período (`period_start`–`period_end`, inclusive), total, cantidad de asignaciones, quién pagó (`paid_by_id`) y cuándo (`paid_at`). `legacy_pool_id` solo lo usan los lotes históricos creados por la migración para los repartos `PAID`. |
+
+Reglas que garantiza la base (CHECK y triggers, para cualquier vía de
+escritura):
+
+- El trabajador de la asignación es participante de la operación; las
+  asignaciones de una operación suman exactamente su fondo
+  (`tip_fund_amount`) y hay una por participante (constraint trigger
+  diferido, al commit). Desde SPRINT-4A-T03 toda operación con fondo y
+  participantes debe tener su reparto.
+- `PAID` exige lote y `UNPAID` no lo admite. Una asignación pasa a `PAID` una
+  sola vez, con un lote del mismo local cuyo período contiene su fecha; una
+  asignación `PAID` es inmutable y no se borra.
+- Mientras una operación tenga asignaciones `PAID` no cambian sus montos,
+  fecha, local ni participantes.
+- El lote es inmutable (sin `UPDATE`, `DELETE` ni `TRUNCATE`) y sus totales
+  cuadran con sus asignaciones.
+
+**Migración de datos.** Cada operación existente con fondo y participantes
+recibió sus asignaciones con la regla de reparto vigente (`splitDailyFund`:
+partes iguales y residuo de a $1 rotado por fecha). Las que alimentaban un
+reparto `PAID` quedaron `PAID` en un lote histórico por reparto; el resto,
+incluidas las de repartos `DRAFT` y `CONFIRMED`, quedó `UNPAID`. Ninguna fila
+de `tip_pools` ni de sus constancias se borró ni modificó.
+
 ## Medios de pago y ventas MrComanda (SPRINT-4-T32)
 
 > Con SPRINT-4R-T01 las ventas (manuales y MrComanda) dejaron de capturarse y
 > pasaron a modo lectura histórica; el catálogo `payment_methods` se conserva
-> para ese historial y para la futura importación de ventas desde Excel.
+> para ese historial y clasifica las líneas de la importación diaria del Excel
+> (SPRINT-4R-T08 en adelante).
 
 Migración `20261105021500_medios_pago_catalogo` (reversa manual en su
 `down.sql`, que Prisma no ejecuta). Reemplaza al enum `PaymentMethod` por el
@@ -390,7 +439,7 @@ Reglas clave:
   supervisor ya no captura ventas ni realiza el cierre por turno/conciliación.
 - **Auditoría con lista blanca**: el alta se registra con local, fecha y
   montos, sin datos personales ni contenido del archivo.
-- Contrato HTTP completo: [Operación diaria](../README.md#operación-diaria-sprint-4r-t01)
+- Contrato HTTP completo: [Operación diaria](../README.md#operación-diaria-sprint-4r-t01-participantes-desde-sprint-4r-t03)
   en el README del backend.
 
 ## Participantes diarios y regla equitativa (SPRINT-4R-T02)
@@ -470,7 +519,10 @@ horas: todo cálculo nuevo crea el reparto con `agreement_id NULL`,
 `agreement_snapshot.rule = 'EQUAL_SHARES'`, una fila de
 `tip_pool_daily_operation_sources` por operación del período y líneas con
 `hours_worked NULL` (regla y residuo en el README del backend); este modelo es
-el contrato que ambos consumen.
+el contrato que ambos consumen. Desde SPRINT-4A-T08 ese reparto por período ya
+no se calcula: la misma regla se aplica al guardar la operación diaria y queda
+en [`daily_tip_allocations`](#propinas-diarias-por-trabajador-y-lotes-de-pago-sprint-4a-t02);
+los repartos ya guardados se conservan como histórico.
 
 ## Importación diaria de ventas MrComanda (SPRINT-4R-T08)
 
@@ -486,6 +538,15 @@ Migración `20261108010000_importaciones_ventas_mrcomanda` (con reversa en
 | `payment_method_aliases` | Alias externo de un medio del catálogo (`T. DEBITO` → `DEBIT_CARD`). Guarda la etiqueta configurada y su forma normalizada; una etiqueta normalizada resuelve un único medio por sistema. El código del medio no cambia. |
 | `sales_imports` | Cabecera por archivo importado: local, fecha de negocio, período y horario del reporte, fecha de emisión (`issued_at`, informativa, desde SPRINT-4R-T10), identificador y nombre externos del local, versión, estado, total del reporte, nombre original, ruta privada, tipo, tamaño, SHA-256, quién lo subió (`uploaded_by_id`, `created_at`) y quién lo confirmó. |
 | `sales_import_lines` | Total por medio de pago dentro de una importación: número de línea, etiqueta original, etiqueta normalizada, medio resuelto, monto CLP entero con signo y porcentaje opcional. |
+| `sales_import_skipped_lines` | Línea del reporte omitida (SPRINT-4A-T18; desde SPRINT-4A-T21 se omite sola): solo con monto 0 (CHECK) y sin alias para su etiqueta (trigger). Se conserva para la trazabilidad, no es una venta e inmutable. |
+
+**Resolución manual (SPRINT-4A-T18, migración `20261110070000_importaciones_resolucion_manual`).**
+`sales_imports.store_resolution` y `sales_import_lines.resolution`
+(`SalesImportResolution`: `AUTOMATIC` por equivalencia configurada, `MANUAL`
+si lo eligió el administrador) junto con `resolved_by_id` y `resolved_at`
+registran lo resuelto a mano en la vista previa. Los triggers aceptan la
+elección manual sin abrir huecos: local activo, sin contradecir otro ID
+Subway, medio activo y sin alias hacia otro medio.
 
 Reglas que garantiza la base (CHECK, índices únicos y triggers):
 
@@ -629,6 +690,12 @@ erDiagram
   DAILY_OPERATIONS ||--o{ DAILY_OPERATION_PARTICIPANTS : "selecciona"
   USERS ||--o{ DAILY_OPERATION_PARTICIPANTS : "participa"
   DAILY_OPERATIONS |o--o| TIP_POOL_DAILY_OPERATION_SOURCES : "alimenta un reparto"
+  DAILY_OPERATIONS ||--o{ DAILY_TIP_ALLOCATIONS : "reparte"
+  USERS ||--o{ DAILY_TIP_ALLOCATIONS : "recibe"
+  STORES ||--o{ TIP_PAYMENT_BATCHES : "paga propinas"
+  USERS ||--o{ TIP_PAYMENT_BATCHES : "registra el pago"
+  TIP_PAYMENT_BATCHES |o--o{ DAILY_TIP_ALLOCATIONS : "marca como pagadas"
+  TIP_POOLS |o--o| TIP_PAYMENT_BATCHES : "lote histórico"
 
   STORES ||--o{ SALES : "vende"
   PAYMENT_METHODS ||--o{ SALES : "cobra"
@@ -651,6 +718,8 @@ erDiagram
   USERS ||--o{ SALES_IMPORTS : "sube"
   USERS |o--o{ SALES_IMPORTS : "confirma"
   SALES_IMPORTS ||--o{ SALES_IMPORT_LINES : "totales por medio"
+  SALES_IMPORTS ||--o{ SALES_IMPORT_SKIPPED_LINES : "líneas en 0 omitidas"
+  USERS |o--o{ SALES_IMPORTS : "resuelve a mano"
   PAYMENT_METHODS ||--o{ SALES_IMPORT_LINES : "resuelve"
 
   STORES ||--o| STORE_OPERATING_SCHEDULES : "abre según"
@@ -729,6 +798,16 @@ enum CashClosingVoucherSource {
 
 enum ExternalSystem {
   MRCOMANDA [note: 'Punto de venta; origen del Excel diario (SPRINT-4R-T08)']
+}
+
+enum TipAllocationStatus {
+  UNPAID
+  PAID
+}
+
+enum SalesImportResolution {
+  AUTOMATIC
+  MANUAL
 }
 
 enum SalesImportStatus {
@@ -1210,7 +1289,7 @@ Table daily_operation_participants {
     worker_id
   }
 
-  Note: 'SPRINT-4R-T02: selección compartida por tarjeta y efectivo; trigger exige mismo local, rol TRABAJADOR y activo al escribir'
+  Note: 'SPRINT-4R-T02: selección compartida por tarjeta y efectivo; trigger exige mismo local, rol TRABAJADOR o SUPERVISOR (SPRINT-4A-T01) y activo al escribir'
 }
 
 Table tip_pool_daily_operation_sources {
@@ -1224,6 +1303,48 @@ Table tip_pool_daily_operation_sources {
   }
 
   Note: 'SPRINT-4R-T02: fuente del reparto alimentada por la operación diaria, separada de tip_pool_sources'
+}
+
+Table daily_tip_allocations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  business_date date [not null, note: 'Copiada de la operación (trigger)']
+  amount bigint [not null, note: 'CLP entero >= 0 (CHECK)']
+  status TipAllocationStatus [not null, default: 'UNPAID', note: 'PAID exige lote; UNPAID no lo admite (CHECK). PAID es inmutable']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+  operation_id uuid [not null, ref: > daily_operations.id, note: 'Cascade']
+  store_id uuid [not null, ref: > stores.id, note: 'Copiado de la operación (trigger)']
+  worker_id uuid [not null, ref: > users.id, note: 'Debe ser participante de la operación (trigger)']
+  payment_batch_id uuid [ref: > tip_payment_batches.id]
+
+  indexes {
+    (operation_id, worker_id) [unique]
+    (store_id, business_date)
+    (worker_id, business_date)
+    payment_batch_id
+  }
+
+  Note: 'SPRINT-4A-T02: propina diaria por participante; las de una operación suman su fondo (constraint trigger diferido)'
+}
+
+Table tip_payment_batches {
+  id uuid [pk, default: `gen_random_uuid()`]
+  period_start date [not null]
+  period_end date [not null, note: '>= period_start (CHECK)']
+  total_amount bigint [not null, note: 'Suma de sus asignaciones (constraint trigger diferido)']
+  allocation_count integer [not null, note: 'Cantidad de asignaciones; al menos una']
+  paid_at timestamptz [not null]
+  created_at timestamptz [not null, default: `now()`]
+  store_id uuid [not null, ref: > stores.id]
+  paid_by_id uuid [not null, ref: > users.id]
+  legacy_pool_id uuid [unique, ref: - tip_pools.id, note: 'Solo lotes históricos migrados de repartos PAID']
+
+  indexes {
+    (store_id, period_start, period_end)
+    paid_by_id
+  }
+
+  Note: 'SPRINT-4A-T02: lote de pago por local y período; inmutable (trigger)'
 }
 
 Table store_external_codes {
@@ -1287,6 +1408,9 @@ Table sales_imports {
   store_id uuid [not null, ref: > stores.id]
   uploaded_by_id uuid [not null, ref: > users.id]
   confirmed_by_id uuid [ref: > users.id]
+  store_resolution SalesImportResolution [not null, default: 'AUTOMATIC', note: 'SPRINT-4A-T18: MANUAL si el local se eligió a mano']
+  resolved_at timestamptz
+  resolved_by_id uuid [ref: > users.id, note: 'Quien resolvió a mano en la vista previa']
 
   indexes {
     (store_id, business_date, version) [unique]
@@ -1307,7 +1431,8 @@ Table sales_import_lines {
   percentage decimal(5,2) [note: '0 a 100, opcional']
   created_at timestamptz [not null, default: `now()`]
   import_id uuid [not null, ref: > sales_imports.id, note: 'Cascade solo al descartar una PENDING']
-  payment_method_id uuid [not null, ref: > payment_methods.id, note: 'Resuelto por alias (trigger)']
+  payment_method_id uuid [not null, ref: > payment_methods.id, note: 'Resuelto por alias o a mano (trigger)']
+  resolution SalesImportResolution [not null, default: 'AUTOMATIC', note: 'SPRINT-4A-T18: MANUAL si el medio se eligió a mano']
 
   indexes {
     (import_id, line_number) [unique]
@@ -1316,6 +1441,25 @@ Table sales_import_lines {
   }
 
   Note: 'SPRINT-4R-T08: solo cambian mientras la importación está PENDING'
+}
+
+Table sales_import_skipped_lines {
+  id uuid [pk, default: `gen_random_uuid()`]
+  line_number integer [not null]
+  original_label varchar(100) [not null]
+  normalized_label varchar(100) [not null, note: 'Sin alias configurado (trigger)']
+  amount bigint [not null, note: 'Solo 0 (CHECK)']
+  percentage decimal(5,2)
+  resolution SalesImportResolution [not null, default: 'AUTOMATIC', note: 'AUTOMATIC: omitida sola (SPRINT-4A-T21)']
+  created_at timestamptz [not null, default: `now()`]
+  import_id uuid [not null, ref: > sales_imports.id, note: 'Cascade solo al descartar una PENDING']
+
+  indexes {
+    (import_id, line_number) [unique]
+    (import_id, normalized_label) [unique]
+  }
+
+  Note: 'SPRINT-4A-T18/T21: trazabilidad de las líneas en 0 sin medio; no es una venta'
 }
 
 Table store_operating_schedules {

@@ -1,10 +1,16 @@
 # Frontend Moi-food
 
+**Guía de uso por rol del flujo de propinas y ventas:**
+[`docs/guia-propinas-y-ventas.md`](../docs/guia-propinas-y-ventas.md)
+(operación diaria, reparto automático, pago por período con Excel, «Mis
+propinas» e importación de ventas).
+
 Constancias personales exclusivas de trabajador y supervisor (SPRINT-4-T02):
 [permisos, integración y pruebas](docs/SPRINT-4-T02.md).
 
-Reparto, validación y entrega de propinas para contador (SPRINT-3-T15):
-[guía y pruebas](docs/SPRINT-3-T15.md).
+Reparto por período del contador (SPRINT-3-T15, **retirado en SPRINT-4A-T08**):
+[nota histórica](docs/SPRINT-3-T15.md). Hoy el reparto es automático y el pago
+se registra en [`/propinas`](#propinas-del-período-y-pago-sprint-4a-t07).
 
 Responsive de las vistas autenticadas (SPRINT-3-T07): menú móvil desplegable,
 diálogos adaptados y tablas accesibles. Alcance y verificación:
@@ -13,13 +19,13 @@ diálogos adaptados y tablas accesibles. Alcance y verificación:
 Operación diaria del local (SPRINT-4R-T01): una sola declaración por
 local y fecha — propina tarjeta con voucher, propina efectivo y diferencia de
 efectivo con signo. Contrato en el
-[README del backend](../backend/README.md#operación-diaria-sprint-4r-t01);
+[README del backend](../backend/README.md#operación-diaria-sprint-4r-t01-participantes-desde-sprint-4r-t03);
 reemplaza al registro diario de propinas, a la captura de ventas y al cierre
 por turno con conciliación (hoy históricos, en modo lectura).
 
-Registro diario de propinas para supervisor (SPRINT-3-T11, **histórico**):
-[`/propinas/diarias`, contrato y pruebas](docs/SPRINT-3-T11.md). El flujo fue
-reemplazado por la operación diaria (SPRINT-4R-T01).
+Registro diario de propinas por medio de pago (SPRINT-3-T11, **histórico**):
+[contrato y pruebas](docs/SPRINT-3-T11.md). Fue reemplazado por la operación
+diaria (SPRINT-4R-T01), que hoy ocupa la misma ruta `/propinas/diarias`.
 
 Aplicación Next.js 16 con App Router, TypeScript estricto y Tailwind CSS.
 
@@ -254,7 +260,7 @@ Panel, contrato y pruebas: [docs/SPRINT-2-T17.md](docs/SPRINT-2-T17.md). API de 
 
 ## Locales (SPRINT-3-T02)
 
-`/admin/locales` permite crear, editar, desactivar y reactivar locales como administrador. `GET /api/stores` expone el catálogo autenticado y las mutaciones del BFF conservan el token en servidor y validan origen, rol y datos. Usuarios, Auditoría, Documentos, Alertas DT y Liquidaciones consumen la API sin caché; los locales nuevos aparecen sin configurar variables ni redeplegar. Documentos incluye locales sin trabajadores e identifica los inactivos; Auditoría conserva esa identificación desde el HTML inicial.
+`/admin/locales` permite crear, editar, desactivar y reactivar locales como administrador. Desde SPRINT-4A-T16 muestra y edita el **ID Subway** de cada local (columna en la tabla y en las fichas móviles, «Sin configurar» si falta; campo opcional en crear y editar, solo dígitos de 1 a 10, vacío lo quita); es el número con que la importación de ventas identifica el Excel de MrComanda, y un ID duplicado muestra un mensaje propio. `GET /api/stores` expone el catálogo autenticado y las mutaciones del BFF conservan el token en servidor y validan origen, rol y datos. Usuarios, Auditoría, Documentos, Alertas DT y Liquidaciones consumen la API sin caché; los locales nuevos aparecen sin configurar variables ni redeplegar. Documentos incluye locales sin trabajadores e identifica los inactivos; Auditoría conserva esa identificación desde el HTML inicial.
 
 Calidad: `npm run test:stores`, `npm run lint`, `npm run format:check`, `npm run build`. Integración: `TEST_REAL_DISPOSABLE=true npx playwright test --config playwright.stores.config.ts` solo con backend/base/almacenamiento de pruebas y fixtures preparados mediante `scripts/prepare-real-api.mjs`. GitHub Actions ejecuta Docker y conserva evidencia; consultar `docs/SPRINT-3-T02.md`.
 
@@ -268,9 +274,13 @@ Constancias propias de propinas enteradas (SPRINT-3-T16):
 ## Medios de pago (SPRINT-4-T32)
 
 `/admin/medios-pago` permite crear, editar, desactivar y reactivar los medios de pago del sistema como administrador: nombre, orden de lista, comportamiento en el cierre (`CASH`, `RECONCILABLE_CARD`, `EXTERNAL_OTHER`) y disponibilidad para propinas. El código se normaliza a mayúsculas y guiones bajos y no se puede cambiar después de crearlo; los medios desactivados conservan su historial visible. `GET /api/payment-methods` exige sesión y solo administración lista inactivos; las mutaciones del BFF validan origen, rol, cuerpo acotado y respuesta. El registro diario de propinas que cargaba los medios activos elegibles del
-catálogo quedó histórico con SPRINT-4R-T01; el catálogo se conserva para el
-historial y la futura importación de ventas desde Excel, y el histórico muestra
-el nombre guardado aunque el medio se desactive. Pruebas: `npm run test:payment-methods` (unitarias), `npm run test:payment-methods:integration` (BFF con backend simulado) y `npm run test:payment-methods:e2e` (recorrido real con base exclusiva, igual que los demás módulos).
+catálogo quedó histórico con SPRINT-4R-T01 (el histórico muestra el nombre
+guardado aunque el medio se desactive); hoy el catálogo clasifica las líneas
+del Excel de ventas. **Etiquetas de los informes (SPRINT-4A-T20):** la sección
+«Etiquetas de los informes de ventas» lista los alias de MrComanda de cada medio
+y permite agregarlos («Agregar etiqueta») o quitarlos (BFF
+`/api/payment-method-aliases`); corregir una etiqueta es quitarla y asociarla al
+medio correcto, y las importaciones confirmadas no cambian. Pruebas: `npm run test:payment-methods` (unitarias), `npm run test:payment-methods:integration` (BFF con backend simulado) y `npm run test:payment-methods:e2e` (recorrido real con base exclusiva, igual que los demás módulos).
 
 Diseño móvil del Sprint 4: [dirección y verificación](docs/SPRINT-4-DISENO-MOVIL.md). Prueba de navegador: npm run test:mobile-design -- --headed.
 
@@ -311,9 +321,10 @@ ejemplo `1000`) y ejecutar el mismo script de preparación.
 
 ## Operación diaria (SPRINT-4R-T01)
 
-Una sola pantalla de cierre por local y fecha reemplaza al registro diario de
-propinas (`/propinas/diarias`, hoy histórico), a la captura de ventas y al
-cierre de caja por turno con conciliación. El supervisor declara una vez al
+Una sola pantalla de cierre por local y fecha, **`/propinas/diarias`** (menú
+«Operación diaria» del SUPERVISOR), reemplaza al registro diario de propinas
+por medio de pago, a la captura de ventas y al cierre de caja por turno con
+conciliación. El supervisor declara una vez al
 día, para su local (el local sale de la sesión validada, nunca de un parámetro
 editable):
 
@@ -327,7 +338,7 @@ editable):
   faltante; si no es cero el **motivo es obligatorio**.
 
 Contrato HTTP en el
-[README del backend](../backend/README.md#operación-diaria-sprint-4r-t01):
+[README del backend](../backend/README.md#operación-diaria-sprint-4r-t01-participantes-desde-sprint-4r-t03):
 `POST /daily-operations` (multipart) responde 201 al crear, 200 al reintento
 idéntico (sin duplicar) y 409 con `existingOperationId` cuando ya existe otra
 operación con distinto contenido para el mismo local y fecha;
@@ -340,7 +351,9 @@ Pruebas: `npm run test:daily-operations` (unitarias), `npm run test:daily-operat
 
 ### Participantes, vista previa y corrección (SPRINT-4R-T05)
 
-- **Selección de participantes:** contador «N de M seleccionados» y botón
+- **Selección de participantes:** trabajadores y supervisores activos del
+  local (desde SPRINT-4A-T01 el supervisor puede incluirse); contador «N de M
+  seleccionados» y botón
   «Seleccionar todos / Quitar selección» (controles de al menos 44 px). Con
   fondo 0 la selección se conserva en pantalla pero no se envía, porque el
   backend exige la selección vacía.
@@ -357,14 +370,50 @@ Pruebas: `npm run test:daily-operations` (unitarias), `npm run test:daily-operat
   participantes que ya no son elegibles se avisan y se quitan al guardar. Un
   409 informa que la operación ya alimentó un reparto confirmado o pagado o
   que sus propinas ya se pagaron.
-- **Detalle registrado:** muestra cada participante con su monto del día.
+- **Detalle registrado:** muestra cada participante con su monto del día. Ese
+  monto es la propina No pagada que el backend guarda al registrar la
+  operación (SPRINT-4A-T03) y que después se paga por período en `/propinas`.
+
+## Propinas del período y pago (SPRINT-4A-T07)
+
+**`/propinas`** (menú «Propinas» de ADMINISTRADOR y CONTADOR; Server Component
+con `DailyTipsWorkspace`, BFF `/api/daily-tips/[[...path]]`):
+
+- Filtro de local y período «Desde/Hasta» (por defecto la semana actual, de
+  lunes a domingo en hora de Chile; máximo 62 días) con atajos «Semana actual»
+  y «Semana anterior». El filtro vive en la URL (`?storeId&from&to`).
+- «Propinas por día» (`GET /daily-tips/days`) con estado No pagado, Parcial o
+  Pagado y «Detalle» del día por trabajador (`GET /daily-tips/day`).
+- «Resumen por trabajador» (`GET /daily-tips/summary`).
+- «Descargar Excel» (`GET /daily-tips/export`): el archivo `.xlsx` del período.
+- «Marcar propinas como pagadas»: el diálogo muestra local, período, total a
+  pagar y trabajadores; «Confirmar pago» llama a
+  `POST /daily-tips/payment-batches` y vuelve a consultar. Un 409 (sin
+  pendientes o pago simultáneo) se informa sin duplicar el pago.
+- «Pagos registrados» (`GET /daily-tips/payment-batches`) y el panel de
+  propinas vencidas (SPRINT-4A-T22, abajo). Enlace a «Repartos anteriores»
+  (`/propinas/historico`).
+
+Pruebas: `npm run test:daily-tips` y `npm run test:daily-tips:real` (con las variables del [recorrido de SPRINT-4A-T13](#recorrido-de-propinas-y-pago-sprint-4a-t13)).
+
+## Mis propinas (SPRINT-4A-T10)
+
+**`/portal/propinas`** (TRABAJADOR y SUPERVISOR) consulta `GET /my-tips` en el
+servidor y muestra cada día del mes con local, monto y estado No pagada o
+Pagada (con fecha de pago), más los totales pendiente, pagado y total del mes.
+Filtro por mes con `?month=YYYY-MM` (por defecto el actual en hora de Chile);
+estados de carga, vacío y error con mensajes propios. Las constancias de los
+repartos antiguos (SPRINT-3-T16) siguen debajo. Pruebas unitarias:
+`npx tsc -p tsconfig.test.json && node --test .test-build/my-tips.test.js`; el
+recorrido real está en `npm run test:tip-flow:real`.
+
 ## Repartos anteriores: histórico de solo lectura (SPRINT-4A-T08)
 
 El flujo de borradores, observación, confirmación y pago del reparto por período (`/propinas/repartos`, SPRINT-4R-T06) se retiró: la propina se reparte al guardar la operación diaria y el contador o el administrador la paga por período en `/propinas`. Pagar un reparto por período dejaba esas propinas sin pagar y permitía pagarlas dos veces.
 
 - **`/propinas/historico`** (ADMINISTRADOR y CONTADOR, enlazado desde `/propinas` como «Repartos anteriores»; Server Component sobre `GET /tip-pools`): lista los repartos guardados del más reciente al más antiguo. Los confirmados y pagados van en la tabla principal («Confirmado sin pago», «Pagado»); los borradores van aparte y plegados como «Borrador sin efecto». Desde SPRINT-4A-T22 ya no muestra la alerta de los registros con tarjeta anteriores: esos registros no alertan y la alerta vigente está en `/propinas`.
 - **`/propinas/historico/<id>`**: resumen, montos por trabajador y, si está pagado, las constancias PDF (BFF `/api/tip-pools/<id>/receipts/<userId>/download`). No hay acciones sobre el reparto.
-- `/propinas/repartos` redirige a `/propinas` (administrador y contador) o al inicio (supervisor). El supervisor ya no tiene vista de repartos; sus propinas personales llegan al portal en otra tarea.
+- `/propinas/repartos` redirige a `/propinas` (administrador y contador) o al inicio (supervisor). El supervisor ya no tiene vista de repartos; sus propinas personales están en «Mis propinas» (`/portal/propinas`, SPRINT-4A-T10).
 
 Pruebas: `npm run test:tip-pools` y `TEST_REAL_DISPOSABLE=true COMPOSE_PROJECT_NAME=<stack> npm run test:tip-pools:real` (los repartos históricos se siembran en la base exclusiva del stack, porque la API ya no los crea).
 
@@ -403,7 +452,9 @@ Con las mismas variables corren `test:daily-tips:real`, `test:daily-flow:real`, 
 `/admin/importacion-ventas`, solo para ADMINISTRADOR, carga el Informe de Ventas Diario de MrComanda (.xlsx, máximo 5 MB). La vista previa muestra local, fecha de negocio, emisión, medios de pago y total antes de confirmar; las ventas solo se registran al confirmar.
 
 - Si la fecha del nombre del archivo difiere de la del contenido se avisa y se usa la del contenido.
-- Un local o medio sin equivalencia, o un total que no cuadra, impide confirmar y explica qué revisar; no se guarda nada.
+- El local se identifica por su ID Subway (SPRINT-4A-T17). Un total que no cuadra o un archivo inválido impide confirmar y explica qué revisar; no se guarda nada.
+- **Datos no identificados (SPRINT-4A-T18/T19/T21):** si el ID Subway no corresponde a un local o una línea con valor no tiene alias, la vista previa muestra un aviso «Elige los datos que no se identificaron para confirmar» con selectores: un local activo y, por línea, un medio activo o «Crear medio de pago «etiqueta»» con nombre editable (se crea activo, fuera de la conciliación y sin propinas). «Recordar para próximas cargas» viene marcado: guarda el ID Subway en el local (si no tiene uno) o el alias del medio. Confirmar se habilita con todo resuelto y usa el BFF `POST /api/sales-imports/confirm-with-resolution`. El detalle indica lo resuelto a mano y quién lo hizo.
+- Las líneas en $0 sin medio reconocido se omiten solas («Omitida sola») y no impiden confirmar.
 - Un archivo idéntico informa que ya estaba importado, sin duplicar.
 - Una corrección muestra las diferencias por medio de pago contra la versión vigente y exige aceptar el reemplazo.
 - El detalle indica versión, archivo, responsable y fecha de carga, y permite descargar el Excel original.

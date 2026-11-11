@@ -1,5 +1,11 @@
 # SPRINT-4R-T07 — Verificación end-to-end del flujo diario y el reparto equitativo
 
+> **Evidencia histórica.** Esta verificación incluía el cálculo, la
+> confirmación y la entrega del reparto por período, flujo retirado en
+> SPRINT-4A-T08. El recorrido vigente (reparto automático, pago por período,
+> Excel y «Mis propinas») se verifica con `npm run test:tip-flow:real`
+> (SPRINT-4A-T13, ver el [README del frontend](../README.md#recorrido-de-propinas-y-pago-sprint-4a-t13)).
+
 Valida como **un único flujo** lo construido en SPRINT-4R-T01 a T06: propinas,
 comprobante (voucher), diferencia de efectivo, participantes, cálculo del
 reparto y detalle por trabajador. Sustituye la verificación del antiguo cierre

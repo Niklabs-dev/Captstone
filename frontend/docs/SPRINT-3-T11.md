@@ -7,8 +7,11 @@
 > histórico. Las lecturas del API de propinas (`GET /tips`) se conservan en
 > modo lectura para consultar el histórico; las escrituras (`POST`, `PATCH`,
 > `DELETE /tips`) ya no son flujo operativo. El contrato vigente está en el
-> [README del backend](../../backend/README.md#operación-diaria-sprint-4r-t01).
-> El contenido siguiente se conserva como referencia del comportamiento
+> [README del backend](../../backend/README.md#operación-diaria-sprint-4r-t01-participantes-desde-sprint-4r-t03).
+> Hoy la ruta `/propinas/diarias` muestra la **Operación diaria** del
+> supervisor; el formulario por medio de pago descrito abajo ya no existe. Ver
+> la [guía de propinas y ventas](../../docs/guia-propinas-y-ventas.md). El
+> contenido siguiente se conserva como referencia del comportamiento
 > histórico y de su evidencia de pruebas.
 
 El supervisor abre **Registrar propinas** desde Inicio o **Propinas diarias**

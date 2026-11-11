@@ -1,49 +1,32 @@
-# SPRINT-3-T15 — Reparto de propinas del contador
+# SPRINT-3-T15 — Reparto de propinas del contador (retirado)
 
-Ruta: `/propinas/repartos`. Contador: consulta y calcula por local y período,
-registra observaciones en borradores, confirma montos y registra la entrega
-con fecha de pago y constancias PDF por trabajador. Administrador: consulta
-los mismos datos y descarga constancias, sin controles de escritura.
-Supervisor y trabajador no tienen acceso a esta vista ni a su BFF.
+> **Flujo retirado en SPRINT-4A-T08.** La vista `/propinas/repartos` ya no
+> existe (redirige a `/propinas`) y las acciones de escritura de la API
+> (`POST /tip-pools/preview`, `/observations`, `/confirm` y `/pay`) responden
+> `410 Gone`. El flujo vigente está en la
+> [guía de propinas y ventas](../../docs/guia-propinas-y-ventas.md): la
+> propina se reparte sola al guardar la operación diaria y el ADMINISTRADOR o
+> el CONTADOR la paga por período en `/propinas`.
 
-La pantalla reutiliza el layout, controles, diálogos y tablas de DESIGN.md.
-Muestra pacto, horas, responsables, conciliación en CLP y observación vigente.
-Confirmar, recalcular y pagar requieren confirmación explícita. Observaciones,
-confirmación y pago envían expectedVersion; un 409 bloquea acciones hasta
-actualizar la foto. Los fallos conservan los campos; una sesión vencida usa la recuperación
-común. Las constancias se ofrecen solo en repartos PAID.
+## Qué entregó esta tarea (histórico)
 
-Las alertas se consultan desde T14; sus fechas y días hábiles proceden de la
-API y del calendario configurado en backend. No se recalcula el plazo en el
-navegador. Pagar actualiza las alertas; se descartan respuestas anteriores.
+En el Sprint 3 el contador consultaba, calculaba, revisaba y pagaba un reparto
+de propinas por local y período, con constancias PDF por trabajador; el
+administrador solo lo consultaba. Se retiró porque pagar un reparto por período
+dejaba las propinas diarias del período sin pagar y permitía pagarlas dos veces.
 
-## Contrato y permisos
+## Qué se conserva
 
-Se añade `GET /tip-pools?storeId&periodStart&periodEnd` para consultar la foto
-existente sin calcular ni escribir. Acepta los mismos filtros de fecha/local
-que la vista previa; responde lista vacía o reparto. Solo contador y
-administrador. Swagger documenta la consulta. No hay migraciones nuevas.
+- Los repartos guardados, sus líneas, fuentes y constancias, sin cambios.
+  Se consultan en solo lectura en **Repartos anteriores**
+  (`/propinas/historico` y `/propinas/historico/<id>`), con
+  `GET /tip-pools`, `GET /tip-pools/:id` y las constancias PDF de los repartos
+  pagados.
+- Los repartos pagados quedaron como lotes de pago históricos: sus propinas
+  diarias figuran como Pagadas. Los que nunca se pagaron no tienen efecto.
+- Pruebas del histórico: `npm run test:tip-pools` y
+  `TEST_REAL_DISPOSABLE=true COMPOSE_PROJECT_NAME=<stack> npm run test:tip-pools:real`
+  (ver el [README del frontend](../README.md#repartos-anteriores-histórico-de-solo-lectura-sprint-4a-t08)).
 
-El BFF `/api/tip-pools/[[...segments]]` admite únicamente las rutas conocidas,
-valida sesión y rol, UUID y fechas reales, cuerpos JSON de hasta 4096 bytes,
-origen de mutaciones y claves permitidas. Verifica la respuesta, correlaciona
-local/período e identidad del reparto, proyecta personas y evita mensajes
-arbitrarios de backend. Los códigos 422 se traducen mediante una lista de
-causas conocidas; otros errores usan mensajes públicos.
-
-## Validación
-
-- `npm run test:tip-pools`: validación de contratos, fechas, conciliación,
-  proyección, constancias, acciones y navegación.
-- `npm run test:tip-pools:real`: Chromium a 360, 390, 768 y 1440 px contra
-  Next.js, NestJS y PostgreSQL reales. Requiere TEST_REAL_DISPOSABLE=true,
-  TEST_REAL_FRONTEND_URL, TEST_REAL_BACKEND_URL y credenciales sintéticas de
-  administrador, ya documentadas en .env.example. COMPOSE_PROJECT_NAME debe
-  apuntar al sistema exclusivo (por defecto sprint3-t15).
-- Los tests crean un local y cuentas propios por proyecto, preparan solamente
-  pacto y horas por SQL en esa base exclusiva y realizan el resto por API.
-  Al terminar desactivan cuentas y local, conservando auditoría y constancias.
-- El workflow sprint-3-t15-contador.yml ejecuta calidad de ambos proyectos,
-  pruebas unitarias y recorridos reales y adjunta capturas y trazas.
-
-La tarea se entrega para revisión; no se marca Hecho sin confirmación.
+El contenido original de esta guía (contrato del BFF, validación y pruebas del
+flujo retirado) se conserva en el historial de git, en el commit `48823e5`.

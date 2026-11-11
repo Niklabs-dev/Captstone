@@ -397,6 +397,11 @@ export class SalesImportsController {
   @Get(':id')
   @ApiOperation({
     summary: 'Obtiene el detalle de una importación con sus líneas y versiones',
+    description:
+      'Incluye las líneas por medio de pago (y las omitidas por venir en 0 ' +
+      'sin alias), lo resuelto a mano en la vista previa con quién lo ' +
+      'resolvió, y todas las versiones del mismo local y fecha con su ' +
+      'estado (PENDING, ACTIVE o SUPERSEDED).',
   })
   @ApiOkResponse({
     description: 'Importación con líneas por medio de pago y versiones.',

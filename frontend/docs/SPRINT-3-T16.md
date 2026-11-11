@@ -1,5 +1,12 @@
 # SPRINT-3-T16 — Mis constancias de propinas
 
+> **Actualización (SPRINT-4A-T10):** `/portal/propinas` («Mis propinas»)
+> muestra primero las propinas diarias propias con su estado No pagada o
+> Pagada (`GET /my-tips`); las constancias descritas aquí corresponden a los
+> repartos por período históricos (retirados en SPRINT-4A-T08) y siguen
+> disponibles debajo. Ver la
+> [guía de propinas y ventas](../../docs/guia-propinas-y-ventas.md#trabajador-y-supervisor-mis-propinas).
+
 Ruta `/portal/propinas`, exclusiva de trabajador y supervisor según la
 [corrección de alcance SPRINT-4-T02](SPRINT-4-T02.md). Presenta únicamente
 constancias propias de repartos PAID: local histórico, período, monto,

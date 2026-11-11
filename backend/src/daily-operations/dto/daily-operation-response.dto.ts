@@ -47,18 +47,32 @@ export class DailyOperationVoucherResponseDto {
 }
 
 export class DailyOperationStoreDto {
-  @ApiProperty({ example: '1010021e-9bab-42d5-851c-417e9e2503bf' })
+  @ApiProperty({
+    description: 'ID del local de la operación diaria.',
+    example: '1010021e-9bab-42d5-851c-417e9e2503bf',
+  })
   id: string;
 
-  @ApiProperty({ example: 'Subway Melipilla Centro' })
+  @ApiProperty({
+    description: 'Nombre del local.',
+    example: 'Subway Melipilla Centro',
+  })
   name: string;
 }
 
 export class DailyOperationPersonDto {
-  @ApiProperty({ example: 'b2c3d4e5-f6a7-4890-b1c2-d3e4f5a6b7c8' })
+  @ApiProperty({
+    description:
+      'ID del usuario (responsable, participante o trabajador elegible).',
+    example: 'b2c3d4e5-f6a7-4890-b1c2-d3e4f5a6b7c8',
+  })
   id: string;
 
-  @ApiProperty({ example: 'María Contreras' })
+  @ApiProperty({
+    description:
+      'Nombre y apellido de la persona; nunca se exponen RUT, correo ni teléfono.',
+    example: 'María Contreras',
+  })
   name: string;
 }
 
