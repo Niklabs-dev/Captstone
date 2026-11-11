@@ -119,6 +119,10 @@ export class TipPoolsController {
   @Roles(ROLE.CONTADOR, ROLE.ADMINISTRADOR)
   @ApiOperation({
     summary: 'Obtiene la foto guardada de un reparto histórico',
+    description:
+      'Solo lectura (SPRINT-4A-T08): devuelve el reparto por período tal como ' +
+      'se guardó, con su pacto, líneas y fuentes, sin recalcular. Los ' +
+      'repartos actuales se consultan en /daily-tips.',
   })
   @ApiOkResponse({
     description: 'Reparto con el pacto, las líneas y las fuentes guardadas.',
@@ -182,6 +186,9 @@ export class TipPoolsController {
   @Header('Cache-Control', 'private, no-store')
   @ApiOperation({
     summary: 'Lista las constancias de pago de un reparto histórico pagado',
+    description:
+      'Solo para repartos PAID del flujo anterior a SPRINT-4A-T08. Los pagos ' +
+      'actuales se registran por lotes en /daily-tips/payment-batches.',
   })
   @ApiOkResponse({
     description: 'Una constancia por trabajador, ordenadas por userId.',

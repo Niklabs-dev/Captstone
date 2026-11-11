@@ -57,7 +57,8 @@ $ npm run prisma:migrate:deploy   # producción/CI (solo aplica)
 $ npm run prisma:seed
 
 # opcional, solo desarrollo/pruebas: agrega usuarios, pacto, horas, entradas
-# y un reparto completamente sintéticos del módulo de propinas.
+# y un reparto por período histórico (solo lectura desde SPRINT-4A-T08),
+# completamente sintéticos, del módulo de propinas.
 $ SEED_DEMO_DATA=true npm run prisma:seed
 
 # regenerar el cliente (corre solo en npm install vía postinstall)
@@ -123,10 +124,19 @@ Todos los endpoints exigen JWT. El listado está disponible para los roles auten
 | Endpoint | Descripción |
 | --- | --- |
 | `GET /stores` | Lista locales ordenados por nombre, con filtro opcional `isActive=true\|false`. |
-| `POST /stores` | Crea un local activo con `name`, `city` y `address`. Recorta y colapsa espacios; responde 409 si el nombre ya existe, ignorando mayúsculas, tildes y espacios repetidos. |
-| `PATCH /stores/:id` | Edita uno o más de esos campos y aplica las mismas validaciones; `null` responde 400. |
+| `POST /stores` | Crea un local activo con `name`, `city`, `address` y, opcional, `subwayStoreId`. Recorta y colapsa espacios; responde 409 si el nombre ya existe, ignorando mayúsculas, tildes y espacios repetidos, o si el ID Subway ya es de otro local. |
+| `PATCH /stores/:id` | Edita uno o más de esos campos y aplica las mismas validaciones; `null` responde 400, salvo `subwayStoreId: null`, que quita el ID Subway. |
 | `PATCH /stores/:id/deactivate` | Desactiva el local sin borrar su historial. Responde 409 si tiene usuarios activos asignados; es idempotente si ya estaba inactivo. |
 | `PATCH /stores/:id/reactivate` | Reactiva el local para permitir asignaciones y operaciones nuevas; es idempotente si ya estaba activo. |
+
+**ID Subway (SPRINT-4A-T15/T16).** `subwayStoreId` es el número que Subway
+asigna al local y que el Excel de MrComanda trae en su encabezado después del
+número interno (`Local: 208 - 72597` → `72597`; el 208 no se guarda). Es
+opcional, solo dígitos (1 a 10) y único (`stores.subway_store_id`, con CHECK);
+la importación de ventas identifica el local por él. Su cambio se audita en
+`STORE_UPDATED` con el valor anterior y el nuevo, y aplica a las próximas
+importaciones. El seed asigna Santa María `72597`, Ugalde `74413` y Calera
+`69132` solo a los locales base que no tengan uno.
 
 Nombre y ciudad deben incluir al menos una letra; dirección, al menos una letra o número. Los caracteres invisibles se eliminan antes de validar. Las altas de usuarios y los cambios de estado del local se serializan con bloqueo de fila para evitar usuarios activos en locales inactivos. Las llamadas idempotentes sin cambio de estado no duplican auditoría.
 
@@ -197,7 +207,7 @@ Los endpoints marcados con `@Audited()` quedan registrados automáticamente (`Au
 `TIP_ENTRY_*`, `CASH_CLOSING_CREATED` y `MRCOMANDA_SALES_IMPORTED` corresponden
 al flujo anterior de captura: sus registros históricos siguen listándose en
 auditoría, pero las escrituras ya no forman parte del flujo operativo vigente
-(ver [Operación diaria](#operación-diaria-sprint-4r-t01)).
+(ver [Operación diaria](#operación-diaria-sprint-4r-t01-participantes-desde-sprint-4r-t03)).
 
 El detalle se arma solo con campos declarados (listas blancas): nunca incluye contraseñas ni el contenido de los archivos.
 
@@ -392,9 +402,14 @@ Una sola operación por local y fecha de negocio reemplaza al flujo anterior de
 cierre de caja por turno con conciliación, a la captura de ventas (manual o
 MrComanda) y al registro de propinas por medio. El supervisor declara una vez al
 día la propina recibida con tarjeta (con su voucher), la propina en efectivo, la
-diferencia de efectivo observada y los trabajadores que participan del reparto;
-**las ventas dejan de capturarse** y ningún total se calcula ni se infiere
-desde ellas.
+diferencia de efectivo observada y los participantes del reparto;
+**las ventas no se capturan aquí** (llegan por la
+[importación del Excel](#importación-diaria-de-ventas-sprint-4r-t10)) y ningún
+total de propinas se calcula ni se infiere desde ellas. Al guardar, la API
+reparte el fondo del día entre los participantes
+([reparto equitativo](#reparto-equitativo-de-propinas-sprint-4r-t04)) en la
+misma transacción. Guía de uso por rol:
+[`docs/guia-propinas-y-ventas.md`](../docs/guia-propinas-y-ventas.md).
 
 Solo existe una operación por `(storeId, businessDate)`. El alta es
 **multipart** (`multipart/form-data`):
@@ -408,7 +423,7 @@ Solo existe una operación por `(storeId, businessDate)`. El alta es
 | `cashDifference` | Entero CLP **con signo**: diferencia de efectivo declarada por el supervisor. Positivo = sobrante, negativo = faltante. |
 | `differenceReason` | Obligatorio si `cashDifference != 0`; ausente o en blanco con diferencia distinta de cero responde 400. |
 | `voucher` | Foto del voucher de propinas con tarjeta. Obligatorio si `cardTipAmount > 0`; JPEG/PNG/WebP, máximo 5 MiB. Se guarda en el volumen **privado** del backend con su SHA-256 y jamás se sirve como archivo público. |
-| `participantIds` | Repetido: un campo por cada trabajador que participa del reparto (`FormData.append` por ID). Cada valor debe ser el UUID de un `TRABAJADOR` activo del local (catálogo `GET /daily-operations/eligible-workers`). Con fondo del día (`cardTipAmount + cashTipAmount`) mayor que 0 se exige al menos uno; con fondo 0 la selección debe venir vacía. Se rechazan con 400 y mensaje claro: lista vacía cuando corresponde, IDs repetidos, UUID inválidos y trabajadores no elegibles (otro local, inactivo u otro rol). |
+| `participantIds` | Repetido: un campo por cada participante del reparto (`FormData.append` por ID). Cada valor debe ser el UUID de un `TRABAJADOR` o `SUPERVISOR` activo del local (SPRINT-4A-T01; el supervisor puede incluirse a sí mismo; catálogo `GET /daily-operations/eligible-workers`). Con fondo del día (`cardTipAmount + cashTipAmount`) mayor que 0 se exige al menos uno; con fondo 0 la selección debe venir vacía. Se rechazan con 400 y mensaje claro: lista vacía cuando corresponde, IDs repetidos, UUID inválidos y usuarios no elegibles (otro local, inactivo, `ADMINISTRADOR` o `CONTADOR`). |
 
 Propinas y selección se guardan **en la misma transacción**: no existe una
 operación con la mitad de la selección. La selección es una sola lista
@@ -422,8 +437,8 @@ paralelos ni se infieren propinas desde ventas o vouchers.
 | Endpoint | Roles | Descripción |
 | --- | --- | --- |
 | `POST /daily-operations` | `SUPERVISOR` (solo su local) | Crea la operación del local y día con su selección de participantes. **201** al crear; un **reintento idéntico** (mismos campos, mismo archivo de voucher por su hash y misma selección comparada como conjunto, sin exigir orden) responde **200** con la operación existente y no duplica fila, selección ni auditoría; otro contenido para la misma clave responde **409** con `existingOperationId` consultable. |
-| `GET /daily-operations/eligible-workers?storeId=<uuid>` | `SUPERVISOR` (su local), `ADMINISTRADOR` | Catálogo acotado de trabajadores elegibles: `TRABAJADOR` activos del local ordenados alfabéticamente, solo `{id, name}` (jamás RUT, correo, teléfono ni credenciales). |
-| `PATCH /daily-operations/:id` | `SUPERVISOR` (su local), `ADMINISTRADOR` | Corrección **multipart**: corrige solo lo enviado (montos, diferencia, motivo, `participantIds` repetido y/o voucher de reemplazo); local, fecha y responsable original no cambian. El voucher se conserva si la tarjeta sigue mayor que 0 y no hay reemplazo, y se retiran archivo y metadatos si la tarjeta queda en 0; con caja cuadrada el motivo queda vacío. La corrección bloquea la fila (`FOR UPDATE`) y recalcula sus reglas sobre el estado vigente: dos correcciones simultáneas se serializan y ninguna decide con datos obsoletos. Los triggers de la base impiden corregir montos o selección de una operación que alimentó un reparto `CONFIRMED`/`PAID`: responden **409** con el mensaje de la base. |
+| `GET /daily-operations/eligible-workers?storeId=<uuid>` | `SUPERVISOR` (su local), `ADMINISTRADOR` | Catálogo acotado de participantes elegibles: `TRABAJADOR` y `SUPERVISOR` activos del local ordenados alfabéticamente, solo `{id, name}` (jamás RUT, correo, teléfono ni credenciales). |
+| `PATCH /daily-operations/:id` | `SUPERVISOR` (su local), `ADMINISTRADOR` | Corrección **multipart**: corrige solo lo enviado (montos, diferencia, motivo, `participantIds` repetido y/o voucher de reemplazo); local, fecha y responsable original no cambian. El voucher se conserva si la tarjeta sigue mayor que 0 y no hay reemplazo, y se retiran archivo y metadatos si la tarjeta queda en 0; con caja cuadrada el motivo queda vacío. La corrección bloquea la fila (`FOR UPDATE`) y recalcula sus reglas sobre el estado vigente: dos correcciones simultáneas se serializan y ninguna decide con datos obsoletos. Si cambia el fondo o la selección, el reparto (`tipAllocations`) se recalcula en la misma transacción solo si todas sus propinas están No pagadas; con alguna Pagada responde **409** sin cambiar nada (corregir solo motivo, diferencia o voucher no toca el reparto). Los triggers de la base también impiden corregir montos o selección de una operación que alimentó un reparto histórico `CONFIRMED`/`PAID` (409). |
 | `GET /daily-operations?storeId=<uuid>&businessDate=<fecha>` | `SUPERVISOR` (su local), `ADMINISTRADOR`, `CONTADOR` | Arreglo de 0 o 1 operaciones para el local y día. |
 | `GET /daily-operations/:id` | `SUPERVISOR` (su local), `ADMINISTRADOR`, `CONTADOR` | Detalle de la operación. |
 | `GET /daily-operations/:id/voucher` | `SUPERVISOR` (su local), `ADMINISTRADOR`, `CONTADOR` | Descarga privada y autorizada del voucher; no existe una URL pública del archivo. |
@@ -434,7 +449,9 @@ Respuesta (`DailyOperationResponse`): `id`, `store` (`id`, `name`),
 `fileName`, `mimeType`, `sizeBytes`, `sha256Hash`, `createdAt`),
 `responsible` (`id`, `name`; siempre desde el JWT — el body no acepta
 `responsibleId`), `participants` (arreglo de `{id, name}` ordenado por nombre;
-la selección compartida por tarjeta y efectivo) y `createdAt`/`updatedAt`. Los
+la selección compartida por tarjeta y efectivo), `tipAllocations` (la propina
+de cada participante con su monto, estado `UNPAID`/`PAID` y lote de pago;
+SPRINT-4A-T03) y `createdAt`/`updatedAt`. Los
 montos son enteros en CLP: se rechazan negativos en las propinas, decimales y
 campos obligatorios vacíos con 400 identificando el campo. El alta se audita
 como `DAILY_OPERATION_CREATED` y la corrección como `DAILY_OPERATION_UPDATED`,
@@ -451,23 +468,24 @@ selección de trabajadores que participan de su reparto
 por la propina de tarjeta y la de efectivo del mismo local/día (la operación ya
 acumula ambas en `tipFundAmount`), sin duplicados
 (`UNIQUE(operation_id, worker_id)`) y validada al insertar o cambiar (el
-trabajador debe ser del mismo local, con rol `TRABAJADOR` y activo): una baja
-lógica posterior no borra la selección histórica. El pacto de reparto admite la
+participante debe ser del mismo local, con rol `TRABAJADOR` o, desde
+SPRINT-4A-T01, `SUPERVISOR`, y activo): una baja lógica posterior no borra la
+selección histórica. El pacto de reparto admite la
 regla equitativa explícita `EQUAL_SHARES` junto a la proporcional histórica
 `PROPORTIONAL_TO_HOURS`, que identifica los repartos guardados con
 `tip_entries` y horas;
 las líneas y constancias de un reparto equitativo guardan `hoursWorked`
 `NULL` — la regla no usa horas y no se inventan — mientras los repartos
-proporcionales e históricos conservan las suyas. El reparto se alimenta de la
-operación por una fuente propia (`tip_pool_daily_operation_sources`, CLP
-entero igual al fondo del día, una operación como máximo por reparto) que da la
-conciliación exacta contra el fondo, y los repartos `CONFIRMED`/`PAID` son
-inmutables: la base rechaza corregir participantes o los montos, fecha y local
-de una operación que ya alimentó un reparto cerrado (con el reparto en
-`DRAFT` sí se permite ajustarla).
+proporcionales e históricos conservan las suyas. Los repartos por período
+(`tip_pools`, hoy históricos) se alimentaban de la operación por una fuente
+propia (`tip_pool_daily_operation_sources`); los `CONFIRMED`/`PAID` siguen
+inmutables y congelan las operaciones que los alimentaron. Desde SPRINT-4A-T02
+la unidad vigente es la propina diaria por participante
+(`daily_tip_allocations`), descrita en
+[Propinas diarias y pago por período](#propinas-diarias-excel-y-pago-por-período-sprint-4a-t04-a-t06).
 
-El modelo **se expone con SPRINT-4R-T03**: la API para consultar y corregir la
-selección de participantes ya está descrita en
+La API para consultar y corregir la
+selección de participantes está descrita en
 [Operación diaria](#operación-diaria-sprint-4r-t01-participantes-desde-sprint-4r-t03);
 el cálculo diario equitativo se describe en
 [Reparto equitativo](#reparto-equitativo-de-propinas-sprint-4r-t04). Detalle
@@ -520,6 +538,54 @@ leen con sus horas, pacto y fuentes `tip_entries`; los equitativos, con
 `rule: "EQUAL_SHARES"`, `totalHours: null` y `dailySources`. Los triggers de
 la base mantienen la inmutabilidad de `CONFIRMED`, `PAID` y las constancias.
 
+## Propinas diarias, Excel y pago por período (SPRINT-4A-T04 a T06)
+
+**Modelo (SPRINT-4A-T02/T03).** Al guardar o corregir la operación diaria, la
+API guarda en la misma transacción una propina por participante
+(`daily_tip_allocations`: operación, local, fecha, trabajador, monto CLP
+entero y estado `UNPAID` No pagada / `PAID` Pagada). La base garantiza que las
+propinas de una operación sumen exactamente su fondo y cubran a todos sus
+participantes, que una propina `PAID` sea inmutable y que una operación con
+propinas pagadas no cambie sus montos, fecha, local ni participantes. El pago
+se registra como lote inmutable (`tip_payment_batches`: local, período, total,
+cantidad, quién pagó y cuándo). Detalle en
+[`docs/modelo-datos.md`](docs/modelo-datos.md#propinas-diarias-por-trabajador-y-lotes-de-pago-sprint-4a-t02).
+
+Todos los endpoints exigen JWT; el rango `from`–`to` (YYYY-MM-DD, inclusive,
+días de negocio en hora de Chile) es de hasta **62 días**. Fechas inválidas,
+`from` posterior a `to` o un rango mayor responden 400; un local inexistente,
+404.
+
+| Endpoint | Roles | Descripción |
+| --- | --- | --- |
+| `GET /daily-tips/days?storeId&from&to` | `ADMINISTRADOR`, `CONTADOR`, `SUPERVISOR` (su local) | Un elemento por día con operación diaria: total repartido, pagado, pendiente, participantes y estado del día (`UNPAID`, `PARTIAL` o `PAID`), más los totales del rango. |
+| `GET /daily-tips/day?storeId&date` | `ADMINISTRADOR`, `CONTADOR`, `SUPERVISOR` (su local) | Propina de cada participante del día con su estado y, si está pagada, el lote y la fecha de pago. Solo `id` y nombre de cada persona. |
+| `GET /daily-tips/summary?storeId&from&to[&status]` | `ADMINISTRADOR`, `CONTADOR`, `SUPERVISOR` (su local) | Por trabajador: días con propina, total, pendiente y pagado, más el total general; `status=UNPAID` muestra solo lo que falta pagar. |
+| `GET /daily-tips/export?storeId&from&to` | `ADMINISTRADOR`, `CONTADOR` | Descarga `propinas_<local>_<desde>_<hasta>.xlsx`: hoja «Resumen» (una fila por trabajador con nombre y RUT, una columna por día, totales por trabajador, por día y general) y hoja «Detalle» (fecha, trabajador, monto, estado y lote). Montos numéricos con formato CLP que cuadran con `/summary`; `Cache-Control: no-store`. Auditado como `DAILY_TIPS_EXPORTED` sin montos ni datos personales. |
+| `POST /daily-tips/payment-batches` | `ADMINISTRADOR`, `CONTADOR` | Cuerpo `{ storeId, from, to }`. Crea el lote y marca en él todas las propinas No pagadas del local en el período, en una transacción que bloquea el local y sus operaciones (`FOR UPDATE`). **201** con total, cantidad de propinas y de trabajadores, quién y cuándo. Sin pendientes responde **409** sin crear el lote: un doble clic o dos solicitudes simultáneas no duplican el pago. No se puede revertir. Auditado como `DAILY_TIPS_PAID`. |
+| `GET /daily-tips/payment-batches?storeId&from&to` | `ADMINISTRADOR`, `CONTADOR` | Lotes del local cuyo período se cruza con el rango, del pago más reciente al más antiguo. Incluye los lotes históricos creados por la migración para los repartos por período ya pagados. |
+
+La alerta de las propinas No pagadas fuera de plazo está en
+[Alerta legal de pago de propinas](#alerta-legal-de-pago-de-propinas-sprint-4a-t22).
+
+**Migración de los datos anteriores** (`20261110040000_propinas_diarias_lotes_pago`):
+cada operación existente con fondo y participantes recibió sus propinas con la
+misma regla de reparto; las que alimentaban un reparto por período `PAID`
+quedaron `PAID` en un lote histórico por reparto (`legacy_pool_id`), y el resto
+(incluidas las de repartos `DRAFT` y `CONFIRMED`) quedó `UNPAID`. Ninguna fila
+de `tip_pools` se borró ni modificó.
+
+## Mis propinas: portal del trabajador (SPRINT-4A-T09)
+
+| Endpoint | Roles | Descripción |
+| --- | --- | --- |
+| `GET /my-tips?from&to` | `TRABAJADOR`, `SUPERVISOR` | Propinas propias por día (fecha, local, monto, estado, lote y fecha de pago) y los totales pendiente y pagado. La identidad sale del JWT: `userId` y `storeId` responden 400. Sin `from` ni `to` se consulta el mes en curso (hora de Chile); máximo 62 días. `ADMINISTRADOR` y `CONTADOR` reciben 403. |
+
+La propina aparece como No pagada apenas el supervisor guarda la operación del
+día, y como Pagada (con la fecha del lote) después del pago por período. Las
+constancias de los repartos antiguos siguen en `GET /my-tip-receipts`
+([Constancias propias](#constancias-propias-de-propinas-sprint-3-t16)).
+
 ## Lectura del Excel diario de MrComanda (SPRINT-4R-T09)
 
 Las ventas del día salen del «Informe de Ventas Diario» que exporta MrComanda
@@ -555,12 +621,15 @@ se leen: el reporte no las trae y vienen de la operación diaria.
 (SPRINT-4A-T17). Un encabezado sin ID Subway reconocible
 (`STORE_NOT_IDENTIFIED`), un ID Subway no asignado a ningún local
 (`STORE_NOT_CONFIGURED`: «El ID Subway 72597 no está asignado a ningún
-local»), un local inactivo (`STORE_INACTIVE`) o una etiqueta sin alias quedan
-como `issues` y `canConfirm = false`: nunca se crean equivalencias
-automáticamente. `store_external_codes` queda sin uso (ni la API ni los
+local»), un local inactivo (`STORE_INACTIVE`) o una etiqueta con valor sin
+alias quedan como `issues` y `canConfirm = false`: nunca se crean
+equivalencias por suposición; el administrador los elige a mano
+([resolución manual](#resolución-manual-de-local-y-medios-sprint-4a-t18-a-t21)).
+Una línea en 0 sin alias se omite sola (`skipped = true`, SPRINT-4A-T21) y no
+impide confirmar. `store_external_codes` queda sin uso (ni la API ni los
 triggers la leen); se conserva por compatibilidad y su retiro, si
-corresponde, irá en una migración nueva. Con el reporte real de ejemplo, «N.de Créd.»
-queda sin alias hasta que el PO defina su medio equivalente.
+corresponde, irá en una migración nueva. Con el reporte real de ejemplo, «N.de Créd.» viene en
+$0 y se omite sola.
 
 **Dependencia XLSX.** `read-excel-file` con versión exacta (9.3.12): solo lee
 .xlsx, depende de pocos paquetes y no tenía vulnerabilidades en `npm audit`
@@ -590,6 +659,7 @@ ventas).
 | --- | --- |
 | `POST /sales-imports/preview` | Multipart con el campo `file` (.xlsx, máximo 5 MB; se valida por su contenido, no por el nombre ni el tipo declarado). Lee el reporte, resuelve local y medios y, si todo resuelve, guarda el archivo en el volumen privado (`DOCUMENTS_STORAGE_PATH/sales-imports/`, nombre aleatorio) y crea la importación `PENDING` con su siguiente versión. |
 | `POST /sales-imports/:id/confirm` | Cuerpo `{ "expectedActiveImportId": "<uuid>" \| null }`. En una transacción la versión vigente del mismo local y fecha pasa a `SUPERSEDED` y esta a `ACTIVE`. |
+| `POST /sales-imports/confirm-with-resolution` | Multipart con `file` (el mismo Excel) y `resolution` (JSON). Para una vista previa `UNRESOLVED`: crea la importación con lo elegido a mano y la deja vigente en una sola transacción (ver [resolución manual](#resolución-manual-de-local-y-medios-sprint-4a-t18-a-t21)). |
 | `DELETE /sales-imports/:id` | Descarta una `PENDING` y su archivo. Las confirmadas o reemplazadas nunca se eliminan. |
 | `GET /sales-imports` | Lista con filtros `storeId`, `from`, `to` (YYYY-MM-DD), `status` y `limit` (1–200). |
 | `GET /sales-imports/:id` | Detalle con líneas por medio de pago y todas las versiones del mismo local y fecha. |
@@ -601,7 +671,7 @@ ventas).
 | --- | --- | --- |
 | `CREATED` | 201 | Archivo nuevo guardado como `PENDING`; `canConfirm: true`. `activeImport` indica la versión vigente que se reemplazaría. |
 | `EXISTING` | 200 | El mismo archivo (hash) ya estaba importado para ese local y fecha: se devuelve esa importación sin duplicarla ni volver a auditar. |
-| `UNRESOLVED` | 200 | El Excel es válido, pero el local o algún medio no tiene equivalencia (`issues`); no se guarda nada. Se configura la equivalencia y se vuelve a subir. |
+| `UNRESOLVED` | 200 | El Excel es válido, pero el local o algún medio con valor no se identificó (`issues`); no se guarda nada. Trae `resolutionOptions` (locales activos con su versión vigente y medios activos del catálogo) para resolverlo con `confirm-with-resolution`. |
 
 Los problemas del archivo responden con `code`, `row` y un mensaje accionable,
 sin guardar nada: 400 (sin archivo o vacío), 413 (más de 5 MB, o más de 25 MB descomprimido), 415 (`.xls` o
@@ -629,6 +699,42 @@ crean en la misma transacción y, si falla, el archivo guardado se elimina.
 la versión reemplazada), `SALES_IMPORT_DISCARDED` y
 `SALES_IMPORT_FILE_DOWNLOADED`, con actor, local, fecha de negocio, hash,
 versión y total.
+
+### Resolución manual de local y medios (SPRINT-4A-T18 a T21)
+
+`POST /sales-imports/confirm-with-resolution` reenvía el archivo con la
+elección del administrador en el campo `resolution` (JSON validado como
+`SalesImportResolutionDto`):
+
+```json
+{
+  "expectedActiveImportId": null,
+  "store": { "storeId": "<uuid>", "remember": true },
+  "lines": [
+    { "lineNumber": 3, "action": "ASSIGN", "paymentMethodId": "<uuid>", "remember": true },
+    { "lineNumber": 4, "action": "CREATE", "name": "Gift card", "remember": true }
+  ]
+}
+```
+
+- `store` solo va si el local no se identificó: un local **activo**. Con
+  `remember`, el ID Subway del archivo se asigna al local solo si este no
+  tiene uno (nunca se sobrescribe; auditado como `STORE_UPDATED`).
+- `lines` trae exactamente una entrada por línea pendiente (sin alias y con
+  valor): `ASSIGN` la asocia a un medio activo; `CREATE` da de alta un medio
+  nuevo (activo, `EXTERNAL_OTHER`, sin propinas) con ese nombre y el alias de
+  la etiqueta, en la misma transacción (`PAYMENT_METHOD_CREATED` y
+  `PAYMENT_METHOD_ALIAS_CREATED`; en `CREATE`, `remember` debe ser `true`).
+  Con `ASSIGN` y `remember` se crea el alias de la etiqueta. Las líneas en 0
+  sin alias se omiten solas y no se envían; una línea con valor nunca se
+  omite.
+- Si la resolución no cubre exactamente lo pendiente o una elección no es
+  válida responde **400** sin guardar nada; si la versión vigente cambió, si el
+  archivo ya tiene otra versión o si el medio nuevo repite un nombre o código
+  existente, **409**. Mismo archivo ya vigente: 200 sin cambios.
+- El detalle (`GET /sales-imports/:id`) registra lo resuelto a mano
+  (`resolvedBy`, la resolución de cada línea) y las líneas omitidas
+  (`skippedLines`, `sales_import_skipped_lines`, solo con monto 0).
 
 ## Días de operación y ventas sin importar (SPRINT-4R-T12)
 
@@ -669,7 +775,7 @@ y motivo).
 
 ## Registro diario de propinas (flujo anterior — histórico, modo lectura)
 
-> **Reemplazado por la [Operación diaria](#operación-diaria-sprint-4r-t01)
+> **Reemplazado por la [Operación diaria](#operación-diaria-sprint-4r-t01-participantes-desde-sprint-4r-t03)
 > (SPRINT-4R-T01).** Las lecturas (`GET /tips`, `GET /tips/:id`) se conservan
 > para consultar el histórico por local y día; las escrituras (`POST`, `PATCH`,
 > `DELETE`) ya no forman parte del flujo operativo vigente.
@@ -763,9 +869,10 @@ está documentada en `.env.example` y se propaga al contenedor mediante
 
 ## Catálogo de medios de pago (SPRINT-4-T32)
 
-> Se conserva íntegro con SPRINT-4R-T01: su uso en cierres, ventas y registro
-> de propinas por medio quedó histórico, y el catálogo se mantiene para ese
-> historial y para la futura importación de ventas desde Excel.
+> Su uso en cierres, ventas manuales y registro de propinas por medio quedó
+> histórico con SPRINT-4R-T01; hoy el catálogo clasifica las líneas de la
+> [importación del Excel de MrComanda](#importación-diaria-de-ventas-sprint-4r-t10)
+> mediante sus [alias](#alias-de-medios-de-pago-de-los-informes-sprint-4a-t20).
 
 Los medios de pago viven en la tabla relacional `payment_methods`, única
 fuente para ventas, propinas, líneas de cierre y clasificación de vouchers.
@@ -794,6 +901,21 @@ serializan con bloqueo de fila y se auditan (`PAYMENT_METHOD_CREATED`,
 `PAYMENT_METHOD_UPDATED`, `PAYMENT_METHOD_DEACTIVATED`,
 `PAYMENT_METHOD_REACTIVATED`) sin registrar el cuerpo completo de la
 solicitud.
+
+### Alias de medios de pago de los informes (SPRINT-4A-T20)
+
+Cada alias une una etiqueta del Excel de MrComanda con un medio del catálogo
+(`payment_method_aliases`); con él la importación reconoce la línea sola. El
+seed crea `EFECTIVO`, `T. DEBITO` y `T. CREDITO`. Exclusivo de `ADMINISTRADOR`:
+
+| Endpoint | Descripción |
+| --- | --- |
+| `GET /payment-method-aliases` | Lista los alias ordenados por el orden del medio y la etiqueta. |
+| `POST /payment-method-aliases` | `{ "label": "N.de Créd.", "paymentMethodId": "<uuid>" }`. La etiqueta se normaliza (mayúsculas, sin tildes, espacios colapsados) y es única: 409 si ya está asociada; 400 si el medio está inactivo. |
+| `DELETE /payment-method-aliases/:id` | Quita el alias: la próxima carga con esa etiqueta pedirá elegir el medio. |
+
+Las importaciones ya confirmadas nunca cambian al crear o quitar un alias. Se
+auditan como `PAYMENT_METHOD_ALIAS_CREATED` y `PAYMENT_METHOD_ALIAS_DELETED`.
 
 ## Ingreso de ventas MrComanda (flujo anterior — histórico)
 
@@ -830,7 +952,7 @@ explícita y quedar dentro de un único día de negocio en Chile.
 
 ## Cierre de caja por turno (flujo anterior — histórico, modo lectura)
 
-> **Reemplazado por la [Operación diaria](#operación-diaria-sprint-4r-t01)
+> **Reemplazado por la [Operación diaria](#operación-diaria-sprint-4r-t01-participantes-desde-sprint-4r-t03)
 > (SPRINT-4R-T01).** La doble captura por turno con conciliación y la foto de
 > voucher del cierre quedaron fuera del flujo operativo: la diferencia de
 > efectivo se declara una sola vez al día en la operación diaria. Los cierres,
@@ -881,43 +1003,26 @@ Un cierre `CLOSED` es inmutable: triggers rechazan modificar o eliminar el
 cierre, sus líneas, vouchers, vínculos a propinas y ventas asociadas (para
 cualquier rol y vía de escritura), y el `TRUNCATE` de las tablas involucradas.
 
-## Consulta consolidada de ventas, alertas y diferencias (SPRINT-4-T13)
+## Panel y reportes de ventas, propinas y diferencias (SPRINT-4R-T13, SPRINT-4A-T11/T23)
 
-> Lee las fuentes del flujo anterior (ventas, cierres por turno y registro
-> diario de propinas por medio), hoy históricas desde SPRINT-4R-T01. Las cifras
-> operativas del día (propina tarjeta, propina efectivo y diferencia de
-> efectivo) nacen en la [Operación diaria](#operación-diaria-sprint-4r-t01).
+Leen tres fuentes independientes y nunca las mezclan: las **ventas** salen solo
+de la versión vigente (`ACTIVE`) del Excel de MrComanda, y las **propinas** con
+tarjeta y en efectivo y la **diferencia de efectivo** (con signo y motivo, sin
+compensar sobrantes con faltantes) salen de la operación diaria. La propina
+nunca se suma a las ventas y no se infiere un descuadre del Excel. Sin Excel
+vigente o sin operación diaria el dato es `null` (ausencia de datos), no 0.
 
 | Endpoint | Roles | Descripción |
 | --- | --- | --- |
-| `GET /sales-dashboard?date=YYYY-MM-DD` | `ADMINISTRADOR` | `{ businessDate, timeZone, periodStart, periodEnd, calculatedAt, stores, totals }`: resumen de cada local (ordenado por nombre, incluidos los que no tienen movimientos) y totales generales. Sin `date` se usa el día actual en Chile. |
+| `GET /sales-dashboard?date=YYYY-MM-DD` | `ADMINISTRADOR` | Un día de negocio (por defecto hoy en Chile) por local: ventas por medio de pago del catálogo, estado de la importación (mismo cálculo de `GET /sales-days`), propinas, diferencia de efectivo, si la operación diaria tiene voucher (`hasVoucher`, SPRINT-4A-T11) y alertas vigentes hoy (`alertsAsOf`) de registro en la DT y de propinas diarias vencidas (`alerts.tipPayment`, `totals.tipPaymentAlerts`, con `tipLegalPaymentDays`). |
+| `GET /sales-reports?from&to[&storeId]` | `ADMINISTRADOR`, `CONTADOR` (solo lectura, SPRINT-4A-T23) | Rango de hasta 366 días, de un local o de todos, con columnas dinámicas por medio de pago, propinas, sobrantes y faltantes totalizados por separado y la lista de diferencias con signo y motivo; cada operación indica `hasVoucher`. |
+| `GET /sales-reports/legacy?from&to[&storeId]` | `ADMINISTRADOR`, `CONTADOR` | Histórico de solo lectura previo a SPRINT-4R-T01: cierres por turno con conciliación Mercado Pago y ventas de la tabla `sales`. No se mezcla con el reporte vigente. |
 
-Solo lee y concilia las fuentes existentes, sin copiar cifras. Por local:
-
-- **`sales`**: ventas del día de negocio en hora de Chile (`sold_at` dentro de
-  `[periodStart, periodEnd)`), en **montos netos** (`gross_amount - tip_amount`).
-  Separa lo ya conciliado en un cierre (`closed*`) de lo que aún no tiene cierre
-  (`unclosed*`), con desglose dinámico por medio de pago: todos los activos del
-  catálogo más los medios históricos (inactivos) que tengan movimientos en el
-  día, cada uno con su código y nombre.
-- **`cardTips`**: la propina con tarjeta como **concepto aparte**, nunca sumada a
-  la venta: `registeredAmount` del registro diario de propinas (débito y
-  crédito) y `closingsAmount` de los vouchers de Mercado Pago de los cierres.
-- **`closings`**: cierres de caja del día (SPRINT-4-T09). `netSalesAmount` es lo
-  esperado sin el fondo de caja y coincide con `sales.closedNetAmount` cuando
-  todas las ventas conciliadas son del mismo día. `cashDifference` (contado menos
-  esperado) y `voucherDifference` (Mercado Pago neto menos MrComanda) se informan
-  por separado para no contar dos veces el mismo descuadre; `cashDifference` es
-  solo informativo y nunca determina el cuadre.
-- **`pendingDifferences`**: cierres del día con alguna línea descuadrada o
-  descuadre de vouchers, con `lineDifferences` por medio (código, nombre,
-  esperado, contado y diferencia), `voucherDifference`, `hasDifferences`,
-  `isBalanced` y `balanceStatus` (`CUADRADO`/`NO_CUADRADO`). Es la misma regla
-  que exige `differenceReason` al cerrar: cualquier línea o conciliación
-  descuadrada deja el cierre no cuadrado aunque el total se compense.
-- **`alerts`**: cantidad de alertas `OVERDUE`/`UPCOMING` de registro en la DT y
-  de entrega de propinas, calculadas por sus módulos al momento de la consulta
-  (no dependen de `date`).
+El voucher de cada operación se descarga con `GET /daily-operations/:id/voucher`
+(`ADMINISTRADOR`, `CONTADOR` y el `SUPERVISOR` de su local), auditado como
+`DAILY_OPERATION_VOUCHER_DOWNLOADED`. Así el contador contrasta la diferencia
+de efectivo con las ventas por medio de pago del mismo día sin poder importar
+ventas ni corregir la operación.
 
 ## Documentación interactiva (Swagger / OpenAPI)
 
@@ -927,6 +1032,15 @@ La API genera su documentación OpenAPI con `@nestjs/swagger`:
   los endpoints; para los protegidos, pegar el access token en **Authorize**
   (candado) con el esquema Bearer.
 - **Esquema OpenAPI en JSON:** `http://localhost:3001/api/docs-json`.
+
+Cada grupo (tag) tiene su descripción en `src/swagger.ts`; los de flujos
+anteriores (`tip-pools`, `tips`, `cash-closings`) se identifican como
+históricos de solo lectura. Las acciones retiradas del reparto por período
+(`POST /tip-pools/preview`, `/:id/observations`, `/:id/confirm` y `/:id/pay`)
+figuran como **obsoletas** (`deprecated`) y documentan solo su respuesta
+`410 Gone`. `test/swagger-tip-sales-flow.spec.ts` verifica que cada endpoint
+del flujo de propinas y ventas tenga resumen, descripción y JWT, y que solo
+esas cuatro acciones estén obsoletas.
 
 ## Compile and run the project
 

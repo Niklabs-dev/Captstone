@@ -385,6 +385,12 @@ export class DailyOperationsController {
   @Roles(...READER_ROLES)
   @ApiOperation({
     summary: 'Obtiene el detalle de una operación diaria por su ID',
+    description:
+      'Propina con tarjeta y en efectivo, fondo del día, diferencia de ' +
+      'efectivo con su motivo, metadatos del voucher, responsable, ' +
+      'participantes y la propina repartida a cada uno con su estado de pago. ' +
+      'El SUPERVISOR solo ve las de su local; ADMINISTRADOR y CONTADOR, ' +
+      'cualquiera.',
   })
   @ApiOkResponse({
     description: 'Operación con el detalle de montos y metadatos del voucher.',

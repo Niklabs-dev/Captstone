@@ -75,6 +75,8 @@ archivo `.env` junto a `docker-compose.yml` (nunca se commitea):
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@moi-food.cl` / `admin-cambiar-en-produccion` | Administrador creado por el seed |
 | `ADMIN_FIRST_NAME` / `ADMIN_LAST_NAME` | `Administrador` / `Moi-food` | Nombre del administrador |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | URL de la API que usa el navegador (se fija al construir la imagen del frontend) |
+| `TIP_LEGAL_PAYMENT_DAYS` | `7` | Días hábiles para pagar una propina diaria antes de que alerte como vencida (entero de 1 a 260; ampliable por convenio). Ver la [guía de propinas y ventas](docs/guia-propinas-y-ventas.md#alertas-de-propinas-vencidas-y-plazo-de-pago) |
+| `TIP_ALERT_HOLIDAYS` | vacío | Feriados chilenos `YYYY-MM-DD` separados por coma que no cuentan como días hábiles del plazo anterior; se actualiza cada año |
 
 En producción **todos** los secretos (`DB_PASSWORD`, `JWT_SECRET`, `ADMIN_PASSWORD`)
 deben reemplazarse.
@@ -174,6 +176,34 @@ muestra el recurso como *degraded* por esos contenedores detenidos, es
 esperable: el estado real lo dan `db`, `backend` y `frontend`, que tienen
 `healthcheck`.
 
+## Propinas y ventas: cómo funciona
+
+La [guía de uso de propinas y ventas](docs/guia-propinas-y-ventas.md) explica
+el flujo paso a paso por rol. En resumen:
+
+1. **Registro diario** (SUPERVISOR, `/propinas/diarias`): una operación por
+   local y día con la propina con tarjeta (y la foto del voucher), la propina
+   en efectivo, la diferencia de efectivo y los participantes del día
+   (trabajadores y el propio supervisor).
+2. **Reparto automático**: al guardar, el fondo del día se divide en partes
+   iguales entre los participantes; los pesos que sobran se entregan de a $1 y
+   rotan según la fecha. Cada participante recibe una propina **No pagada**.
+3. **Pago por período** (ADMINISTRADOR y CONTADOR, `/propinas`): revisión por
+   día y por trabajador, Excel del período y «Marcar propinas como pagadas»,
+   que registra un lote de pago irreversible. Las propinas que siguen sin
+   pagar después de `TIP_LEGAL_PAYMENT_DAYS` días hábiles se alertan.
+4. **Portal del trabajador** (TRABAJADOR y SUPERVISOR, `/portal/propinas`):
+   cada uno ve sus propinas del mes como No pagada o Pagada.
+5. **Ventas** (ADMINISTRADOR, `/admin/importacion-ventas`): importación diaria
+   del Excel de MrComanda, que identifica el local por su **ID Subway**; lo que
+   no se reconoce se elige a mano en la vista previa. Panel y reportes muestran
+   ventas, propinas y diferencias por separado; el CONTADOR revisa en solo
+   lectura el voucher y la diferencia de cada día.
+
+Los repartos por período del flujo anterior (calculados, confirmados y pagados
+por el contador) se retiraron en el Sprint 4A y se conservan como histórico de
+solo lectura en `/propinas/historico`.
+
 ## Opción 2: desarrollo local (sin Docker para la app)
 
 Útil para trabajar con recarga en caliente. La base de datos sigue corriendo en Docker.
@@ -232,5 +262,7 @@ TEST_DATABASE_URL="postgresql://postgres:cambiar-en-produccion@localhost:5433/su
 ## Más documentación
 
 - [`AGENTS.md`](AGENTS.md): convenciones de código y flujo de trabajo del equipo.
-- [`backend/README.md`](backend/README.md): autenticación, roles, usuarios, auditoría y Swagger.
+- [`docs/guia-propinas-y-ventas.md`](docs/guia-propinas-y-ventas.md): guía de uso por rol del registro diario, el reparto, el pago de propinas, el portal del trabajador y la importación de ventas.
+- [`backend/README.md`](backend/README.md): autenticación, roles, usuarios, auditoría, contratos de la API (propinas diarias, pago por período, importación de ventas) y Swagger.
+- [`frontend/README.md`](frontend/README.md): vistas, BFF y pruebas de la aplicación web.
 - [`backend/docs/modelo-datos.md`](backend/docs/modelo-datos.md): modelo de datos completo.

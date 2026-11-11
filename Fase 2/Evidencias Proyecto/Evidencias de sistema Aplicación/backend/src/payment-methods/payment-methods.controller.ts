@@ -48,6 +48,11 @@ export class PaymentMethodsController {
   @ApiOperation({
     summary:
       'Lista los medios de pago del catálogo, con filtros de estado y disponibilidad para propinas',
+    description:
+      'Disponible para cualquier rol autenticado. Sin filtros incluye los ' +
+      'inactivos, que siguen identificando las ventas históricas. Las ' +
+      'etiquetas con que cada medio aparece en el Excel de MrComanda se ' +
+      'administran en /payment-method-aliases.',
   })
   @ApiOkResponse({
     description: 'Medios ordenados por sortOrder y código.',
@@ -77,7 +82,15 @@ export class PaymentMethodsController {
       'availableForTips',
     ],
   })
-  @ApiOperation({ summary: 'Crea un medio de pago en el catálogo' })
+  @ApiOperation({
+    summary: 'Crea un medio de pago en el catálogo',
+    description:
+      'Solo ADMINISTRADOR. El código (UPPER_SNAKE) es único e inmutable. Para ' +
+      'crear un medio a partir de una línea no reconocida del Excel de ' +
+      'ventas se usa la acción CREATE de ' +
+      'POST /sales-imports/confirm-with-resolution, que además crea el alias ' +
+      'de la etiqueta del informe.',
+  })
   @ApiCreatedResponse({
     description: 'Medio de pago creado.',
     type: PaymentMethodResponseDto,
@@ -113,6 +126,10 @@ export class PaymentMethodsController {
   })
   @ApiOperation({
     summary: 'Edita nombre, orden, comportamiento o propinas de un medio',
+    description:
+      'Solo ADMINISTRADOR. Edita solo lo enviado; el código no se modifica. ' +
+      'Las ventas e importaciones históricas siguen mostrando el medio con su ' +
+      'código y nombre vigentes.',
   })
   @ApiOkResponse({
     description: 'Medio de pago actualizado.',
@@ -153,6 +170,9 @@ export class PaymentMethodsController {
   })
   @ApiOperation({
     summary: 'Desactiva un medio de pago sin eliminar ni ocultar su historial',
+    description:
+      'Solo ADMINISTRADOR. Baja lógica: el medio no admite cargas ni alias ' +
+      'nuevos, pero sus movimientos pasados siguen visibles. Idempotente.',
   })
   @ApiOkResponse({
     description: 'Medio desactivado; idempotente si ya estaba inactivo.',
@@ -183,7 +203,12 @@ export class PaymentMethodsController {
     entityType: 'payment_methods',
     entityIdFrom: 'params.id',
   })
-  @ApiOperation({ summary: 'Reactiva un medio de pago inactivo' })
+  @ApiOperation({
+    summary: 'Reactiva un medio de pago inactivo',
+    description:
+      'Solo ADMINISTRADOR. Vuelve a admitir cargas y alias nuevos. ' +
+      'Idempotente.',
+  })
   @ApiOkResponse({
     description: 'Medio reactivado; idempotente si ya estaba activo.',
     type: PaymentMethodResponseDto,

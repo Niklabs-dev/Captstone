@@ -42,7 +42,13 @@ export class StoresController {
   constructor(private readonly storesService: StoresService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Lista los locales y permite filtrar por estado' })
+  @ApiOperation({
+    summary: 'Lista los locales y permite filtrar por estado',
+    description:
+      'Disponible para cualquier rol autenticado. Cada local incluye su ID ' +
+      'Subway (o null si no está configurado), con el que se identifica el ' +
+      'Excel diario de ventas de MrComanda. Sin filtro incluye los inactivos.',
+  })
   @ApiOkResponse({
     description: 'Locales ordenados por nombre.',
     type: StoreResponseDto,
@@ -65,6 +71,12 @@ export class StoresController {
   })
   @ApiOperation({
     summary: 'Crea un local activo, con su ID Subway opcional',
+    description:
+      'Solo ADMINISTRADOR. Recorta y colapsa espacios; el nombre es único ' +
+      'ignorando mayúsculas, tildes y espacios repetidos. El ID Subway (solo ' +
+      'dígitos, único) es el que trae el informe de MrComanda tras el número ' +
+      'interno, ej. «208 - 72597» → 72597; sin él, el Excel del local no se ' +
+      'identifica solo al importar.',
   })
   @ApiCreatedResponse({ description: 'Local creado.', type: StoreResponseDto })
   @ApiBadRequestResponse({
@@ -103,6 +115,10 @@ export class StoresController {
   })
   @ApiOperation({
     summary: 'Desactiva un local sin eliminar su historial',
+    description:
+      'Solo ADMINISTRADOR. Un local inactivo no admite asignaciones ni cargas ' +
+      'nuevas (su Excel de ventas queda como no importable) y conserva su ' +
+      'historial consultable. Idempotente: sin cambio de estado no se audita.',
   })
   @ApiOkResponse({
     description: 'Local desactivado; idempotente si ya estaba inactivo.',
@@ -135,7 +151,12 @@ export class StoresController {
     entityType: 'stores',
     entityIdFrom: 'params.id',
   })
-  @ApiOperation({ summary: 'Reactiva un local previamente desactivado' })
+  @ApiOperation({
+    summary: 'Reactiva un local previamente desactivado',
+    description:
+      'Solo ADMINISTRADOR. Vuelve a permitir asignaciones y operaciones ' +
+      'nuevas. Idempotente: sin cambio de estado no se audita.',
+  })
   @ApiOkResponse({
     description: 'Local reactivado; idempotente si ya estaba activo.',
     type: StoreResponseDto,
@@ -168,6 +189,11 @@ export class StoresController {
   @ApiOperation({
     summary:
       'Edita el nombre, la ciudad, la dirección o el ID Subway de un local',
+    description:
+      'Solo ADMINISTRADOR. Corrige solo los campos enviados con las mismas ' +
+      'validaciones del alta; subwayStoreId en null quita el ID Subway. El ' +
+      'cambio de ID Subway se audita con el valor anterior y el nuevo y ' +
+      'aplica a las próximas importaciones; las ya confirmadas no cambian.',
   })
   @ApiOkResponse({ description: 'Local actualizado.', type: StoreResponseDto })
   @ApiBadRequestResponse({
