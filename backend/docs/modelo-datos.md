@@ -673,9 +673,17 @@ Reglas que garantiza la base:
 - Las líneas de una toma CONFIRMED no se insertan, modifican ni borran
   (trigger `inventory_count_lines_require_open_rows`). La finalización
   (SPRINT-5-T06) inserta las líneas vacías **antes** de pasar la toma a
-  CONFIRMED, en la misma transacción. El trigger toma la toma con `FOR SHARE`,
-  así que un guardado concurrente con la finalización espera y luego se
-  rechaza.
+  CONFIRMED, en la misma transacción. Desde
+  `20261111130000_inventario_bloqueo_finalizacion` el trigger toma la toma con
+  `FOR NO KEY UPDATE` (antes `FOR SHARE`, que producía deadlock entre dos
+  finalizaciones simultáneas): las escrituras de líneas de una toma se
+  serializan entre sí y con su finalización, y la que llega tarde ve la toma
+  CONFIRMED y se rechaza. El rechazo usa SQLSTATE `42501`
+  (`insufficient_privilege`) con el mensaje «La toma de inventario … está
+  finalizada: no se permite INSERT/UPDATE/DELETE sobre sus líneas»; la API
+  (SPRINT-5-T06) lo traduce a 409.
+- `saved_at` lo asigna el mismo trigger (`now()`) en cada INSERT y UPDATE
+  permitido; `saved_by_id` lo informa el servicio.
 - Filas de la plantilla fijas (trigger `inventory_template_rows_fixed_rows`):
   la posición y el tipo no se actualizan y las filas no se borran, porque el Product
   Owner copia el Excel descargado y lo pega en otro cuadre. Solo cambian el
@@ -1655,7 +1663,7 @@ Table inventory_count_lines {
   packages_per_box integer
   package_content decimal(12,3)
   loose_only boolean [not null, default: false]
-  saved_at timestamptz [not null, default: `now()`]
+  saved_at timestamptz [not null, default: `now()`, note: 'Lo asigna el trigger en cada INSERT y UPDATE']
   count_id uuid [not null, ref: > inventory_counts.id]
   product_id uuid [not null, ref: > products.id]
   saved_by_id uuid [not null, ref: > users.id]
