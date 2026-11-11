@@ -41,6 +41,7 @@
     "test:daily-tips": "tsc -p tsconfig.test.json && node --test .test-build/daily-tips.test.js .test-build/tip-payment-alerts.test.js .test-build/navigation.test.js .test-build/mobile-navigation.test.js",
     "test:daily-tips:real": "playwright test --config playwright.daily-tips.config.ts",
     "test:daily-flow:real": "playwright test --config playwright.daily-flow.config.ts",
+    "test:tip-flow:real": "playwright test --config playwright.tip-flow.config.ts",
     "test:sales-imports": "tsc -p tsconfig.test.json && node --test .test-build/sales-imports.test.js .test-build/navigation.test.js .test-build/mobile-navigation.test.js",
     "test:sales-imports:real": "playwright test --config playwright.sales-imports.config.ts",
     "test:sales-overview": "tsc -p tsconfig.test.json && node --test .test-build/sales-overview.test.js .test-build/navigation.test.js .test-build/mobile-navigation.test.js",

@@ -7,6 +7,7 @@ import {
   getNavigationSurface,
 } from '../helpers/navigation';
 import { seedLegacyPools } from '../helpers/legacy-tip-pools';
+import { tipBusinessDate } from '../../src/lib/tips';
 test.skip(
   process.env.TEST_REAL_DISPOSABLE !== 'true',
   'Requiere sistema exclusivo con datos sintéticos.',
@@ -41,6 +42,13 @@ async function login(
       })
     ).status(),
   ).toBe(200);
+}
+// Desde SPRINT-4A-T10 «Mis propinas» también lista las propinas diarias: los
+// conteos se limitan a la sección de constancias.
+function receiptItems(page: Page) {
+  return page
+    .getByRole('region', { name: 'Mis constancias de propinas' })
+    .getByRole('listitem');
 }
 async function cleanLayout(page: Page) {
   expect(
@@ -151,6 +159,35 @@ test.beforeAll(async ({ request }, info) => {
     if (r.userId === peer.id) peerId = r.id;
     if (r.userId === supervisor.id) supervisorReceiptId = r.id;
   }
+  // SPRINT-4A-T10: «Mis propinas» también muestra las propinas diarias. Una
+  // operación de hoy para el trabajador y el supervisor comprueba que las
+  // constancias se cuentan aparte de esa lista.
+  const supAuth = await request.post(backend + '/auth/login', {
+    data: { email: supervisor.email, password },
+  });
+  expect(supAuth.status()).toBe(200);
+  const operation = new FormData();
+  for (const [name, value] of [
+    ['storeId', store.id],
+    ['businessDate', tipBusinessDate()],
+    ['cardTipAmount', '0'],
+    ['cashTipAmount', '3000'],
+    ['cashDifference', '0'],
+    ['participantIds', worker.id],
+    ['participantIds', supervisor.id],
+  ])
+    operation.append(name, value);
+  expect(
+    (
+      await request.post(backend + '/daily-operations', {
+        headers: {
+          Authorization:
+            'Bearer ' + ((await supAuth.json()).accessToken as string),
+        },
+        multipart: operation,
+      })
+    ).status(),
+  ).toBe(201);
   // El historial propio se conserva aunque el trabajador cambie de local.
   expect(
     (
@@ -196,7 +233,14 @@ test('Portal: solo PAID propio, navegación, PDF verificado y aislamiento entre 
   await expect(
     page.getByRole('heading', { level: 1, name: 'Mis propinas' }),
   ).toBeVisible();
-  await expect(page.getByRole('listitem')).toHaveCount(1);
+  await expect(receiptItems(page)).toHaveCount(1);
+  // La propina diaria propia figura aparte, en la lista por día.
+  const daily = page
+    .getByRole('region', { name: /Propinas por día/ })
+    .getByRole('listitem');
+  await expect(daily).toHaveCount(1);
+  await expect(daily).toContainText('$1.500');
+  await expect(daily).toContainText('No pagada');
   await expect(page.getByRole('main')).toContainText('$12.500');
   await expect(page.getByRole('main')).toContainText('Contador Prueba T16');
   await expect(page.getByRole('main')).not.toContainText('Bruno');
@@ -269,7 +313,7 @@ test('Portal: solo PAID propio, navegación, PDF verificado y aislamiento entre 
   await context.clearCookies();
   await login(context, baseURL!, peer.email);
   await page.goto('/portal/propinas');
-  await expect(page.getByRole('listitem')).toHaveCount(1);
+  await expect(receiptItems(page)).toHaveCount(1);
   await expect(page.getByRole('main')).toContainText('$6.250');
   const peerList = await context.request.get('/api/my-tip-receipts');
   expect((await peerList.json())[0].userId).toBe(peer.id);
@@ -317,7 +361,7 @@ test('Carga, fallo, reintento, vacío e integridad alterada sin descargar', asyn
   ).toBeVisible();
   release();
   hold = false;
-  await expect(page.getByRole('listitem')).toHaveCount(1);
+  await expect(receiptItems(page)).toHaveCount(1);
   fail = true;
   await page.getByRole('button', { name: 'Actualizar constancias' }).click();
   await expect(
@@ -328,7 +372,7 @@ test('Carga, fallo, reintento, vacío e integridad alterada sin descargar', asyn
   );
   fail = false;
   await page.getByRole('button', { name: 'Reintentar consulta' }).click();
-  await expect(page.getByRole('listitem')).toHaveCount(1);
+  await expect(receiptItems(page)).toHaveCount(1);
   await page.route('**/api/my-tip-receipts/*/download', async (route) => {
     const response = await route.fetch();
     expect(response.status()).toBe(200);
@@ -342,7 +386,7 @@ test('Carga, fallo, reintento, vacío e integridad alterada sin descargar', asyn
   await expect(page.getByRole('main').getByRole('alert')).toContainText(
     'No se pudo verificar',
   );
-  await expect(page.getByRole('listitem')).toHaveCount(1);
+  await expect(receiptItems(page)).toHaveCount(1);
   const folder = 'output/playwright/my-tip-receipts/' + info.project.name;
   await mkdir(folder, { recursive: true });
   await page.screenshot({
@@ -424,7 +468,7 @@ for (const role of [
         await expect(
           page.getByRole('heading', { level: 1, name: 'Mis propinas' }),
         ).toBeVisible();
-        await expect(page.getByRole('listitem')).toHaveCount(1);
+        await expect(receiptItems(page)).toHaveCount(1);
         const button = page.getByRole('button', {
           name: /Descargar constancia del/,
         });

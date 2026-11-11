@@ -381,6 +381,23 @@ Pruebas: `npm run test:daily-tips` (incluye `tip-payment-alerts.test.js`) y `npm
 
 `TEST_REAL_DISPOSABLE=true npm run test:daily-flow:real` recorre con API y base reales, en cuatro anchos, el flujo completo: el supervisor registra los días desde el formulario, cada día queda repartido y el contador ve el monto de cada trabajador y paga el período en `/propinas` (desde SPRINT-4A-T08; antes calculaba, validaba y entregaba el reparto por período); además comprueba que ya no existe cierre por turno ni captura de ventas o Mercado Pago. El equivalente por HTTP está en `backend/test/daily-flow-equal-pool.integration.spec.ts`. Trazabilidad con la DoD, comandos, conteos y hallazgos: [SPRINT-4R-T07](docs/SPRINT-4R-T07.md).
 
+## Recorrido de propinas y pago (SPRINT-4A-T13)
+
+`npm run test:tip-flow:real` (`tests/real-tip-flow`, 1440 y 390 px) recorre por la interfaz, con Next.js, NestJS y PostgreSQL reales, el flujo nuevo completo: el supervisor registra $40.000 entre tres trabajadores y él mismo (4 × $10.000 No pagadas), un día con residuo ($10.000 entre tres) y corrige un día antes del pago (se recalcula); el trabajador ve solo lo suyo como No pagada en «Mis propinas»; el contador ve la alerta legal (T22), el total diario, el detalle y descarga un Excel cuyos totales por trabajador, por día y general cuadran con la pantalla; paga del 03-11-2026 al 10-11-2026 (todo pasa a Pagado y un segundo pago responde 409); el administrador abre el período vencido desde la alerta, lo paga y la alerta desaparece; después del pago la corrección se rechaza y el trabajador ve Pagada.
+
+Los pagos no se pueden borrar, así que corre en un stack desechable con puertos propios que se destruye al terminar:
+
+```bash
+docker compose -f docker-compose.yml -f frontend/docs/docker-compose.tip-flow-test.yml -p moifood-t13 up --build -d --wait
+cd frontend
+TEST_REAL_DISPOSABLE=true COMPOSE_PROJECT_NAME=moifood-t13 \
+  TEST_REAL_BACKEND_URL=http://127.0.0.1:3614 TEST_REAL_FRONTEND_URL=http://127.0.0.1:3613 \
+  npm run test:tip-flow:real
+cd .. && docker compose -f docker-compose.yml -f frontend/docs/docker-compose.tip-flow-test.yml -p moifood-t13 down -v --rmi local
+```
+
+Con las mismas variables corren `test:daily-tips:real`, `test:daily-flow:real`, `test:daily-operations:real`, `test:my-tip-receipts:real` y `test:tip-pools:real`. Las fechas son las de la tarea: requiere que en Chile ya sea 10-11-2026 o después.
+
 ## Importación diaria de ventas (SPRINT-4R-T11)
 
 `/admin/importacion-ventas`, solo para ADMINISTRADOR, carga el Informe de Ventas Diario de MrComanda (.xlsx, máximo 5 MB). La vista previa muestra local, fecha de negocio, emisión, medios de pago y total antes de confirmar; las ventas solo se registran al confirmar.

@@ -307,7 +307,9 @@ test('Supervisor: validación, voucher, registro, reintento idéntico, conflicto
   );
   expect(eligibleIds).toContain(accounts[2].id);
   expect(eligibleIds).toContain(accounts[3].id);
-  expect(eligibleIds).not.toContain(accounts[0].id);
+  // Desde SPRINT-4A-T01 el supervisor del local también participa; el de
+  // otro local, no.
+  expect(eligibleIds).toContain(accounts[0].id);
   expect(eligibleIds).not.toContain(accounts[1].id);
   const eligibleText = JSON.stringify(eligibleBody);
   expect(eligibleText).not.toContain('@');
@@ -699,6 +701,8 @@ test('Participantes: seleccionar todos, vista previa del reparto, foco, correcci
 }, info) => {
   const correctionDate = '2026-10-29';
   const secondWorker = 'Dana Prueba de operación';
+  // Desde SPRINT-4A-T01 el propio supervisor también es elegible.
+  const supervisorName = 'Camila Prueba de operación';
   await login(context, baseURL!);
   await page.goto('/propinas/diarias');
   await registerDate(page, correctionDate);
@@ -718,7 +722,7 @@ test('Participantes: seleccionar todos, vista previa del reparto, foco, correcci
   const participants = page.getByRole('group', {
     name: 'Trabajadores participantes del reparto',
   });
-  await expect(participants).toContainText('0 de 2 seleccionados');
+  await expect(participants).toContainText('0 de 3 seleccionados');
   const toggleAll = participants.getByRole('button', {
     name: 'Seleccionar todos',
   });
@@ -726,23 +730,27 @@ test('Participantes: seleccionar todos, vista previa del reparto, foco, correcci
     44,
   );
   await toggleAll.click();
-  await expect(participants).toContainText('2 de 2 seleccionados');
+  await expect(participants).toContainText('3 de 3 seleccionados');
   await expect(page.getByRole('checkbox', { name: workerName })).toBeChecked();
   await expect(
     page.getByRole('checkbox', { name: secondWorker }),
   ).toBeChecked();
+  await expect(
+    page.getByRole('checkbox', { name: supervisorName }),
+  ).toBeChecked();
 
-  // Vista previa: $10.001 entre 2 da $5.001 y $5.000 con $1 de residuo.
+  // Vista previa: $10.001 entre 3 da $3.334, $3.334 y $3.333 ($2 de residuo).
   const shares = preview.getByRole('table');
   await expect(shares).toContainText(workerName);
   await expect(shares).toContainText(secondWorker);
-  await expect(shares).toContainText('$5.001');
-  await expect(shares).toContainText('$5.000');
-  await expect(preview).toContainText('queda $1 de residuo');
+  await expect(shares).toContainText(supervisorName);
+  await expect(shares.getByText('$3.334')).toHaveCount(2);
+  await expect(shares.getByText('$3.333')).toHaveCount(1);
+  await expect(preview).toContainText('quedan $2 de residuo');
 
   // Sin participantes con fondo: error y foco en la primera casilla.
   await participants.getByRole('button', { name: 'Quitar selección' }).click();
-  await expect(participants).toContainText('0 de 2 seleccionados');
+  await expect(participants).toContainText('0 de 3 seleccionados');
   const save = page.getByRole('button', {
     name: 'Guardar operación',
     exact: true,
@@ -784,7 +792,7 @@ test('Participantes: seleccionar todos, vista previa del reparto, foco, correcci
   await expect(
     page.getByRole('textbox', { name: /Propina en efectivo/ }),
   ).toHaveValue('10001');
-  await expect(participants).toContainText('2 de 2 seleccionados');
+  await expect(participants).toContainText('2 de 3 seleccionados');
   await fillOperation(page, { cash: '9000' });
   await page.getByRole('checkbox', { name: secondWorker }).uncheck();
   await expect(preview.getByRole('table')).not.toContainText(secondWorker);
