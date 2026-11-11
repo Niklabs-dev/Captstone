@@ -171,17 +171,18 @@ test('Elige el local y los medios no identificados, omite la línea en 0 y recue
   await expect(
     voucherSelect.locator('option', { hasText: 'Omitir' }),
   ).toHaveCount(0);
+  // SPRINT-4A-T21: la nota en 0 sin alias se omite sola, sin selector.
+  await expect(page.getByLabel(`Medio de pago para «${note}»`)).toHaveCount(0);
   await voucherSelect.selectOption({ label: 'Transferencia' });
-  await expect(confirm).toBeDisabled();
-  const noteSelect = page.getByLabel(`Medio de pago para «${note}»`);
-  await noteSelect.selectOption({ label: 'Omitir (monto 0)' });
   await expect(confirm).toBeEnabled();
 
   const lines = page.getByRole('region', {
     name: 'Medios de pago del archivo',
   });
   await expect(lines).toContainText('Transferencia');
-  await expect(lines).toContainText('Omitida (monto 0)');
+  await expect(lines).toContainText(
+    'Omitida sola (monto 0, sin medio reconocido)',
+  );
   await expect(lines).toContainText('$600.000');
   await noOverflow(page);
   await confirm.click();
@@ -192,11 +193,13 @@ test('Elige el local y los medios no identificados, omite la línea en 0 y recue
   await expect(detail).toContainText(storeName);
   await expect(detail).toContainText('Elegido a mano');
   await expect(detail).toContainText('Resuelto a mano por');
-  await expect(detail).toContainText('Omitida (monto 0)');
+  await expect(detail).toContainText(
+    'Omitida sola (monto 0, sin medio reconocido)',
+  );
   await expect(detail).toContainText('Vigente');
 
   // La siguiente carga del mismo local ya identifica local y vale; la nota
-  // omitida no se recuerda y vuelve a pedirse.
+  // en 0 se vuelve a omitir sola.
   await upload(
     page,
     'ventas-14-03-2026.xlsx',
@@ -207,9 +210,7 @@ test('Elige el local y los medios no identificados, omite la línea en 0 y recue
   await expect(page.getByLabel(`Medio de pago para «${voucher}»`)).toHaveCount(
     0,
   );
-  await page
-    .getByLabel(`Medio de pago para «${note}»`)
-    .selectOption({ label: 'Omitir (monto 0)' });
+  await expect(page.getByLabel(`Medio de pago para «${note}»`)).toHaveCount(0);
   const correct = page.getByRole('button', { name: 'Confirmar corrección' });
   await expect(correct).toBeDisabled();
   await page.getByRole('checkbox', { name: /Revisé las diferencias/ }).check();
@@ -222,22 +223,13 @@ test('Elige el local y los medios no identificados, omite la línea en 0 y recue
     fullPage: true,
     scale: 'css',
   });
-  await page.getByRole('button', { name: 'Cancelar' }).click();
+  // Ya no queda nada por elegir: es una vista previa común, que se descarta.
+  await page.getByRole('button', { name: 'Descartar', exact: true }).click();
   await expect(main.getByText('No se registraron ventas')).toBeVisible();
 });
 
-test('Informe real del 05/11: Santa María, N.de Créd. omitida y 873.260', async ({
-  page,
-  context,
-  baseURL,
-}) => {
-  const sample = process.env.MRCOMANDA_SAMPLE_XLSX;
-  test.skip(!sample, 'Requiere MRCOMANDA_SAMPLE_XLSX con el informe real.');
-  test.skip(
-    !process.env.COMPOSE_PROJECT_NAME,
-    'Requiere COMPOSE_PROJECT_NAME del stack de pruebas.',
-  );
-  // Reproduce el caso del PO: el local base no tiene asignado su ID Subway.
+// Ejecuta SQL en la base del stack de pruebas (COMPOSE_PROJECT_NAME).
+function sql(statement: string): undefined {
   execFileSync(
     'docker',
     [
@@ -253,47 +245,80 @@ test('Informe real del 05/11: Santa María, N.de Créd. omitida y 873.260', asyn
       '-c',
       'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "$1"',
       '--',
-      "UPDATE stores SET subway_store_id = NULL WHERE subway_store_id = '72597';",
+      statement,
     ],
     { stdio: 'pipe' },
   );
-  await login(context, baseURL!);
-  await openImports(page);
-  const main = page.getByRole('main');
-  await upload(page, 'ventas-06-11-2026.xlsx', await readFile(sample ?? ''));
-  await expect(
-    main.getByText('Hay datos que el sistema no identificó'),
-  ).toBeVisible();
-  await page
-    .getByLabel('Local del archivo (ID Subway 72597)')
-    .selectOption({ label: 'Santa María' });
-  // Sin recordar, para que cada proyecto reproduzca el mismo caso.
-  await page
-    .getByRole('checkbox', { name: /Recordar para próximas cargas/ })
-    .first()
-    .uncheck();
-  await page
-    .getByLabel('Medio de pago para «N.de Créd.»')
-    .selectOption({ label: 'Omitir (monto 0)' });
-  const lines = page.getByRole('region', {
-    name: 'Medios de pago del archivo',
-  });
-  await expect(lines).toContainText('$873.260');
-  await noOverflow(page);
-  // Si otro proyecto ya lo confirmó, Santa María tiene una vigente para el
-  // 05/11: el reemplazo se acepta de forma explícita (y el mismo archivo es
-  // idempotente en el servidor).
-  const replace = page.getByRole('checkbox', {
-    name: /Revisé las diferencias/,
-  });
-  if (await page.getByText('Corrección de la versión vigente').isVisible())
-    await replace.check();
-  await page.getByRole('button', { name: /^Confirmar/ }).click();
-  await expect(main.getByText(/confirmada/)).toBeVisible();
-  const detail = page.locator('section', {
-    has: page.getByRole('heading', { name: 'Detalle de la importación' }),
-  });
-  await expect(detail).toContainText('Santa María');
-  await expect(detail).toContainText('$873.260');
-  await expect(detail).toContainText('N.de Créd.');
+  return undefined;
+}
+
+test('Informe real del 05/11: Santa María sin ID Subway se elige a mano, N.de Créd. se omite sola y 873.260', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const sample = process.env.MRCOMANDA_SAMPLE_XLSX;
+  test.skip(!sample, 'Requiere MRCOMANDA_SAMPLE_XLSX con el informe real.');
+  test.skip(
+    !process.env.COMPOSE_PROJECT_NAME,
+    'Requiere COMPOSE_PROJECT_NAME del stack de pruebas.',
+  );
+  // Reproduce el caso del PO: el local base sin su ID Subway. El finally
+  // restaura el 72597 para no dejar el seed alterado (SPRINT-4A-T12 exige
+  // que Santa María lo conserve y que el archivo se identifique por él).
+  sql(
+    "UPDATE stores SET subway_store_id = NULL WHERE subway_store_id = '72597';",
+  );
+  try {
+    await login(context, baseURL!);
+    await openImports(page);
+    const main = page.getByRole('main');
+    await upload(page, 'ventas-06-11-2026.xlsx', await readFile(sample ?? ''));
+    await expect(
+      main.getByText('Hay datos que el sistema no identificó'),
+    ).toBeVisible();
+    await page
+      .getByLabel('Local del archivo (ID Subway 72597)')
+      .selectOption({ label: 'Santa María' });
+    await expect(
+      page.getByRole('checkbox', {
+        name: /Recordar para próximas cargas \(asigna el ID Subway 72597 al local\)/,
+      }),
+    ).toBeChecked();
+    // SPRINT-4A-T21: «N.de Créd.» en 0 y sin alias se omite sola.
+    await expect(
+      page.getByLabel(/^Medio de pago para «N\.de Créd\.»/),
+    ).toHaveCount(0);
+    const lines = page.getByRole('region', {
+      name: 'Medios de pago del archivo',
+    });
+    await expect(lines).toContainText(
+      'Omitida sola (monto 0, sin medio reconocido)',
+    );
+    await expect(lines).toContainText('$873.260');
+    await noOverflow(page);
+    // Si otro proyecto ya lo confirmó, Santa María tiene una vigente para el
+    // 05/11: el reemplazo se acepta de forma explícita (y el mismo archivo es
+    // idempotente en el servidor).
+    if (await page.getByText('Corrección de la versión vigente').isVisible())
+      await page
+        .getByRole('checkbox', { name: /Revisé las diferencias/ })
+        .check();
+    await page.getByRole('button', { name: /^Confirmar/ }).click();
+    await expect(main.getByText(/confirmada/)).toBeVisible();
+    const detail = page.locator('section', {
+      has: page.getByRole('heading', { name: 'Detalle de la importación' }),
+    });
+    await expect(detail).toContainText('Santa María');
+    await expect(detail).toContainText('$873.260');
+    await expect(detail).toContainText('N.de Créd.');
+    // No se comprueba que el ID quede recordado: si el mismo archivo ya
+    // estaba vigente (otro proyecto u otra suite lo confirmó), el backend
+    // responde idempotente sin aplicar «Recordar» (defecto informado en
+    // SPRINT-4A-T12); el finally restaura el ID.
+  } finally {
+    sql(
+      "UPDATE stores SET subway_store_id = '72597' WHERE name = 'Santa María' AND subway_store_id IS NULL;",
+    );
+  }
 });
