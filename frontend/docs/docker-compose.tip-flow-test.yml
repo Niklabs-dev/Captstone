@@ -1,0 +1,20 @@
+# Stack desechable para el recorrido end-to-end de propinas y pago
+# (SPRINT-4A-T13). Se combina SOLO con docker-compose.yml (sin el override de
+# desarrollo) y publica puertos propios en 127.0.0.1, así convive con el stack
+# del equipo (3000/3001/5433) y con otros stacks de pruebas:
+#
+#   docker compose -f docker-compose.yml -f frontend/docs/docker-compose.tip-flow-test.yml \
+#     -p moifood-t13 up --build -d --wait
+#   ...pruebas (ver frontend/README.md, «Recorrido de propinas y pago»)...
+#   docker compose -f docker-compose.yml -f frontend/docs/docker-compose.tip-flow-test.yml \
+#     -p moifood-t13 down -v --rmi local
+services:
+  db:
+    ports:
+      - '127.0.0.1:55613:5432'
+  backend:
+    ports:
+      - '127.0.0.1:3614:3001'
+  frontend:
+    ports:
+      - '127.0.0.1:3613:3000'
