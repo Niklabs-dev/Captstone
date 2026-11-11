@@ -4,7 +4,7 @@ import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module.js';
 import { createSwaggerDocument } from '../src/swagger.js';
 
-describe('Swagger de alertas de propinas (SPRINT-3-T14)', () => {
+describe('Swagger de alertas de propinas (SPRINT-3-T14 y SPRINT-4A-T22)', () => {
   let app: INestApplication;
   let document: OpenAPIObject;
 
@@ -53,23 +53,60 @@ describe('Swagger de alertas de propinas (SPRINT-3-T14)', () => {
     });
   });
 
-  it('expone los campos del plazo y del reparto asociado', () => {
+  it('expone el plazo vigente, los totales y el detalle por local y trabajador', () => {
     const schemas = document.components?.schemas ?? {};
-    const alert = schemas.TipPaymentAlertDto as { properties: object };
-    expect(Object.keys(alert.properties)).toEqual(
-      expect.arrayContaining([
-        'tipEntryId',
-        'store',
-        'businessDate',
-        'paymentMethod',
-        'paymentMethodName',
-        'amount',
-        'pool',
-        'deadline',
-        'daysRemaining',
-        'status',
-      ]),
-    );
-    expect(schemas.TipPaymentAlertPoolDto).toBeDefined();
+    const keys = (name: string): string[] =>
+      Object.keys((schemas[name] as { properties: object }).properties);
+    expect(keys('TipPaymentAlertCollectionDto')).toEqual([
+      'legalPaymentDays',
+      'asOf',
+      'overdueThrough',
+      'items',
+      'totals',
+      'calculatedAt',
+    ]);
+    expect(keys('TipPaymentAlertDto')).toEqual([
+      'store',
+      'worker',
+      'allocationCount',
+      'amount',
+      'oldestBusinessDate',
+      'newestBusinessDate',
+      'deadline',
+      'daysOverdue',
+    ]);
+    expect(keys('TipPaymentAlertSummaryDto')).toEqual([
+      'alertCount',
+      'allocationCount',
+      'amount',
+      'oldestBusinessDate',
+      'newestBusinessDate',
+      'maxDaysOverdue',
+    ]);
+    // Ya no expone los campos de los registros históricos tip_entries.
+    expect(keys('TipPaymentAlertDto')).not.toContain('tipEntryId');
+    expect(schemas.TipPaymentAlertPoolDto).toBeUndefined();
+    // Cada campo lleva descripción y ejemplo.
+    for (const name of [
+      'TipPaymentAlertCollectionDto',
+      'TipPaymentAlertDto',
+      'TipPaymentAlertSummaryDto',
+    ]) {
+      const properties = (
+        schemas[name] as {
+          properties: Record<
+            string,
+            { description?: string; example?: unknown }
+          >;
+        }
+      ).properties;
+      for (const [field, property] of Object.entries(properties)) {
+        expect(property.description, `${name}.${field}`).toEqual(
+          expect.any(String),
+        );
+        if (!['items', 'totals', 'store', 'worker'].includes(field))
+          expect(property.example, `${name}.${field}`).toBeDefined();
+      }
+    }
   });
 });

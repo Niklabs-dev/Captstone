@@ -1,14 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { parseCalendarDate } from '../audit/utils/business-day.util.js';
 import { canAccessStore } from '../auth/policies/store-access.policy.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
-import { formatDbDate } from '../documents/utils/document-dates.util.js';
-import { Prisma } from '../generated/prisma/client.js';
+import {
+  businessDateOf,
+  formatDbDate,
+  toDbDate,
+} from '../documents/utils/document-dates.util.js';
+import { parseCalendarDate } from '../audit/utils/business-day.util.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
-  calculateTipPaymentDeadline,
+  latestOverdueBusinessDate,
   parseTipAlertHolidays,
+  parseTipLegalPaymentDays,
+  summarizeTipPaymentAlerts,
+  tipPaymentDaysOverdue,
+  tipPaymentDeadline,
   type TipHolidayCalendar,
 } from './alerts/tip-payment-deadline.js';
 import type {
@@ -16,33 +23,20 @@ import type {
   TipPaymentAlertCollection,
 } from './types/tip-payment-alerts.types.js';
 
-const TIP_PAYMENT_ALERT_SELECT = {
-  id: true,
-  businessDate: true,
-  paymentMethod: { select: { code: true, name: true } },
-  amount: true,
-  store: { select: { id: true, name: true } },
-  poolSource: {
-    select: {
-      pool: {
-        select: {
-          id: true,
-          status: true,
-          periodStart: true,
-          periodEnd: true,
-        },
-      },
-    },
-  },
-} satisfies Prisma.TipEntrySelect;
-
-type TipPaymentAlertRecord = Prisma.TipEntryGetPayload<{
-  select: typeof TIP_PAYMENT_ALERT_SELECT;
-}>;
-
+// Alerta legal de pago de propinas (SPRINT-4A-T22). Reemplaza la alerta de
+// SPRINT-3-T14, que se calculaba sobre los registros históricos tip_entries
+// y solo se resolvía al pagar un reparto por período (retirado en
+// SPRINT-4A-T08): esos registros ya no alertan, pero no se borran.
+//
+// La fuente es daily_tip_allocations: cada propina diaria No pagada cuya
+// fecha de negocio superó los días hábiles de TIP_LEGAL_PAYMENT_DAYS genera
+// una alerta, agrupada por local y trabajador. Al pagarla en un lote
+// (SPRINT-4A-T06) pasa a Pagada y deja de aparecer. No se guarda como fila:
+// se calcula en cada consulta con la fecha de Chile.
 @Injectable()
 export class TipPaymentAlertsService {
   private readonly holidays: TipHolidayCalendar;
+  private readonly legalPaymentDays: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -51,70 +45,108 @@ export class TipPaymentAlertsService {
     this.holidays = parseTipAlertHolidays(
       config.get<string>('TIP_ALERT_HOLIDAYS'),
     );
+    this.legalPaymentDays = parseTipLegalPaymentDays(
+      config.get<string>('TIP_LEGAL_PAYMENT_DAYS'),
+    );
   }
 
-  async list(currentUser: AuthUser): Promise<TipPaymentAlertCollection> {
-    const entries = await this.prisma.tipEntry.findMany({
+  async list(
+    currentUser: AuthUser,
+    now: Date = new Date(),
+  ): Promise<TipPaymentAlertCollection> {
+    const today = businessDateOf(now);
+    const overdueThrough = latestOverdueBusinessDate(
+      today,
+      this.legalPaymentDays,
+      this.holidays,
+    );
+    const groups = await this.prisma.dailyTipAllocation.groupBy({
+      by: ['storeId', 'workerId'],
       where: {
-        // Medios conciliables con tarjeta (catálogo): la plata tarda en
-        // llegar y la ley exige entregar la propina a tiempo. Incluye medios
-        // desactivados con registros pendientes: el dinero adeudado no
-        // desaparece al desactivar el medio.
-        paymentMethod: { is: { behavior: 'RECONCILABLE_CARD' } },
-        OR: [
-          { poolSource: null },
-          { poolSource: { is: { pool: { status: { not: 'PAID' } } } } },
-        ],
+        status: 'UNPAID',
+        businessDate: { lte: toDbDate(overdueThrough) },
       },
-      select: TIP_PAYMENT_ALERT_SELECT,
+      _count: { _all: true },
+      _sum: { amount: true },
+      _min: { businessDate: true },
+      _max: { businessDate: true },
     });
-    const calculatedAt = new Date();
-    const items = entries
-      .filter((entry) => canAccessStore(currentUser, entry.store.id))
-      .map((entry) => toTipPaymentAlert(entry, calculatedAt, this.holidays))
-      .sort(compareAlerts);
-    return { items, calculatedAt };
-  }
-}
+    // Hoy solo consultan roles globales; un rol de local vería solo el suyo.
+    const visible = groups.filter((group) =>
+      canAccessStore(currentUser, group.storeId),
+    );
+    const [stores, workers] = await Promise.all([
+      this.prisma.store.findMany({
+        where: { id: { in: [...new Set(visible.map((g) => g.storeId))] } },
+        select: { id: true, name: true },
+      }),
+      this.prisma.user.findMany({
+        where: { id: { in: [...new Set(visible.map((g) => g.workerId))] } },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+    ]);
+    const storeNames = new Map(stores.map((store) => [store.id, store.name]));
+    const workerNames = new Map(
+      workers.map((worker) => [
+        worker.id,
+        `${worker.firstName} ${worker.lastName}`,
+      ]),
+    );
 
-function toTipPaymentAlert(
-  entry: TipPaymentAlertRecord,
-  now: Date,
-  holidays: TipHolidayCalendar,
-): TipPaymentAlert {
-  const businessDateText = formatDbDate(entry.businessDate);
-  const businessDate = parseCalendarDate(businessDateText);
-  if (!businessDate) {
-    throw new Error(`La fecha del registro ${entry.id} no es válida`);
-  }
-  const deadline = calculateTipPaymentDeadline(businessDate, now, holidays);
-  const pool = entry.poolSource?.pool;
-  return {
-    id: entry.id,
-    tipEntryId: entry.id,
-    store: entry.store,
-    businessDate: businessDateText,
-    paymentMethod: entry.paymentMethod.code,
-    paymentMethodName: entry.paymentMethod.name,
-    amount: Number(entry.amount),
-    pool: pool
-      ? {
-          id: pool.id,
-          status: pool.status,
-          periodStart: formatDbDate(pool.periodStart),
-          periodEnd: formatDbDate(pool.periodEnd),
+    const items = visible
+      .map((group): TipPaymentAlert => {
+        const oldest = group._min.businessDate;
+        const newest = group._max.businessDate;
+        if (!oldest || !newest) {
+          throw new Error('El grupo de propinas vencidas no tiene fechas');
         }
-      : null,
-    ...deadline,
-  };
+        const oldestText = formatDbDate(oldest);
+        const oldestDate = parseCalendarDate(oldestText);
+        if (!oldestDate) {
+          throw new Error(`La fecha ${oldestText} de la propina no es válida`);
+        }
+        const deadline = tipPaymentDeadline(
+          oldestDate,
+          this.legalPaymentDays,
+          this.holidays,
+        );
+        return {
+          store: {
+            id: group.storeId,
+            name: storeNames.get(group.storeId) ?? '',
+          },
+          worker: {
+            id: group.workerId,
+            name: workerNames.get(group.workerId) ?? '',
+          },
+          allocationCount: group._count._all,
+          amount: Number(group._sum.amount ?? 0n),
+          oldestBusinessDate: oldestText,
+          newestBusinessDate: formatDbDate(newest),
+          deadline: formatDbDate(toDbDate(deadline)),
+          daysOverdue: tipPaymentDaysOverdue(deadline, today),
+        };
+      })
+      .sort(compareAlerts);
+
+    return {
+      legalPaymentDays: this.legalPaymentDays,
+      asOf: formatDbDate(toDbDate(today)),
+      overdueThrough: formatDbDate(toDbDate(overdueThrough)),
+      items,
+      totals: summarizeTipPaymentAlerts(items),
+      calculatedAt: now,
+    };
+  }
 }
 
+// Primero las de mayor atraso; luego por local, trabajador e IDs (estable).
 function compareAlerts(left: TipPaymentAlert, right: TipPaymentAlert): number {
-  const leftStatus = left.status === 'OVERDUE' ? 0 : 1;
-  const rightStatus = right.status === 'OVERDUE' ? 0 : 1;
   return (
-    leftStatus - rightStatus ||
-    left.deadline.localeCompare(right.deadline) ||
-    left.id.localeCompare(right.id)
+    right.daysOverdue - left.daysOverdue ||
+    left.store.name.localeCompare(right.store.name, 'es') ||
+    left.worker.name.localeCompare(right.worker.name, 'es') ||
+    left.store.id.localeCompare(right.store.id) ||
+    left.worker.id.localeCompare(right.worker.id)
   );
 }

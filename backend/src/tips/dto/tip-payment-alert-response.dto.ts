@@ -1,17 +1,15 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  TIP_PAYMENT_ALERT_STATUSES,
-  type TipPaymentAlert,
-  type TipPaymentAlertCollection,
-  type TipPaymentAlertPool,
-  type TipPaymentAlertStatus,
+import type {
+  TipPaymentAlert,
+  TipPaymentAlertCollection,
+  TipPaymentAlertRef,
+  TipPaymentAlertSummary,
 } from '../types/tip-payment-alerts.types.js';
-import {
-  TIP_POOL_STATUSES,
-  type TipPoolStatusCode,
-} from '../types/tip-pools.types.js';
 
-class TipPaymentAlertStoreDto {
+// Respuesta de GET /tip-payment-alerts (SPRINT-4A-T22): propinas diarias No
+// pagadas fuera del plazo legal, por local y trabajador.
+
+class TipPaymentAlertStoreDto implements TipPaymentAlertRef {
   @ApiProperty({
     description: 'ID del local (UUID).',
     example: '1010021e-9bab-42d5-851c-417e9e2503bf',
@@ -22,116 +20,153 @@ class TipPaymentAlertStoreDto {
   name: string;
 }
 
-export class TipPaymentAlertPoolDto implements TipPaymentAlertPool {
+class TipPaymentAlertWorkerDto implements TipPaymentAlertRef {
   @ApiProperty({
-    description: 'ID del reparto asociado (UUID).',
-    example: 'a9000000-0000-4000-8000-000000000009',
+    description: 'ID del trabajador que recibe la propina (UUID).',
+    example: '6b1f7a8e-2c41-4f0e-9d7a-3c5e2b1a0f99',
   })
   id: string;
 
   @ApiProperty({
-    description: 'Estado actual del reparto; si está PAID ya no hay alerta.',
-    enum: TIP_POOL_STATUSES,
-    example: 'CONFIRMED',
+    description: 'Nombre y apellido del trabajador.',
+    example: 'Ana Pérez',
   })
-  status: TipPoolStatusCode;
-
-  @ApiProperty({
-    description: 'Primer día del período del reparto (YYYY-MM-DD).',
-    example: '2026-10-01',
-  })
-  periodStart: string;
-
-  @ApiProperty({
-    description: 'Último día del período del reparto (YYYY-MM-DD).',
-    example: '2026-10-15',
-  })
-  periodEnd: string;
+  name: string;
 }
 
 export class TipPaymentAlertDto implements TipPaymentAlert {
   @ApiProperty({
-    description: 'ID de la alerta; coincide con el registro diario (UUID).',
-    example: 'a9000000-0000-4000-8000-000000000005',
-  })
-  id: string;
-
-  @ApiProperty({
-    description: 'ID del registro diario con tarjeta (UUID).',
-    example: 'a9000000-0000-4000-8000-000000000005',
-  })
-  tipEntryId: string;
-
-  @ApiProperty({
-    description: 'Local del registro.',
+    description: 'Local de las propinas vencidas.',
     type: TipPaymentAlertStoreDto,
   })
   store: TipPaymentAlertStoreDto;
 
   @ApiProperty({
-    description: 'Fecha en que se recibió la propina (YYYY-MM-DD).',
-    example: '2026-10-02',
+    description: 'Trabajador al que se le deben las propinas.',
+    type: TipPaymentAlertWorkerDto,
   })
-  businessDate: string;
-
-  @ApiProperty({
-    description: 'Código del medio de pago conciliable con tarjeta.',
-    example: 'DEBIT_CARD',
-  })
-  paymentMethod: string;
+  worker: TipPaymentAlertWorkerDto;
 
   @ApiProperty({
     description:
-      'Nombre del medio de pago según el catálogo; se muestra aunque el medio esté desactivado.',
-    example: 'Tarjeta de débito',
+      'Cantidad de propinas diarias No pagadas y vencidas del trabajador en el local (una por día trabajado).',
+    example: 3,
   })
-  paymentMethodName: string;
+  allocationCount: number;
 
-  @ApiProperty({ description: 'Monto pendiente en CLP.', example: 4000 })
+  @ApiProperty({
+    description: 'Suma pendiente de esas propinas en CLP.',
+    example: 15000,
+  })
   amount: number;
 
   @ApiProperty({
     description:
-      'Reparto asociado y su período; null si el registro aún no se reparte.',
-    type: TipPaymentAlertPoolDto,
-    nullable: true,
+      'Fecha de negocio de la propina vencida más antigua (YYYY-MM-DD).',
+    example: '2026-10-20',
   })
-  pool: TipPaymentAlertPoolDto | null;
+  oldestBusinessDate: string;
 
   @ApiProperty({
     description:
-      'Séptimo día hábil posterior a businessDate, sin sábados, domingos ni feriados configurados (YYYY-MM-DD).',
-    example: '2026-10-13',
+      'Fecha de negocio de la propina vencida más reciente (YYYY-MM-DD); nunca posterior a overdueThrough.',
+    example: '2026-10-29',
+  })
+  newestBusinessDate: string;
+
+  @ApiProperty({
+    description:
+      'Fecha límite de pago de la propina más antigua: el último de los legalPaymentDays días hábiles posteriores a oldestBusinessDate, sin sábados, domingos ni feriados de TIP_ALERT_HOLIDAYS (YYYY-MM-DD).',
+    example: '2026-10-29',
   })
   deadline: string;
 
   @ApiProperty({
     description:
-      'Días hábiles restantes en hora de Chile: 0 en el día límite y negativo al vencer. Un fin de semana posterior al límite puede tener 0 y estado OVERDUE.',
-    example: 3,
+      'Días corridos de atraso de la propina más antigua: desde deadline hasta hoy en hora de Chile (1 el día siguiente al límite).',
+    example: 12,
   })
-  daysRemaining: number;
+  daysOverdue: number;
+}
+
+export class TipPaymentAlertSummaryDto implements TipPaymentAlertSummary {
+  @ApiProperty({
+    description: 'Cantidad de alertas (pares local y trabajador).',
+    example: 2,
+  })
+  alertCount: number;
+
+  @ApiProperty({
+    description: 'Cantidad de propinas diarias vencidas sin pagar.',
+    example: 5,
+  })
+  allocationCount: number;
+
+  @ApiProperty({ description: 'Monto total vencido en CLP.', example: 25000 })
+  amount: number;
 
   @ApiProperty({
     description:
-      'UPCOMING hasta el día límite; OVERDUE desde el día siguiente.',
-    enum: TIP_PAYMENT_ALERT_STATUSES,
-    example: 'UPCOMING',
+      'Fecha de negocio vencida más antigua (YYYY-MM-DD); null sin alertas.',
+    example: '2026-10-20',
+    nullable: true,
+    type: String,
   })
-  status: TipPaymentAlertStatus;
+  oldestBusinessDate: string | null;
+
+  @ApiProperty({
+    description:
+      'Fecha de negocio vencida más reciente (YYYY-MM-DD); null sin alertas.',
+    example: '2026-10-29',
+    nullable: true,
+    type: String,
+  })
+  newestBusinessDate: string | null;
+
+  @ApiProperty({
+    description: 'Mayor atraso en días corridos; 0 sin alertas.',
+    example: 12,
+  })
+  maxDaysOverdue: number;
 }
 
 export class TipPaymentAlertCollectionDto implements TipPaymentAlertCollection {
   @ApiProperty({
     description:
-      'Alertas pendientes, primero vencidas y luego por fecha límite.',
+      'Plazo legal de pago vigente en días hábiles (TIP_LEGAL_PAYMENT_DAYS; 7 por defecto, ampliable por convenio).',
+    example: 7,
+  })
+  legalPaymentDays: number;
+
+  @ApiProperty({
+    description: 'Día de negocio actual en Chile del cálculo (YYYY-MM-DD).',
+    example: '2026-11-10',
+  })
+  asOf: string;
+
+  @ApiProperty({
+    description:
+      'Última fecha de negocio cuyas propinas No pagadas ya están vencidas (YYYY-MM-DD): las de fechas posteriores siguen en plazo.',
+    example: '2026-10-29',
+  })
+  overdueThrough: string;
+
+  @ApiProperty({
+    description:
+      'Alertas por local y trabajador, primero las de mayor atraso y luego por local y trabajador.',
     type: [TipPaymentAlertDto],
   })
   items: TipPaymentAlertDto[];
 
   @ApiProperty({
-    description: 'Instante del cálculo de días restantes (ISO 8601).',
-    example: '2026-10-28T15:00:00.000Z',
+    description: 'Totales de todas las alertas de la respuesta.',
+    type: TipPaymentAlertSummaryDto,
+  })
+  totals: TipPaymentAlertSummaryDto;
+
+  @ApiProperty({
+    description: 'Instante del cálculo (ISO 8601).',
+    example: '2026-11-10T15:00:00.000Z',
   })
   calculatedAt: Date;
 }

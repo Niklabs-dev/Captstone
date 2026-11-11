@@ -12,6 +12,7 @@ import {
 import { DtAlertsService } from '../dt-alerts/dt-alerts.service.js';
 import { SalesReportsService } from '../sales-reports/sales-reports.service.js';
 import type { ImportStatusInfo } from '../sales-reports/types/sales-reports.types.js';
+import { summarizeTipPaymentAlerts } from '../tips/alerts/tip-payment-deadline.js';
 import { TipPaymentAlertsService } from '../tips/tip-payment-alerts.service.js';
 import type { SalesDashboardQueryDto } from './dto/sales-dashboard-query.dto.js';
 import type {
@@ -45,7 +46,10 @@ function countAlerts(alerts: StoreAlert[]): AlertCounts {
   };
 }
 
-function ownAlerts(alerts: StoreAlert[], storeId: string): StoreAlert[] {
+function ownAlerts<T extends { store: { id: string } }>(
+  alerts: readonly T[],
+  storeId: string,
+): T[] {
   return alerts.filter((alert) => alert.store.id === storeId);
 }
 
@@ -88,7 +92,7 @@ export class SalesDashboardService {
     }
     const [dtAlerts, tipAlerts] = await Promise.all([
       this.dtAlerts.list(currentUser),
-      this.tipPaymentAlerts.list(currentUser),
+      this.tipPaymentAlerts.list(currentUser, now),
     ]);
     // Ninguna alerta se pierde: un local con alertas aparece en el panel
     // aunque esté inactivo y sin datos del día.
@@ -114,7 +118,11 @@ export class SalesDashboardService {
           dtRegistration: countAlerts(
             ownAlerts(dtAlerts.items, report.store.id),
           ),
-          tipPayment: countAlerts(ownAlerts(tipAlerts.items, report.store.id)),
+          // Propinas diarias vencidas sin pagar (SPRINT-4A-T22): monto,
+          // días y atraso del local, no solo una cuenta.
+          tipPayment: summarizeTipPaymentAlerts(
+            ownAlerts(tipAlerts.items, report.store.id),
+          ),
         },
       };
     });
@@ -126,6 +134,7 @@ export class SalesDashboardService {
       // Las alertas legales no son históricas: siempre son las vigentes hoy,
       // aunque businessDate sea un día pasado.
       alertsAsOf: today,
+      tipLegalPaymentDays: tipAlerts.legalPaymentDays,
       timeZone: BUSINESS_TIME_ZONE,
       calculatedAt: now,
       paymentMethods: consolidated.paymentMethods,
@@ -143,7 +152,7 @@ export class SalesDashboardService {
         importStatus: consolidated.totals.importStatus,
         // Todas las alertas vigentes, no solo las de los locales listados.
         dtRegistrationAlerts: countAlerts(dtAlerts.items),
-        tipPaymentAlerts: countAlerts(tipAlerts.items),
+        tipPaymentAlerts: tipAlerts.totals,
       },
     };
   }

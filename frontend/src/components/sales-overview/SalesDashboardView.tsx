@@ -12,6 +12,15 @@ import {
 } from '@/components/ui/styles';
 import type { BackendResult } from '@/lib/auth-backend';
 import { formatCalendarDate } from '@/lib/display-date';
+import { plural } from '@/lib/daily-tips';
+import {
+  legalTermText,
+  overdueText,
+  tipAlertHref,
+  tipAlertSummaryText,
+  type TipPaymentAlertSummary,
+} from '@/lib/tip-payment-alerts';
+import { formatClp } from '@/lib/tips';
 import {
   cashDifferenceLabel,
   formatAmount,
@@ -37,10 +46,66 @@ import {
 
 // Panel consolidado del día por local (SPRINT-4R-T14). Cada concepto
 // conserva su fuente: ventas del Excel vigente, propinas y diferencia de la
-// operación diaria del supervisor y alertas legales vigentes hoy.
+// operación diaria del supervisor y alertas legales vigentes hoy (las de
+// propinas, desde SPRINT-4A-T22, sobre las propinas diarias No pagadas).
 function alertsText(counts: AlertCounts): string {
   if (counts.overdue === 0 && counts.upcoming === 0) return 'Sin alertas';
   return `${counts.overdue} vencidas · ${counts.upcoming} por vencer`;
+}
+
+// Propinas diarias No pagadas fuera del plazo legal (SPRINT-4A-T22): monto,
+// cantidad y mayor atraso del local, con enlace a /propinas filtrado por el
+// local y el período vencido.
+function TipAlertsCell({ item }: { item: StoreDashboard }): ReactElement {
+  const summary = item.alerts.tipPayment;
+  if (summary.alertCount === 0)
+    return <span>{tipAlertSummaryText(summary)}</span>;
+  return (
+    <span className="block space-y-2">
+      <span className="block font-semibold whitespace-normal text-crit">
+        {tipAlertSummaryText(summary)}
+      </span>
+      <Link
+        href={tipAlertHref(item.store.id, summary)}
+        prefetch={false}
+        className={buttonClass}
+        aria-label={`Ver propinas vencidas de ${item.store.name}`}
+      >
+        Ver propinas vencidas
+      </Link>
+    </span>
+  );
+}
+
+// Aviso general cuando hay propinas vencidas en cualquier local.
+function TipAlertsNotice({
+  summary,
+  legalDays,
+}: {
+  summary: TipPaymentAlertSummary;
+  legalDays: number;
+}): ReactElement | null {
+  if (summary.alertCount === 0) return null;
+  return (
+    <div
+      role="note"
+      aria-label="Propinas vencidas sin pagar"
+      className={`${alertClass} flex flex-wrap items-center justify-between gap-3`}
+    >
+      <p className="min-w-0">
+        <span className="font-semibold">
+          Hay {formatClp(summary.amount)} en propinas sin pagar fuera del plazo
+          legal
+        </span>{' '}
+        ({plural(summary.allocationCount, 'propina', 'propinas')}, hasta{' '}
+        {overdueText(summary.maxDaysOverdue)}; plazo de{' '}
+        {legalTermText(legalDays)}). Revisa y paga cada local en Propinas.
+      </p>
+      <Link href="/propinas" prefetch={false} className={buttonClass}>
+        Ir a Propinas
+      </Link>
+    </div>
+  );
 }
 
 function ImportCell({ item }: { item: StoreDashboard }): ReactElement {
@@ -191,8 +256,10 @@ function StoreCards({ stores }: { stores: StoreDashboard[] }): ReactElement {
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-ink2">Alertas de propinas</dt>
-                <dd className="mt-1">{alertsText(item.alerts.tipPayment)}</dd>
+                <dt className="text-xs text-ink2">Propinas vencidas</dt>
+                <dd className="mt-1">
+                  <TipAlertsCell item={item} />
+                </dd>
               </div>
             </dl>
             <SourceLinks item={item} />
@@ -255,10 +322,12 @@ function StoreTable({ stores }: { stores: StoreDashboard[] }): ReactElement {
               <td className={`${tableCellClass} min-w-44`}>
                 <DifferenceCell item={item} />
               </td>
-              <td className={`${tableCellClass} whitespace-nowrap`}>
-                DT: {alertsText(item.alerts.dtRegistration)}
+              <td className={`${tableCellClass} min-w-56`}>
+                <span className="block whitespace-nowrap">
+                  DT: {alertsText(item.alerts.dtRegistration)}
+                </span>
                 <span className="mt-1 block">
-                  Propinas: {alertsText(item.alerts.tipPayment)}
+                  Propinas: <TipAlertsCell item={item} />
                 </span>
               </td>
               <td className={`${tableCellClass} min-w-48`}>
@@ -448,11 +517,18 @@ export function SalesDashboardView({
               detail: `${totals.dtRegistrationAlerts.upcoming} por vencer · vigentes al ${alertsDate}`,
             },
             {
-              label: 'Alertas de propinas',
-              value: `${totals.tipPaymentAlerts.overdue} vencidas`,
-              detail: `${totals.tipPaymentAlerts.upcoming} por vencer · vigentes al ${alertsDate}`,
+              label: 'Propinas vencidas',
+              value:
+                totals.tipPaymentAlerts.alertCount > 0
+                  ? formatClp(totals.tipPaymentAlerts.amount)
+                  : 'Al día',
+              detail: `${plural(totals.tipPaymentAlerts.allocationCount, 'propina', 'propinas')} sin pagar · plazo de ${legalTermText(dashboard.tipLegalPaymentDays)} · vigentes al ${alertsDate}`,
             },
           ]}
+        />
+        <TipAlertsNotice
+          summary={totals.tipPaymentAlerts}
+          legalDays={dashboard.tipLegalPaymentDays}
         />
         {dashboard.businessDate !== dashboard.alertsAsOf && (
           <p role="note" className={infoNoticeClass}>
@@ -466,12 +542,8 @@ export function SalesDashboardView({
               Alertas DT
             </Link>{' '}
             y{' '}
-            <Link
-              href="/propinas/historico"
-              prefetch={false}
-              className={inlineLinkClass}
-            >
-              Repartos anteriores de propinas
+            <Link href="/propinas" prefetch={false} className={inlineLinkClass}>
+              Propinas
             </Link>
             .
           </p>

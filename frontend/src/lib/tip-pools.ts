@@ -81,16 +81,6 @@ export interface TipPool {
   paymentDate: string | null;
   receiptsCount: number;
 }
-export interface PaymentAlert {
-  id: string;
-  store: PoolPerson;
-  businessDate: string;
-  amount: number;
-  deadline: string;
-  daysRemaining: number;
-  status: 'UPCOMING' | 'OVERDUE';
-  pool: { id: string; periodStart: string; periodEnd: string } | null;
-}
 export interface PoolReceipt {
   id: string;
   poolId: string;
@@ -268,52 +258,6 @@ export function parsePool(v: unknown): TipPool | null {
     paymentDate: v.paymentDate,
     receiptsCount: v.receiptsCount,
   };
-}
-export function parseAlerts(
-  v: unknown,
-): { items: PaymentAlert[]; calculatedAt: string } | null {
-  if (!isRecord(v) || !instant(v.calculatedAt) || !Array.isArray(v.items))
-    return null;
-  const items: PaymentAlert[] = [];
-  for (const a of v.items) {
-    if (
-      !isRecord(a) ||
-      !isUuid(a.id) ||
-      !person(a.store) ||
-      !isTipDate(a.businessDate) ||
-      !isTipDate(a.deadline) ||
-      !money(a.amount) ||
-      !Number.isSafeInteger(a.daysRemaining) ||
-      !['UPCOMING', 'OVERDUE'].includes(String(a.status))
-    )
-      return null;
-    let pool: PaymentAlert['pool'] = null;
-    if (a.pool !== null) {
-      if (
-        !isRecord(a.pool) ||
-        !isUuid(a.pool.id) ||
-        !isTipDate(a.pool.periodStart) ||
-        !isTipDate(a.pool.periodEnd)
-      )
-        return null;
-      pool = {
-        id: a.pool.id,
-        periodStart: a.pool.periodStart,
-        periodEnd: a.pool.periodEnd,
-      };
-    }
-    items.push({
-      id: a.id,
-      store: projectPerson(a.store),
-      businessDate: a.businessDate,
-      deadline: a.deadline,
-      amount: a.amount,
-      daysRemaining: Number(a.daysRemaining),
-      status: a.status as PaymentAlert['status'],
-      pool,
-    });
-  }
-  return { items, calculatedAt: v.calculatedAt };
 }
 export function parseReceipts(
   v: unknown,

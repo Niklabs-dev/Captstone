@@ -64,6 +64,9 @@ interface Fixture {
 }
 
 const DAY = (): string => businessDaysAgo(2);
+// Fecha de una propina diaria ya fuera de cualquier plazo legal válido
+// (TIP_LEGAL_PAYMENT_DAYS admite hasta 260 días hábiles).
+const OVERDUE_DAY = (): string => businessDaysAgo(400);
 
 function storeOf(body: SalesDashboard, storeId: string): StoreDashboard {
   const store = body.stores.find((item) => item.store.id === storeId);
@@ -208,6 +211,22 @@ describe.skipIf(!databaseUrl)(
       return document.id;
     }
 
+    // Propina diaria No pagada de un trabajador del local con fecha vencida.
+    async function seedOverdueTip(
+      f: Fixture,
+      storeId: string,
+      amount: number,
+    ): Promise<void> {
+      const worker = await createTestUser(f.tx, ROLE.TRABAJADOR, storeId);
+      await createDailyOperation(f.tx, {
+        storeId,
+        responsibleId: f.supervisor.id,
+        businessDate: OVERDUE_DAY(),
+        cashTipAmount: amount,
+        participantIds: [worker.id],
+      });
+    }
+
     async function withinRollback(
       run: (fixture: Fixture) => Promise<void>,
     ): Promise<void> {
@@ -235,6 +254,8 @@ describe.skipIf(!databaseUrl)(
       storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'moifood-panel-'));
       process.env.DOCUMENTS_STORAGE_PATH = storageRoot;
       process.env.DOCUMENTS_MAX_SIZE_MB = '1';
+      // Plazo legal de propinas por defecto (SPRINT-4A-T22).
+      process.env.TIP_LEGAL_PAYMENT_DAYS = '7';
 
       switchable = createSwitchablePrisma();
       const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -543,19 +564,21 @@ describe.skipIf(!databaseUrl)(
         await seedDtDocument(f, f.storeA.id, past);
         await seedDtDocument(f, f.storeA.id, future);
         await seedDtDocument(f, f.storeB.id, future);
-        // Propina con tarjeta histórica sin reparto pagado: alerta de
-        // entrega (art. 64) en el local B.
+        // Propina diaria No pagada fuera del plazo legal en el local B
+        // (SPRINT-4A-T22). Un registro histórico tip_entries ya no alerta.
+        await seedOverdueTip(f, f.storeB.id, 5_000);
         await f.tx.tipEntry.create({
           data: {
-            businessDate: dbDate(DAY()),
+            businessDate: dbDate(OVERDUE_DAY()),
             paymentMethodId: f.card.id,
-            amount: 5_000,
-            storeId: f.storeB.id,
+            amount: 7_000,
+            storeId: f.storeA.id,
             responsibleId: f.supervisor.id,
           },
         });
 
         const body = await dashboard(f);
+        expect(body.tipLegalPaymentDays).toBe(7);
         expect(storeOf(body, f.storeA.id).alerts.dtRegistration).toEqual({
           overdue: 1,
           upcoming: 1,
@@ -564,11 +587,23 @@ describe.skipIf(!databaseUrl)(
           overdue: 0,
           upcoming: 1,
         });
-        const tipB = storeOf(body, f.storeB.id).alerts.tipPayment;
-        expect(tipB.overdue + tipB.upcoming).toBe(1);
+        expect(storeOf(body, f.storeB.id).alerts.tipPayment).toMatchObject({
+          alertCount: 1,
+          allocationCount: 1,
+          amount: 5_000,
+          oldestBusinessDate: OVERDUE_DAY(),
+          newestBusinessDate: OVERDUE_DAY(),
+        });
+        expect(
+          storeOf(body, f.storeB.id).alerts.tipPayment.maxDaysOverdue,
+        ).toBeGreaterThan(0);
         expect(storeOf(body, f.storeA.id).alerts.tipPayment).toEqual({
-          overdue: 0,
-          upcoming: 0,
+          alertCount: 0,
+          allocationCount: 0,
+          amount: 0,
+          oldestBusinessDate: null,
+          newestBusinessDate: null,
+          maxDaysOverdue: 0,
         });
       });
     });
@@ -584,15 +619,7 @@ describe.skipIf(!databaseUrl)(
           false,
         );
         await seedDtDocument(f, inactive.id, past);
-        await f.tx.tipEntry.create({
-          data: {
-            businessDate: dbDate(DAY()),
-            paymentMethodId: f.card.id,
-            amount: 4_000,
-            storeId: inactive.id,
-            responsibleId: f.supervisor.id,
-          },
-        });
+        await seedOverdueTip(f, inactive.id, 4_000);
 
         const body = await dashboard(f);
         // El local aparece con sus alertas aunque no tenga Excel ni operación.
@@ -603,9 +630,10 @@ describe.skipIf(!databaseUrl)(
           dailyOperation: null,
           alerts: { dtRegistration: { overdue: 1, upcoming: 0 } },
         });
-        expect(
-          store.alerts.tipPayment.overdue + store.alerts.tipPayment.upcoming,
-        ).toBe(1);
+        expect(store.alerts.tipPayment).toMatchObject({
+          alertCount: 1,
+          amount: 4_000,
+        });
 
         // Los totales cuentan todas las alertas vigentes: como todo local con
         // alertas aparece en el panel, cuadran con la suma por local de la
@@ -620,9 +648,13 @@ describe.skipIf(!databaseUrl)(
         expect(body.totals.dtRegistrationAlerts).toEqual(
           sum((s) => s.alerts.dtRegistration),
         );
-        expect(body.totals.tipPaymentAlerts).toEqual(
-          sum((s) => s.alerts.tipPayment),
-        );
+        const tipSum = (pick: (s: StoreDashboard) => number): number =>
+          body.stores.reduce((acc, s) => acc + pick(s), 0);
+        expect(body.totals.tipPaymentAlerts).toMatchObject({
+          alertCount: tipSum((s) => s.alerts.tipPayment.alertCount),
+          allocationCount: tipSum((s) => s.alerts.tipPayment.allocationCount),
+          amount: tipSum((s) => s.alerts.tipPayment.amount),
+        });
         expect(body.totals.dtRegistrationAlerts.overdue).toBeGreaterThanOrEqual(
           1,
         );
@@ -680,8 +712,8 @@ describe.skipIf(!databaseUrl)(
         expect(totals.dtRegistrationAlerts.overdue).toBe(
           sum((s) => s.alerts.dtRegistration.overdue),
         );
-        expect(totals.tipPaymentAlerts.upcoming).toBe(
-          sum((s) => s.alerts.tipPayment.upcoming),
+        expect(totals.tipPaymentAlerts.amount).toBe(
+          sum((s) => s.alerts.tipPayment.amount),
         );
         const statusTotal = Object.values(totals.importStatus).reduce(
           (acc, value) => acc + value,

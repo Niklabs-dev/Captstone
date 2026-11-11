@@ -10,6 +10,7 @@ import type {
   SalesTotals,
   TipsTotals,
 } from '../../sales-reports/types/sales-reports.types.js';
+import type { TipPaymentAlertSummary } from '../../tips/types/tip-payment-alerts.types.js';
 
 // Contrato del panel consolidado del administrador (SPRINT-4R-T13, E1-H4):
 // un día de negocio en hora de Chile, agrupado por local. Montos en CLP
@@ -33,7 +34,8 @@ export interface AlertCounts {
 // consultada: ver SalesDashboard.alertsAsOf).
 export interface StoreAlertsSummary {
   dtRegistration: AlertCounts;
-  tipPayment: AlertCounts;
+  // Propinas diarias No pagadas fuera del plazo legal (SPRINT-4A-T22).
+  tipPayment: TipPaymentAlertSummary;
 }
 
 export interface StoreDashboard {
@@ -53,7 +55,7 @@ export interface SalesDashboardTotals {
   cashDifferences: CashDifferenceTotals;
   importStatus: ImportStatusSummary;
   dtRegistrationAlerts: AlertCounts;
-  tipPaymentAlerts: AlertCounts;
+  tipPaymentAlerts: TipPaymentAlertSummary;
 }
 
 export interface SalesDashboard {
@@ -64,6 +66,8 @@ export interface SalesDashboard {
   // Día al que corresponden las alertas legales: siempre hoy (son las
   // vigentes al consultar, no las de businessDate).
   alertsAsOf: string;
+  // Plazo legal de pago de propinas en días hábiles (TIP_LEGAL_PAYMENT_DAYS).
+  tipLegalPaymentDays: number;
   timeZone: string;
   calculatedAt: Date;
   paymentMethods: PaymentMethodColumn[];

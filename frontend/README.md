@@ -362,11 +362,20 @@ Pruebas: `npm run test:daily-operations` (unitarias), `npm run test:daily-operat
 
 El flujo de borradores, observación, confirmación y pago del reparto por período (`/propinas/repartos`, SPRINT-4R-T06) se retiró: la propina se reparte al guardar la operación diaria y el contador o el administrador la paga por período en `/propinas`. Pagar un reparto por período dejaba esas propinas sin pagar y permitía pagarlas dos veces.
 
-- **`/propinas/historico`** (ADMINISTRADOR y CONTADOR, enlazado desde `/propinas` como «Repartos anteriores»; Server Component sobre `GET /tip-pools`): lista los repartos guardados del más reciente al más antiguo. Los confirmados y pagados van en la tabla principal («Confirmado sin pago», «Pagado»); los borradores van aparte y plegados como «Borrador sin efecto». Incluye la alerta legal de las propinas con tarjeta del registro anterior que quedaron pendientes (`GET /tip-payment-alerts`), que el panel de ventas enlaza.
+- **`/propinas/historico`** (ADMINISTRADOR y CONTADOR, enlazado desde `/propinas` como «Repartos anteriores»; Server Component sobre `GET /tip-pools`): lista los repartos guardados del más reciente al más antiguo. Los confirmados y pagados van en la tabla principal («Confirmado sin pago», «Pagado»); los borradores van aparte y plegados como «Borrador sin efecto». Desde SPRINT-4A-T22 ya no muestra la alerta de los registros con tarjeta anteriores: esos registros no alertan y la alerta vigente está en `/propinas`.
 - **`/propinas/historico/<id>`**: resumen, montos por trabajador y, si está pagado, las constancias PDF (BFF `/api/tip-pools/<id>/receipts/<userId>/download`). No hay acciones sobre el reparto.
 - `/propinas/repartos` redirige a `/propinas` (administrador y contador) o al inicio (supervisor). El supervisor ya no tiene vista de repartos; sus propinas personales llegan al portal en otra tarea.
 
 Pruebas: `npm run test:tip-pools` y `TEST_REAL_DISPOSABLE=true COMPOSE_PROJECT_NAME=<stack> npm run test:tip-pools:real` (los repartos históricos se siembran en la base exclusiva del stack, porque la API ya no los crea).
+
+## Alerta de propinas vencidas sin pagar (SPRINT-4A-T22)
+
+`GET /tip-payment-alerts` avisa las propinas diarias No pagadas cuya fecha superó los días legales de pago (`TIP_LEGAL_PAYMENT_DAYS` del backend, 7 días hábiles por defecto y ampliables por convenio; ver `backend/README.md`). El token no llega al navegador: las páginas la leen en el servidor (`lib/tip-payment-alerts-backend.ts`), validan el contrato (`lib/tip-payment-alerts.ts`) y muestran mensajes propios, nunca los del backend.
+
+- **`/propinas`**: panel «Propinas vencidas sin pagar» sobre el filtro, con el plazo vigente y la última fecha vencida. Por local muestra monto, cantidad de propinas y mayor atraso, y por trabajador monto, días, fecha más antigua y días de atraso. «Ver propinas vencidas» abre `/propinas?storeId=…&from=…&to=…` con el período vencido del local (si supera 62 días, desde la fecha más antigua). Al registrar el pago del período la página se vuelve a consultar y lo pagado deja de alertar.
+- **`/admin/panel-ventas`**: aviso con el monto total vencido y el mayor atraso, la ficha «Propinas vencidas» y, en cada local, monto y atraso con el mismo enlace a `/propinas`. Ya no enlaza a `/propinas/historico`.
+
+Pruebas: `npm run test:daily-tips` (incluye `tip-payment-alerts.test.js`) y `npm run test:sales-overview`.
 
 ## Verificación end-to-end del flujo diario y el reparto (SPRINT-4R-T07)
 

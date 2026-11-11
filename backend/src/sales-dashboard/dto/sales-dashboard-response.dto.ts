@@ -27,6 +27,8 @@ import type {
   SalesTotals,
   TipsTotals,
 } from '../../sales-reports/types/sales-reports.types.js';
+import { TipPaymentAlertSummaryDto } from '../../tips/dto/tip-payment-alert-response.dto.js';
+import type { TipPaymentAlertSummary } from '../../tips/types/tip-payment-alerts.types.js';
 import type {
   AlertCounts,
   SalesDashboard,
@@ -42,7 +44,15 @@ import type {
 // vigente y una operación con faltante; en el total, otro local ATRASADO y
 // uno CERRADO.
 const EXAMPLE_DT_ALERTS: AlertCounts = { overdue: 1, upcoming: 2 };
-const EXAMPLE_TIP_ALERTS: AlertCounts = { overdue: 0, upcoming: 1 };
+// Propinas diarias No pagadas fuera del plazo legal (SPRINT-4A-T22).
+const EXAMPLE_TIP_ALERTS: TipPaymentAlertSummary = {
+  alertCount: 2,
+  allocationCount: 5,
+  amount: 25000,
+  oldestBusinessDate: '2026-10-20',
+  newestBusinessDate: '2026-10-28',
+  maxDaysOverdue: 9,
+};
 
 const EXAMPLE_STORE_ALERTS: StoreAlertsSummary = {
   dtRegistration: EXAMPLE_DT_ALERTS,
@@ -114,11 +124,12 @@ class StoreAlertsSummaryDto implements StoreAlertsSummary {
   dtRegistration: AlertCountsDto;
 
   @ApiProperty({
-    description: 'Propinas con tarjeta pendientes de entregar (art. 64).',
-    type: AlertCountsDto,
+    description:
+      'Propinas diarias No pagadas del local fuera del plazo legal de pago (TIP_LEGAL_PAYMENT_DAYS días hábiles): cantidad de alertas por trabajador, días, monto, fechas y mayor atraso (mismo cálculo de GET /tip-payment-alerts).',
+    type: TipPaymentAlertSummaryDto,
     example: EXAMPLE_TIP_ALERTS,
   })
-  tipPayment: AlertCountsDto;
+  tipPayment: TipPaymentAlertSummaryDto;
 }
 
 class StoreDashboardDto implements StoreDashboard {
@@ -218,11 +229,11 @@ class SalesDashboardTotalsDto implements SalesDashboardTotals {
 
   @ApiProperty({
     description:
-      'Todas las alertas vigentes de entrega de propinas (de cualquier local, activo o inactivo).',
-    type: AlertCountsDto,
+      'Todas las propinas diarias No pagadas fuera del plazo legal de pago (de cualquier local, activo o inactivo).',
+    type: TipPaymentAlertSummaryDto,
     example: EXAMPLE_TIP_ALERTS,
   })
-  tipPaymentAlerts: AlertCountsDto;
+  tipPaymentAlerts: TipPaymentAlertSummaryDto;
 }
 
 export class SalesDashboardDto implements SalesDashboard {
@@ -244,6 +255,13 @@ export class SalesDashboardDto implements SalesDashboard {
     example: '2026-11-08',
   })
   alertsAsOf: string;
+
+  @ApiProperty({
+    description:
+      'Plazo legal de pago de propinas vigente en días hábiles (TIP_LEGAL_PAYMENT_DAYS; 7 por defecto) con que se calculan las alertas de propinas.',
+    example: 7,
+  })
+  tipLegalPaymentDays: number;
 
   @ApiProperty({
     description: 'Zona horaria de los días de negocio.',

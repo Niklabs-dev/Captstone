@@ -1,11 +1,9 @@
 import { callBackend, type BackendResult } from './auth-backend';
 import {
-  parseAlerts,
   parsePool,
   parsePools,
   parseReceipts,
   poolError,
-  type PaymentAlert,
   type PoolReceipt,
   type TipPool,
 } from './tip-pools';
@@ -59,11 +57,4 @@ export function fetchPoolReceipts(
   return read('/tip-pools/' + id + '/receipts', token, (value) =>
     parseReceipts(value, id),
   );
-}
-
-// Alerta legal de los registros diarios históricos con tarjeta.
-export function fetchLegacyPaymentAlerts(
-  token: string,
-): Promise<BackendResult<{ items: PaymentAlert[]; calculatedAt: string }>> {
-  return read('/tip-payment-alerts', token, parseAlerts);
 }
