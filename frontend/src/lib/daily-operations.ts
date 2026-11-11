@@ -94,10 +94,12 @@ export function isVoucherMimeType(value: unknown): value is VoucherMimeType {
 }
 // SPRINT-4A-T11: el voucher privado se descarga por el BFF autenticado; el
 // supervisor solo el de su local (el backend responde 403 para otro local) y
-// el administrador el de cualquier local. El CONTADOR queda fuera hasta que
-// el PO lo confirme, aunque el backend ya le permita la lectura.
+// el administrador el de cualquier local. SPRINT-4A-T23 (decisión del PO del
+// 10/11/2026): el CONTADOR, rol global, también lo revisa para comprobar las
+// diferencias de efectivo. Cada lectura la audita el backend
+// (DAILY_OPERATION_VOUCHER_DOWNLOADED); el TRABAJADOR nunca accede.
 export function canReadDailyVoucher(user: AuthUser): boolean {
-  if (user.role === 'ADMINISTRADOR') return true;
+  if (user.role === 'ADMINISTRADOR' || user.role === 'CONTADOR') return true;
   return user.role === 'SUPERVISOR' && isUuid(user.storeId);
 }
 // Ruta del BFF que entrega el voucher; nunca una URL pública del archivo.

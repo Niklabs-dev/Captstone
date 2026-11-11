@@ -15,17 +15,20 @@ import {
 } from '@/components/ui/styles';
 import { fetchSalesReport } from '@/lib/sales-overview-backend';
 import {
+  canOpenSalesImports,
   MAX_REPORT_DAYS,
   parseReportFilters,
   type SearchValue,
 } from '@/lib/sales-overview';
+import { getSalesReportsSession } from '@/lib/sales-reports-session';
 import { fetchStores } from '@/lib/stores-backend';
 import { tipBusinessDate } from '@/lib/tips';
-import { getUsersSession } from '@/lib/users-session';
 
 export const metadata: Metadata = { title: 'Reportes de ventas | MoiFood' };
 
-// SPRINT-4R-T14: reportes por rango y local, exclusivos del administrador.
+// SPRINT-4R-T14: reportes por rango y local. Desde SPRINT-4A-T23 también los
+// consulta el CONTADOR, en solo lectura y sin enlaces a la importación, para
+// revisar el voucher y las diferencias de cada operación diaria.
 export default async function SalesReportsPage({
   searchParams,
 }: {
@@ -35,7 +38,7 @@ export default async function SalesReportsPage({
     storeId?: SearchValue;
   }>;
 }): Promise<ReactElement> {
-  const session = await getUsersSession();
+  const session = await getSalesReportsSession();
   if (!session.ok) {
     if (session.status === 401) redirect('/session-expired');
     if (session.status === 403) redirect('/dashboard?reason=forbidden');
@@ -147,7 +150,13 @@ export default async function SalesReportsPage({
           No se pudo generar el reporte. {report.message}
         </p>
       )}
-      {report?.ok && <SalesReportView report={report.data} scope={scope} />}
+      {report?.ok && (
+        <SalesReportView
+          report={report.data}
+          scope={scope}
+          canOpenImports={canOpenSalesImports(session.user.role)}
+        />
+      )}
     </>
   );
 }

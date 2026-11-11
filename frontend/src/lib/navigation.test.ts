@@ -238,10 +238,9 @@ test('La importación de ventas es exclusiva del administrador (SPRINT-4R-T11)',
   }
 });
 
-test('Panel, reportes y calendario de ventas son exclusivos del administrador (SPRINT-4R-T14)', () => {
+test('Panel y calendario de ventas son exclusivos del administrador (SPRINT-4R-T14)', () => {
   const pages = [
     ['/admin/panel-ventas', 'Panel de ventas'],
-    ['/admin/reportes-ventas', 'Reportes de ventas'],
     ['/admin/calendario-locales', 'Calendario de locales'],
   ] as const;
   for (const [href, title] of pages) {
@@ -260,14 +259,60 @@ test('Panel, reportes y calendario de ventas son exclusivos del administrador (S
     '/admin/panel-ventas/operaciones/3f2e1d0c-9b8a-4765-8432-10fedcba9876';
   assert.equal(getNavigationView(detail).title, 'Panel de ventas');
   assert.equal(getPageRedirect('ADMINISTRADOR', detail), null);
-  assert.equal(
-    getPageRedirect('SUPERVISOR', detail),
-    '/dashboard?reason=forbidden',
-  );
+  for (const role of ['SUPERVISOR', 'CONTADOR'] as const)
+    assert.equal(getPageRedirect(role, detail), '/dashboard?reason=forbidden');
   assert.equal(
     getPageRedirect('TRABAJADOR', detail),
     '/portal?reason=forbidden',
   );
+});
+
+test('Administrador y contador leen los reportes de ventas y el detalle de la operación (SPRINT-4A-T23)', () => {
+  const detail =
+    '/admin/reportes-ventas/operaciones/3f2e1d0c-9b8a-4765-8432-10fedcba9876';
+  assert.deepEqual(getNavigationView('/admin/reportes-ventas'), {
+    href: '/admin/reportes-ventas',
+    title: 'Reportes de ventas',
+  });
+  assert.deepEqual(getNavigationView(detail), {
+    href: '/admin/reportes-ventas',
+    title: 'Reportes de ventas',
+  });
+  for (const role of ROLES) {
+    const allowed = role === 'ADMINISTRADOR' || role === 'CONTADOR';
+    assert.equal(
+      getNavigationItems(role).some(
+        (item) => item.href === '/admin/reportes-ventas',
+      ),
+      allowed,
+    );
+    const denied =
+      role === 'TRABAJADOR'
+        ? '/portal?reason=forbidden'
+        : '/dashboard?reason=forbidden';
+    for (const path of ['/admin/reportes-ventas', detail])
+      assert.equal(getPageRedirect(role, path), allowed ? null : denied);
+  }
+  // El contador no gana otras páginas administrativas ni de escritura.
+  for (const path of [
+    '/admin',
+    '/admin/importacion-ventas',
+    '/admin/panel-ventas',
+    '/admin/calendario-locales',
+    '/admin/medios-pago',
+    '/admin/reportes-ventas-falsos',
+    '/propinas/diarias',
+  ])
+    assert.equal(
+      getPageRedirect('CONTADOR', path),
+      '/dashboard?reason=forbidden',
+    );
+  assert.deepEqual(getNavigationItems('CONTADOR'), [
+    { href: '/dashboard', label: 'Inicio' },
+    { href: '/liquidaciones', label: 'Liquidaciones' },
+    { href: '/propinas', label: 'Propinas' },
+    { href: '/admin/reportes-ventas', label: 'Reportes de ventas' },
+  ]);
 });
 
 test('Solo el administrador entra a las páginas administrativas', () => {

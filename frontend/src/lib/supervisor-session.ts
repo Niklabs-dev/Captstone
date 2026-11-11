@@ -44,8 +44,9 @@ export type VoucherReaderSession =
   | { ok: false; status: number; message: string };
 
 // SPRINT-4A-T11: lectores del voucher privado por el BFF. El supervisor
-// conserva su acceso (el backend acota su local) y el administrador lo revisa
-// desde el panel de ventas; cualquier otro rol recibe 403.
+// conserva su acceso (el backend acota su local), el administrador lo revisa
+// desde el panel y los reportes de ventas y, desde SPRINT-4A-T23, el contador
+// desde los reportes; el trabajador (y cualquier otro rol) recibe 403.
 export const getVoucherReaderSession = cache(
   async (): Promise<VoucherReaderSession> => {
     const session = await getSession();

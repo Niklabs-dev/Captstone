@@ -11,7 +11,7 @@ import {
   cashDifferenceLabel,
   formatAmount,
   importDetailHref,
-  operationDetailHref,
+  reportOperationDetailHref,
   type ReportDay,
   type ReportStore,
   type SalesReport,
@@ -117,16 +117,21 @@ function TipsTable({ stores }: { stores: StoreReport[] }): ReactElement {
   );
 }
 
+// SPRINT-4A-T23: el contador no abre la importación (vista previa y
+// confirmación son del administrador); sí el detalle de la operación.
 function DaySources({
   day,
   store,
+  canOpenImports,
 }: {
   day: ReportDay;
   store: ReportStore;
+  canOpenImports: boolean;
 }): ReactElement {
   const label = `${store.name} del ${formatCalendarDate(day.businessDate)}`;
-  const importId =
-    day.sales?.importId ?? day.importStatus.pendingImportId ?? null;
+  const importId = canOpenImports
+    ? (day.sales?.importId ?? day.importStatus.pendingImportId ?? null)
+    : null;
   if (!importId && !day.dailyOperation)
     return <span className="text-muted">Sin registros</span>;
   return (
@@ -147,7 +152,7 @@ function DaySources({
       )}
       {day.dailyOperation && (
         <Link
-          href={operationDetailHref(day.dailyOperation.operationId)}
+          href={reportOperationDetailHref(day.dailyOperation.operationId)}
           prefetch={false}
           className={buttonClass}
           aria-label={'Ver operación diaria de ' + label}
@@ -159,7 +164,13 @@ function DaySources({
   );
 }
 
-function DaysTable({ stores }: { stores: StoreReport[] }): ReactElement {
+function DaysTable({
+  stores,
+  canOpenImports,
+}: {
+  stores: StoreReport[];
+  canOpenImports: boolean;
+}): ReactElement {
   const rows = stores
     .flatMap((item) => item.days.map((day) => ({ store: item.store, day })))
     .sort(
@@ -252,7 +263,11 @@ function DaysTable({ stores }: { stores: StoreReport[] }): ReactElement {
                 )}
               </td>
               <td className={`${tableCellClass} min-w-48`}>
-                <DaySources day={day} store={store} />
+                <DaySources
+                  day={day}
+                  store={store}
+                  canOpenImports={canOpenImports}
+                />
               </td>
             </tr>
           );
@@ -265,9 +280,11 @@ function DaysTable({ stores }: { stores: StoreReport[] }): ReactElement {
 export function SalesReportView({
   report,
   scope,
+  canOpenImports,
 }: {
   report: SalesReport;
   scope: string;
+  canOpenImports: boolean;
 }): ReactElement {
   const { totals } = report;
   const period = `${formatCalendarDate(report.from)} al ${formatCalendarDate(report.to)}`;
@@ -384,9 +401,9 @@ export function SalesReportView({
       <TablePanel
         id="report-days-title"
         title="Detalle por día"
-        description="Estado de la importación, ventas y operación diaria de cada día informado, con indicador de voucher y enlace a cada fuente. La foto del voucher se revisa en el detalle de la operación."
+        description="Estado de la importación, ventas y operación diaria de cada día informado, con indicador de voucher y enlace a cada fuente. La foto del voucher y las ventas del día por medio de pago se contrastan en el detalle de la operación."
       >
-        <DaysTable stores={report.stores} />
+        <DaysTable stores={report.stores} canOpenImports={canOpenImports} />
       </TablePanel>
 
       <TablePanel
@@ -397,6 +414,7 @@ export function SalesReportView({
         <CashDifferencesTable
           lines={report.cashDifferences}
           caption={`Diferencias de efectivo del ${period}`}
+          operationHref={reportOperationDetailHref}
           emptyText="No hay diferencias de efectivo declaradas en el período."
         />
       </TablePanel>

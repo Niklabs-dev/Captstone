@@ -222,10 +222,19 @@ Las rutas exclusivas del administrador se declaran en
 `src/auth/constants/admin-only-routes.constants.ts`: el panel consolidado
 (`sales-dashboard`), la importación de ventas (`sales-imports`, incluida la
 descarga directa del Excel), el estado diario de ventas (`sales-days`), el
-calendario de operación por local (`stores/:storeId`) y los reportes
-(`sales-reports`, incluido `legacy`). `test/admin-only-routes.spec.ts` falla si
+calendario de operación por local (`stores/:storeId`) y los alias de medios de
+pago (`payment-method-aliases`). `test/admin-only-routes.spec.ts` falla si
 algún endpoint de esas rutas admite otro rol o es público, y una ruta nueva de
 este tipo se agrega a esa lista.
+
+Los reportes de ventas (`sales-reports`, incluido `legacy`) son de solo
+lectura y, desde SPRINT-4A-T23 (decisión del PO), los consulta también el
+`CONTADOR` para contrastar el voucher y la diferencia de efectivo de la
+operación diaria con las ventas por medio de pago. Se declaran en
+`ADMIN_AND_ACCOUNTANT_READ_CONTROLLER_PATHS` del mismo archivo, y el test
+verifica que solo expongan `GET` con `ADMINISTRADOR` y `CONTADOR`; la
+importación de ventas y la corrección de la operación diaria siguen fuera de
+su alcance.
 
 ### Inmutabilidad del registro
 

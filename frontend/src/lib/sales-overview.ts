@@ -1,4 +1,4 @@
-import { isRecord } from './auth';
+import { isRecord, type Role } from './auth';
 import {
   parseTipPaymentAlertSummary,
   type TipPaymentAlertSummary,
@@ -914,22 +914,87 @@ export function weekdaysSummary(weekdays: readonly number[]): string {
   return labels.slice(0, -1).join(', ') + ' y ' + labels[labels.length - 1];
 }
 
+// SPRINT-4A-T23: los reportes de ventas son de solo lectura y los comparten
+// ADMINISTRADOR y CONTADOR (rol global, todos los locales). El panel, la
+// importación de ventas y el calendario siguen siendo del administrador.
+export function canReadSalesReports(role: Role): boolean {
+  return role === 'ADMINISTRADOR' || role === 'CONTADOR';
+}
+// Solo el administrador abre la importación (vista previa y confirmación).
+export function canOpenSalesImports(role: Role): boolean {
+  return role === 'ADMINISTRADOR';
+}
+
 // Enlaces a cada fuente: el Excel importado y la operación diaria.
 export function importDetailHref(importId: string): string {
   return `/admin/importacion-ventas?importacion=${importId}#sales-detail-title`;
 }
+// Detalle de la operación desde el panel del día (solo administrador).
 export function operationDetailHref(operationId: string): string {
   return `/admin/panel-ventas/operaciones/${operationId}`;
 }
+// SPRINT-4A-T23: el mismo detalle, de solo lectura, dentro de los reportes;
+// así el contador llega desde su navegación sin entrar al panel.
+export function reportOperationDetailHref(operationId: string): string {
+  return `/admin/reportes-ventas/operaciones/${operationId}`;
+}
 export function dashboardHref(date: string): string {
   return `/admin/panel-ventas?date=${date}`;
+}
+// Reporte de un solo local y día: vuelve desde el detalle de la operación.
+export function reportDayHref(storeId: string, date: string): string {
+  return (
+    '/admin/reportes-ventas?' + reportQuery({ from: date, to: date, storeId })
+  );
+}
+
+// SPRINT-4A-T23: ventas de la importación vigente del local y día de una
+// operación, por medio de pago, para contrastarlas con el voucher y la
+// diferencia de efectivo. Sale del reporte de ese único día (la misma
+// consolidación de GET /sales-reports); sin Excel vigente, sales es null y
+// nunca se inventa un cero.
+export interface OperationDayMethod extends PaymentMethodColumn {
+  amount: number;
+}
+export interface OperationDaySales {
+  importStatus: ImportStatusInfo | null;
+  sales: { importId: string; version: number; totalAmount: number } | null;
+  methods: OperationDayMethod[];
+}
+export function operationDaySales(
+  report: SalesReport,
+  storeId: string,
+  businessDate: string,
+): OperationDaySales {
+  const day = report.stores
+    .find((item) => item.store.id === storeId)
+    ?.days.find((item) => item.businessDate === businessDate);
+  if (!day?.sales)
+    return {
+      importStatus: day?.importStatus ?? null,
+      sales: null,
+      methods: [],
+    };
+  const sales = day.sales;
+  return {
+    importStatus: day.importStatus,
+    sales: {
+      importId: sales.importId,
+      version: sales.version,
+      totalAmount: sales.totalAmount,
+    },
+    methods: report.paymentMethods.map((column) => ({
+      ...column,
+      amount: methodAmount(sales, column.paymentMethod) ?? 0,
+    })),
+  };
 }
 
 export function salesOverviewError(status: number): string {
   const messages: Record<number, string> = {
     400: 'Revisa los filtros: las fechas deben ser válidas, hasta hoy y con un rango de hasta 366 días.',
     401: 'Tu sesión venció. Vuelve a iniciar sesión.',
-    403: 'Solo el administrador puede consultar el panel y los reportes de ventas.',
+    403: 'Tu rol no permite consultar esta información de ventas. El panel es exclusivo del administrador; los reportes, del administrador y el contador.',
     404: 'El local o el registro solicitado ya no existe. Actualiza la vista.',
     429: 'Demasiadas solicitudes. Espera unos momentos e intenta nuevamente.',
     502: 'No se pudo verificar la respuesta del servicio. Intenta nuevamente.',

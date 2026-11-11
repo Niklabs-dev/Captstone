@@ -961,16 +961,59 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
-    it('solo el administrador consulta los reportes y el legado', async () => {
+    // SPRINT-4A-T23: el CONTADOR los consulta en solo lectura para
+    // contrastar el voucher y la diferencia con las ventas por medio de pago.
+    it('administrador y contador consultan los reportes y el legado; supervisor y trabajador no', async () => {
       await withinRollback(async (f) => {
         for (const path of ['/sales-reports', '/sales-reports/legacy']) {
           const url = `${path}?from=${D2()}&to=${D1()}`;
           await get(url, null).expect(401);
           await get(url, f.supervisor).expect(403);
-          await get(url, f.accountant).expect(403);
           await get(url, f.worker).expect(403);
+          await get(url, f.accountant).expect(200);
           await get(url, f.admin).expect(200);
         }
+      });
+    });
+
+    it('el contador ve el mismo día de un local que el administrador: ventas por medio y operación con su diferencia (SPRINT-4A-T23)', async () => {
+      await withinRollback(async (f) => {
+        const s = await seedScenario(f);
+        const url = `/sales-reports?from=${D2()}&to=${D2()}&storeId=${f.storeA.id}`;
+        const asAdmin = (await get(url, f.admin).expect(200))
+          .body as SalesReport;
+        const asAccountant = (await get(url, f.accountant).expect(200))
+          .body as SalesReport;
+        const { calculatedAt: adminAt, ...adminView } = asAdmin;
+        const { calculatedAt: accountantAt, ...accountantView } = asAccountant;
+        expect(typeof adminAt).toBe('string');
+        expect(typeof accountantAt).toBe('string');
+        expect(accountantView).toEqual(adminView);
+        const day = asAccountant.stores[0]?.days[0];
+        expect(day).toMatchObject({
+          businessDate: D2(),
+          sales: { importId: s.activeAId, totalAmount: 500_000 },
+          dailyOperation: {
+            operationId: s.operationA2,
+            cashDifference: {
+              amount: -2_500,
+              type: 'FALTANTE',
+              reason: 'Vuelto mal entregado',
+            },
+          },
+        });
+        expect(day?.sales?.byPaymentMethod).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              paymentMethod: f.methods.cash.code,
+              amount: 150_000,
+            }),
+            expect.objectContaining({
+              paymentMethod: f.methods.card.code,
+              amount: 300_000,
+            }),
+          ]),
+        );
       });
     });
   },

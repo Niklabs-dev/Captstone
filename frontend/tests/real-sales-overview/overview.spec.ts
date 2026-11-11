@@ -6,7 +6,6 @@ import {
   type Locator,
   type Page,
 } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { randomInt, randomUUID } from 'node:crypto';
 import writeXlsxFile from 'write-excel-file/node';
 import { isRecord } from '../../src/lib/auth';
@@ -109,30 +108,6 @@ function idOf(value: unknown): string {
 function auth(token = adminToken): Record<string, string> {
   return { Authorization: 'Bearer ' + token };
 }
-// Las equivalencias de locales no tienen API: se crean directo en la base,
-// igual que en la prueba de SPRINT-4R-T11.
-function linkExternalCode(storeId: string, code: string): undefined {
-  execFileSync(
-    'docker',
-    [
-      'compose',
-      '-f',
-      '../docker-compose.yml',
-      '-p',
-      process.env.COMPOSE_PROJECT_NAME ?? 'sprint4r-t14',
-      'exec',
-      '-T',
-      'db',
-      'sh',
-      '-c',
-      'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "$1"',
-      '--',
-      `INSERT INTO store_external_codes (system, external_code, store_id, updated_at) VALUES ('MRCOMANDA', '${code}', '${storeId}', now());`,
-    ],
-    { stdio: 'pipe' },
-  );
-  return undefined;
-}
 async function createAccount(
   request: APIRequestContext,
   role: 'SUPERVISOR' | 'TRABAJADOR' | 'CONTADOR',
@@ -162,8 +137,9 @@ interface Fixture {
   supervisorEmail: string;
   workerId: string;
 }
-// Local con calendario de todos los días desde hace 10 días. Sin Excel en la
-// prueba, la equivalencia MrComanda (escrita directo en la base) se omite.
+// Local con calendario de todos los días desde hace 10 días. El ID Subway
+// del informe se asigna al crear el local (SPRINT-4A-T18 reemplazó la tabla
+// de equivalencias); sin Excel en la prueba se omite.
 async function createStore(
   request: APIRequestContext,
   label: string,
@@ -171,15 +147,20 @@ async function createStore(
   externalCode = true,
 ): Promise<Fixture> {
   const storeName = `${label} T14 ${randomUUID()}`;
+  const subwayStoreId = String(randomInt(1_000_000_000, 9_999_999_999));
   const store = await request.post(backend + '/stores', {
     headers: auth(),
-    data: { name: storeName, city: 'Melipilla', address: 'Av. Pruebas 1414' },
+    data: {
+      name: storeName,
+      city: 'Melipilla',
+      address: 'Av. Pruebas 1414',
+      ...(externalCode ? { subwayStoreId } : {}),
+    },
   });
   expect(store.status()).toBe(201);
   const storeId = idOf(await store.json());
   storeIds.push(storeId);
-  const code = `${randomInt(100, 999)} - ${randomInt(10_000, 99_999)}`;
-  if (externalCode) linkExternalCode(storeId, code);
+  const code = `${randomInt(100, 999)} - ${subwayStoreId}`;
   if (calendar)
     expect(
       (
@@ -453,7 +434,11 @@ test('Panel: datos reales, sin dato, día cerrado, enlaces a cada fuente y carga
   await expect(operation).toContainText('-' + money(1500));
   await expect(operation).toContainText('Faltante');
   await expect(operation).toContainText(reason);
-  await expect(operation).toContainText('No incluye ventas');
+  // SPRINT-4A-T23: junto a la diferencia, las ventas del día por medio.
+  const contrast = section(page, 'Diferencia de efectivo y ventas del día');
+  await expect(contrast).toContainText(money(150_000));
+  await expect(contrast).toContainText(money(400_000));
+  await expect(contrast).toContainText(money(550_000));
   await noOverflow(page);
 
   // Día abierto sin Excel: «Sin dato», nunca $0, y alerta de atrasado.
@@ -593,7 +578,8 @@ test('Reportes: rango y local, medios dinámicos, propinas separadas, vacío y f
   ).toHaveAttribute('href', /\/admin\/importacion-ventas\?importacion=/);
   await expect(
     day(imported).getByRole('link', { name: /^Ver operación diaria/ }),
-  ).toHaveAttribute('href', /\/admin\/panel-ventas\/operaciones\//);
+    // SPRINT-4A-T23: desde los reportes, el detalle vive bajo los reportes.
+  ).toHaveAttribute('href', /\/admin\/reportes-ventas\/operaciones\//);
   await expect(
     section(page, 'Diferencias de efectivo')
       .getByRole('row')
@@ -650,7 +636,7 @@ test('Reportes: rango y local, medios dinámicos, propinas separadas, vacío y f
   await noOverflow(page);
 });
 
-test('Voucher: el administrador revisa la foto y la diferencia; otro local recibe 403 (SPRINT-4A-T11)', async ({
+test('Voucher: administrador y contador revisan la foto, la diferencia y las ventas del día; otro local recibe 403 (SPRINT-4A-T11/T23)', async ({
   page,
   context,
   baseURL,
@@ -659,8 +645,10 @@ test('Voucher: el administrador revisa la foto y la diferencia; otro local recib
   const today = chileToday();
   const withVoucher = shift(today, -2);
   const cashOnly = shift(today, -1);
-  const fixture = await createStore(request, 'Voucher', false, false);
+  const fixture = await createStore(request, 'Voucher', false);
   const foreign = await createStore(request, 'Voucher ajeno', false, false);
+  // Excel vigente solo del día con voucher: el otro día no tiene ventas.
+  await importSales(request, fixture, withVoucher, 120_000, 80_000);
   const reason = 'Faltante de arqueo ' + randomUUID().slice(0, 8);
   const operationId = await registerOperation(
     request,
@@ -720,27 +708,138 @@ test('Voucher: el administrador revisa la foto y la diferencia; otro local recib
   expect(file.headers()['content-type']).toBe('image/png');
   expect(file.headers()['cache-control']).toBe('private, no-store');
   expect(Buffer.from(await file.body())).toEqual(png);
+  // SPRINT-4A-T23: ventas del día por medio de pago junto a la diferencia.
+  const contrast = section(page, 'Diferencia de efectivo y ventas del día');
+  await expect(contrast).toContainText('-' + money(1200));
+  await expect(contrast).toContainText(reason);
+  await expect(contrast).toContainText(money(120_000));
+  await expect(contrast).toContainText(money(80_000));
+  await expect(contrast).toContainText(money(200_000));
   await noOverflow(page);
 
-  // Operación sin propina con tarjeta: sin voucher que revisar.
+  // Operación sin propina con tarjeta ni Excel: sin voucher y con aviso.
   await page.goBack();
   await day(cashOnly)
     .getByRole('link', { name: /^Ver operación diaria/ })
     .click();
   await expect(page.getByRole('main')).toContainText('Sin voucher:');
-  await expect(page.getByRole('img', { name: /^Foto del voucher/ })).toHaveCount(
-    0,
+  await expect(
+    page.getByRole('img', { name: /^Foto del voucher/ }),
+  ).toHaveCount(0);
+  await expect(
+    section(page, 'Diferencia de efectivo y ventas del día'),
+  ).toContainText('No hay una importación vigente');
+
+  // SPRINT-4A-T23: el CONTADOR llega desde su menú a los reportes y al
+  // detalle de solo lectura, con la foto, la diferencia y las ventas.
+  const accountant = await createAccount(request, 'CONTADOR', null);
+  await login(context, baseURL!, accountant.email, password);
+  await page.goto('/dashboard');
+  // Menú lateral en escritorio; barra inferior (cuatro módulos) en móvil.
+  await page
+    .getByRole('navigation')
+    .getByRole('link', { name: 'Reportes de ventas' })
+    .click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Reportes de ventas' }),
+  ).toBeVisible();
+  await page.goto(
+    `/admin/reportes-ventas?from=${shift(today, -3)}&to=${today}&storeId=${fixture.storeId}`,
   );
+  await expect(day(withVoucher)).toContainText('Con voucher');
+  // Sin acceso a la importación: ni enlace ni página.
+  await expect(
+    days.getByRole('link', { name: /^Ver importación/ }),
+  ).toHaveCount(0);
+  await noOverflow(page);
+  await day(withVoucher)
+    .getByRole('link', { name: /^Ver operación diaria/ })
+    .click();
+  await expect(page).toHaveURL(
+    new RegExp('/admin/reportes-ventas/operaciones/' + operationId + '$'),
+  );
+  await expect(
+    page.getByRole('heading', {
+      name: `Operación diaria · ${fixture.storeName} · ${display(withVoucher)}`,
+    }),
+  ).toBeVisible();
+  const accountantPreview = page.getByRole('img', {
+    name: /^Foto del voucher/,
+  });
+  await expect(accountantPreview).toHaveAttribute('src', voucherPath);
+  await expect
+    .poll(() =>
+      accountantPreview.evaluate(
+        (image: HTMLImageElement) => image.naturalWidth,
+      ),
+    )
+    .toBeGreaterThan(0);
+  const accountantContrast = section(
+    page,
+    'Diferencia de efectivo y ventas del día',
+  );
+  await expect(accountantContrast).toContainText('-' + money(1200));
+  await expect(accountantContrast).toContainText('Faltante');
+  await expect(accountantContrast).toContainText(money(9000));
+  await expect(accountantContrast).toContainText(money(3000));
+  await expect(accountantContrast).toContainText(money(120_000));
+  await expect(accountantContrast).toContainText(money(80_000));
+  // Solo lectura: el detalle no ofrece ningún botón de edición.
+  await expect(page.getByRole('main').getByRole('button')).toHaveCount(0);
+  await noOverflow(page);
+  const accountantFile = await context.request.get(voucherPath);
+  expect(accountantFile.status()).toBe(200);
+  expect(Buffer.from(await accountantFile.body())).toEqual(png);
+  // Ni el panel, ni la importación, ni la corrección por el BFF.
+  for (const path of [
+    '/admin/panel-ventas',
+    '/admin/panel-ventas/operaciones/' + operationId,
+    '/admin/importacion-ventas',
+  ]) {
+    await page.goto(path);
+    await expect(page).toHaveURL(/\/dashboard\?reason=forbidden$/);
+  }
+  expect(
+    (
+      await context.request.patch('/api/daily-operations/' + operationId, {
+        headers: { Origin: baseURL! },
+        multipart: { cashDifference: '0' },
+      })
+    ).status(),
+  ).toBe(403);
+  // La lectura del contador queda auditada con su identidad.
+  const audit = await request.get(
+    `${backend}/audit-logs?storeId=${fixture.storeId}&limit=100`,
+    { headers: auth() },
+  );
+  expect(audit.status()).toBe(200);
+  const auditBody: unknown = await audit.json();
+  const auditItems =
+    isRecord(auditBody) && Array.isArray(auditBody.items)
+      ? auditBody.items
+      : [];
+  expect(
+    auditItems.some(
+      (item: unknown) =>
+        isRecord(item) &&
+        item.action === 'DAILY_OPERATION_VOUCHER_DOWNLOADED' &&
+        item.entityId === operationId &&
+        isRecord(item.user) &&
+        item.user.id === accountant.id,
+    ),
+  ).toBe(true);
 
   // El supervisor del local lo descarga; el de otro local recibe 403.
   await login(context, baseURL!, fixture.supervisorEmail, password);
   expect((await context.request.get(voucherPath)).status()).toBe(200);
   await login(context, baseURL!, foreign.supervisorEmail, password);
   expect((await context.request.get(voucherPath)).status()).toBe(403);
-  // El CONTADOR no lo revisa hasta que el PO lo confirme.
-  const accountant = await createAccount(request, 'CONTADOR', null);
-  await login(context, baseURL!, accountant.email, password);
+  // El trabajador no ve el voucher ni el detalle.
+  const worker = await createAccount(request, 'TRABAJADOR', fixture.storeId);
+  await login(context, baseURL!, worker.email, password);
   expect((await context.request.get(voucherPath)).status()).toBe(403);
+  await page.goto('/admin/reportes-ventas/operaciones/' + operationId);
+  await expect(page).toHaveURL(/\/portal\?reason=forbidden$/);
   await context.clearCookies();
   expect((await context.request.get(voucherPath)).status()).toBe(401);
 });
@@ -858,25 +957,33 @@ test('Otros roles: sin enlaces, rutas redirigidas y BFF con 403', async ({
   const fixture = await createStore(request, 'Roles', false);
   const accountant = await createAccount(request, 'CONTADOR', null);
   const worker = await createAccount(request, 'TRABAJADOR', fixture.storeId);
-  const pages = [
-    '/admin/panel-ventas',
+  // SPRINT-4A-T23: el CONTADOR sí lee los reportes y su detalle (se prueba
+  // en «Voucher»); panel, calendario e importación siguen negados.
+  const reportPages = [
     '/admin/reportes-ventas',
-    '/admin/calendario-locales',
-    '/admin/panel-ventas/operaciones/' + randomUUID(),
+    '/admin/reportes-ventas/operaciones/' + randomUUID(),
   ];
   for (const [email, home] of [
     [fixture.supervisorEmail, '/dashboard'],
     [accountant.email, '/dashboard'],
     [worker.email, '/portal'],
   ] as const) {
+    const isAccountant = email === accountant.email;
+    const pages = [
+      '/admin/panel-ventas',
+      '/admin/calendario-locales',
+      '/admin/importacion-ventas',
+      '/admin/panel-ventas/operaciones/' + randomUUID(),
+      ...(isAccountant ? [] : reportPages),
+    ];
     await login(context, baseURL!, email, password);
     await page.goto(home);
-    for (const name of [
-      'Panel de ventas',
-      'Reportes de ventas',
-      'Calendario de locales',
-    ])
+    for (const name of ['Panel de ventas', 'Calendario de locales'])
       await expect(page.getByRole('link', { name })).toHaveCount(0);
+    if (!isAccountant)
+      await expect(
+        page.getByRole('link', { name: 'Reportes de ventas' }),
+      ).toHaveCount(0);
     for (const path of pages) {
       await page.goto(path);
       await expect(page).toHaveURL(
