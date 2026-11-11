@@ -36,7 +36,7 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(output).toContain('is valid');
   });
 
-  it('las migraciones crean las 37 tablas del modelo', () => {
+  it('las migraciones crean las 41 tablas del modelo', () => {
     const sql = readMigrations();
     const tablasEsperadas = [
       'stores',
@@ -69,14 +69,19 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'payment_method_aliases',
       'sales_imports',
       'sales_import_lines',
+      'sales_import_skipped_lines',
+      'daily_tip_allocations',
+      'tip_payment_batches',
       'store_operating_schedules',
       'store_closures',
       'products',
       'inventory_movements',
       'inventory_counts',
       'inventory_count_lines',
+      'inventory_template_rows',
       'data_rights_requests',
     ];
+    expect(tablasEsperadas).toHaveLength(41);
     for (const tabla of tablasEsperadas) {
       expect(sql).toContain(`CREATE TABLE "${tabla}"`);
     }
@@ -697,5 +702,109 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
       'ALTER TABLE "sales_import_skipped_lines" DROP COLUMN "resolution"',
     );
     expect(down).not.toContain('NEW."resolution"');
+  });
+
+  it('amplía el inventario para el catálogo y la toma (SPRINT-5-T01)', () => {
+    const sql = readMigration('inventario_catalogo_toma');
+
+    // Unidad recreada solo con KG, L y UNIT; nada de float.
+    expect(sql).toContain(
+      "CREATE TYPE \"UnitOfMeasure_new\" AS ENUM ('UNIT', 'KG', 'L')",
+    );
+    expect(sql).toContain('DROP TYPE "UnitOfMeasure_old"');
+    expect(sql).not.toMatch(/\b(DOUBLE PRECISION|REAL|FLOAT\d*)\b/);
+
+    // Producto: SKU opcional (el UNIQUE se conserva) y formato.
+    expect(sql).toContain('ALTER COLUMN "sku" DROP NOT NULL');
+    expect(sql).not.toContain('DROP INDEX "products_sku_key"');
+    expect(sql).toContain('"alternative_names" VARCHAR(120)[] NOT NULL');
+    expect(sql).toContain('"box_content" DECIMAL(12,3)');
+    expect(sql).toContain('"package_content" DECIMAL(12,3)');
+    expect(sql).toContain('"packages_per_box" INTEGER');
+    expect(sql).toContain('"loose_only" BOOLEAN NOT NULL DEFAULT false');
+    expect(sql).toContain('"products_packages_per_box_positive" CHECK');
+    // Caja y paquete independientes: ningún CHECK los relaciona.
+    expect(sql).not.toMatch(/"packages_per_box"\s*\*\s*"package_content"/);
+
+    // Plantilla: posición y producto únicos, posición fija por trigger.
+    expect(sql).toContain('CREATE TABLE "inventory_template_rows"');
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "inventory_template_rows_position_key"',
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "inventory_template_rows_product_id_key"',
+    );
+    expect(sql).toContain(
+      'CREATE TRIGGER "inventory_template_rows_fixed_rows"',
+    );
+
+    // Toma: una OPEN por local (índice parcial) e índice por local y fecha.
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "inventory_counts_store_id_open_key" ON "inventory_counts"("store_id")\n  WHERE "status" = \'OPEN\'',
+    );
+    expect(sql).toContain(
+      'CREATE INDEX "inventory_counts_store_id_count_date_idx"',
+    );
+    expect(sql).toContain('"template_snapshot" JSONB');
+    expect(sql).toContain('"inventory_counts_status_consistency" CHECK');
+    expect(sql).toContain('CREATE TRIGGER "inventory_counts_status_rows"');
+
+    // Líneas: desglose, total verificado y bloqueo con la toma CONFIRMED.
+    expect(sql).toContain(
+      '"inventory_count_lines_counted_quantity_consistent" CHECK',
+    );
+    expect(sql).toContain('ALTER COLUMN "system_quantity" DROP NOT NULL');
+    expect(sql).toContain('ALTER COLUMN "difference" DROP NOT NULL');
+    expect(sql).toContain(
+      'CREATE TRIGGER "inventory_count_lines_require_open_rows"',
+    );
+    expect(sql).not.toContain('ALTER TABLE "inventory_movements"');
+    expect(sql).not.toContain('SET session_replication_role');
+
+    // La reversa vive junto a la migración y devuelve el modelo inicial.
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('inventario_catalogo_toma'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toContain('DROP TABLE "inventory_template_rows"');
+    expect(down).toContain(
+      "CREATE TYPE \"UnitOfMeasure_old\" AS ENUM ('UNIT', 'KG', 'G', 'L', 'ML', 'PACK')",
+    );
+    expect(down).toContain('ALTER COLUMN "sku" SET NOT NULL');
+    expect(down).toContain('DROP INDEX "inventory_counts_store_id_open_key"');
+    expect(down).toContain('DELETE FROM "_prisma_migrations"');
+  });
+
+  it('bloquea la toma sin deadlock y asigna saved_at (SPRINT-5-T01, revisión)', () => {
+    const sql = readMigration('inventario_bloqueo_finalizacion');
+    // Solo reemplaza la función del trigger de líneas: FOR NO KEY UPDATE en
+    // vez de FOR SHARE y saved_at asignado por la base.
+    expect(sql).toContain(
+      'CREATE OR REPLACE FUNCTION "inventory_count_lines_require_open"()',
+    );
+    expect(sql).toMatch(/WHERE c\."id" = "target"\s+FOR NO KEY UPDATE;/);
+    expect(sql).not.toMatch(/^\s+FOR SHARE;/m);
+    expect(sql).toContain('NEW."saved_at" := now();');
+    expect(sql).toContain("USING ERRCODE = 'insufficient_privilege'");
+    expect(sql).not.toContain('CREATE TRIGGER');
+    expect(sql).not.toContain('ALTER TABLE');
+
+    // La reversa restaura la versión de 20261111120000.
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('inventario_bloqueo_finalizacion'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toMatch(/WHERE c\."id" = "target"\s+FOR SHARE;/);
+    expect(down).not.toContain('NEW."saved_at" := now();');
+    expect(down).toContain('BEGIN;');
+    expect(down).toContain(
+      'WHERE "migration_name" = \'20261111130000_inventario_bloqueo_finalizacion\'',
+    );
   });
 });

@@ -17,10 +17,10 @@
 | Operación diaria | `daily_operations`, `daily_operation_vouchers`, `daily_operation_participants` | Una operación por local y fecha de negocio (SPRINT-4R-T01): propina tarjeta con voucher fotográfico, propina efectivo, fondo de propinas calculado y diferencia de efectivo con signo y motivo. Fuente operativa de ambos montos de propina y, desde SPRINT-4R-T02, de la selección de participantes del reparto (compartida por tarjeta y efectivo) |
 | Importación de ventas | `payment_method_aliases`, `sales_imports`, `sales_import_lines`, `sales_import_skipped_lines`, `store_external_codes` | Ventas diarias importadas desde el Excel de MrComanda (SPRINT-4R-T08): el local se identifica por `stores.subway_store_id` (SPRINT-4A-T17; `store_external_codes` queda sin uso), alias de medios de pago, resolución manual de lo no identificado y líneas en 0 omitidas (SPRINT-4A-T18/T21), archivo importado con hash SHA-256 y versiones (una vigente por local y fecha) y totales por medio de pago. No guarda propinas ni diferencias de efectivo (vienen de la operación diaria) ni escribe en `sales` |
 | Calendario de operación | `store_operating_schedules`, `store_closures` | Días semanales en que abre cada local, desde cuándo se exigen ventas y cierres por excepción con motivo (SPRINT-4R-T12). El estado diario de ventas (IMPORTADO / PENDIENTE / ATRASADO / CERRADO) se calcula al consultar, sin tablas de alertas |
-| Inventario | `products`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Stock por libro mayor de movimientos y conteos físicos que detectan mermas |
+| Inventario | `products`, `inventory_template_rows`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Catálogo de productos con SKU de proveedor, nombres alternativos y formato de caja y paquete; filas fijas de la plantilla impresa; toma de inventario por local (En curso / Finalizado) con conteo por caja, paquete y cantidad suelta (SPRINT-5-T01). El libro mayor de movimientos queda para la comparación contra el stock esperado |
 | Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
 
-**40 tablas y 18 enums**: el modelo base (27 tablas, hasta SPRINT-4-T32) más la
+**41 tablas y 19 enums**: el modelo base (27 tablas, hasta SPRINT-4-T32) más la
 operación diaria de SPRINT-4R-T01 (`daily_operations` y
 `daily_operation_vouchers`), los participantes y fuentes diarias de
 SPRINT-4R-T02 (`daily_operation_participants` y
@@ -31,8 +31,9 @@ SPRINT-4R-T08 (`store_external_codes`, `payment_method_aliases`,
 (`store_operating_schedules` y `store_closures`), y del Sprint 4A la propina
 diaria y los lotes de pago (`daily_tip_allocations` y `tip_payment_batches`,
 enum `TipAllocationStatus`) y las líneas omitidas de la importación
-(`sales_import_skipped_lines`, enum `SalesImportResolution`). Fuente de verdad
-física: `prisma/schema.prisma`.
+(`sales_import_skipped_lines`, enum `SalesImportResolution`), y del Sprint 5
+las filas de la plantilla de inventario (`inventory_template_rows`, enum
+`InventoryTemplateRowKind`). Fuente de verdad física: `prisma/schema.prisma`.
 SPRINT-4R-T02 no agrega enums: añade el valor `EQUAL_SHARES` a
 `TipAgreementRule`. El Portal del Trabajador no agrega
 tablas: es una vista
@@ -622,11 +623,81 @@ partir de este calendario, de los cierres y de las importaciones `ACTIVE`
 importación tardía resuelve el día sin pasos manuales. Reglas en el README del
 backend.
 
+## Inventario: catálogo y toma (SPRINT-5-T01)
+
+Migración `20261111120000_inventario_catalogo_toma` (con reversa en
+`down.sql`). Amplía `products`, `inventory_counts` e `inventory_count_lines`,
+que existían desde la migración inicial sin uso ni filas, y agrega
+`inventory_template_rows`. `inventory_movements` no cambia.
+
+| Tabla | Cambio |
+| --- | --- |
+| `products` | `sku` opcional y único cuando existe (lo entrega el proveedor; PostgreSQL admite varios NULL) y nunca vacío. Agrega `alternative_names` (`VARCHAR(120)[]`, un producto con varios nombres y un solo SKU: Carne Fajita, Beef Steak y Carne Queso), `package_name` (bolsa, paquete, botella o pack), `box_content` y `package_content` (`DECIMAL(12,3)`, independientes), `packages_per_box` (entero, solo informativo) y `loose_only` («solo cantidad suelta»). |
+| `inventory_template_rows` | Una fila por fila de la hoja Excel: `position` (único, = número de fila; la 1 es el encabezado), `kind` (`ITEM`, `BLANK` o `SECTION`), `printed_text` (nombre, `<Vacío>` o rótulo; NULL solo en `BLANK`), `section` (rótulo de la sección que cierra el grupo) y `product_id` opcional y único (solo en `ITEM`). |
+| `inventory_counts` | `status` OPEN («En curso») o CONFIRMED («Finalizado»); agrega `count_date` (fecha de la toma), `finalized_at`, `finalized_by_id` y `template_snapshot` (JSONB, copia de la plantilla al finalizar). |
+| `inventory_count_lines` | Agrega `boxes`, `packages` (enteros), `loose_quantity` (`DECIMAL(12,3)`), `saved_by_id` y `saved_at` (último guardado) y la copia del producto al contarlo: `product_sku`, `product_name`, `unit`, `package_name`, `box_content`, `packages_per_box`, `package_content` y `loose_only`. `counted_quantity` guarda el total; `system_quantity` y `difference` pasan a opcionales (reservadas para la comparación contra el stock). |
+
+**Total de una línea** (lo calcula el backend con aritmética decimal exacta y
+la base lo verifica sobre la copia del formato, CHECK
+`inventory_count_lines_counted_quantity_consistent`):
+
+```
+counted_quantity = boxes × box_content + packages × package_content + loose_quantity
+```
+
+Ejemplo: Carne Fajita (caja de 5 kg con 2 bolsas de 2,5 kg), 1 caja + 2 bolsas
++ 0,300 kg = 10,300 kg. El contenido por caja no se deriva de los paquetes
+(Pepperoni: caja de 7,3 kg con paquetes de 0,93 kg). Una línea vacía (producto
+no contado) tiene `boxes`, `packages`, `loose_quantity` y `counted_quantity` en
+NULL, igual que la celda en blanco de la hoja impresa.
+
+**Unidad**: `UnitOfMeasure` queda en `UNIT`, `KG` y `L`. Se recreó el enum en
+vez de agregar un CHECK para que el cliente Prisma y la API solo conozcan
+valores válidos (G, ML y PACK no tenían filas). En `UNIT` los contenidos y la
+cantidad suelta son enteros (un pack de 6 bebidas son 6 unidades).
+
+Reglas que garantiza la base:
+
+- CHECK: cajas y paquetes `>= 0`; cantidad suelta `>= 0`; contenidos `> 0` y
+  `packages_per_box >= 1` cuando existen; cajas o paquetes contados exigen su
+  contenido en la copia del formato; un producto `loose_only` no admite cajas
+  ni paquetes; textos (SKU, nombre, paquete, nombres alternativos) no vacíos.
+- Una toma OPEN por local como máximo (índice único parcial
+  `inventory_counts_store_id_open_key`, solo en SQL) e índice por
+  `(store_id, count_date)`. Una línea por toma y producto.
+- Ciclo de la toma (trigger `inventory_counts_status_rows`): nace OPEN, no
+  cambia de local ni de creador y pasa una sola vez a CONFIRMED con
+  `finalized_at`, `finalized_by_id` y `template_snapshot` (CHECK
+  `inventory_counts_status_consistency`). Una toma CONFIRMED es inmutable y no
+  se borra; una OPEN se puede descartar y sus líneas se borran en cascada.
+- Las líneas de una toma CONFIRMED no se insertan, modifican ni borran
+  (trigger `inventory_count_lines_require_open_rows`). La finalización
+  (SPRINT-5-T06) inserta las líneas vacías **antes** de pasar la toma a
+  CONFIRMED, en la misma transacción. Desde
+  `20261111130000_inventario_bloqueo_finalizacion` el trigger toma la toma con
+  `FOR NO KEY UPDATE` (antes `FOR SHARE`, que producía deadlock entre dos
+  finalizaciones simultáneas): las escrituras de líneas de una toma se
+  serializan entre sí y con su finalización, y la que llega tarde ve la toma
+  CONFIRMED y se rechaza. El rechazo usa SQLSTATE `42501`
+  (`insufficient_privilege`) con el mensaje «La toma de inventario … está
+  finalizada: no se permite INSERT/UPDATE/DELETE sobre sus líneas»; la API
+  (SPRINT-5-T06) lo traduce a 409.
+- `saved_at` lo asigna el mismo trigger (`now()`) en cada INSERT y UPDATE
+  permitido; `saved_by_id` lo informa el servicio.
+- Filas de la plantilla fijas (trigger `inventory_template_rows_fixed_rows`):
+  la posición y el tipo no se actualizan y las filas no se borran, porque el Product
+  Owner copia el Excel descargado y lo pega en otro cuadre. Solo cambian el
+  texto impreso, la sección y el producto asignado. La carga de las 182 filas
+  es el seed de SPRINT-5-T02.
+- Un producto con líneas de toma, movimientos o fila asignada no se borra (FK
+  Restrict).
+
 ## Cómo ver el modelo de forma visual
 
 > Los diagramas Mermaid y DBML de abajo incluyen el módulo de operación
 > diaria (SPRINT-4R-T01 y SPRINT-4R-T02) y la importación de ventas MrComanda
-> (SPRINT-4R-T08) y el calendario de operación (SPRINT-4R-T12); la fuente de verdad física siempre
+> (SPRINT-4R-T08), el calendario de operación (SPRINT-4R-T12) y el inventario
+> ampliado (SPRINT-5-T01); la fuente de verdad física siempre
 > es `prisma/schema.prisma` y las migraciones.
 
 Hay cuatro opciones; las dos primeras están listas en este archivo:
@@ -728,13 +799,16 @@ erDiagram
   USERS ||--o{ STORE_CLOSURES : "registra"
 
   STORES ||--o{ PRODUCTS : "almacena (vía movimientos)"
+  PRODUCTS |o--o| INVENTORY_TEMPLATE_ROWS : "ocupa una fila"
   PRODUCTS ||--o{ INVENTORY_MOVEMENTS : "mueve"
   STORES ||--o{ INVENTORY_MOVEMENTS : "en"
   USERS ||--o{ INVENTORY_MOVEMENTS : "registra"
   STORES ||--o{ INVENTORY_COUNTS : "cuenta"
   USERS ||--o{ INVENTORY_COUNTS : "levanta"
+  USERS |o--o{ INVENTORY_COUNTS : "finaliza"
   INVENTORY_COUNTS ||--o{ INVENTORY_COUNT_LINES : "detalla"
-  PRODUCTS ||--o{ INVENTORY_COUNT_LINES : "compara"
+  PRODUCTS ||--o{ INVENTORY_COUNT_LINES : "cuenta"
+  USERS ||--o{ INVENTORY_COUNT_LINES : "guarda"
 
   USERS ||--o{ DATA_RIGHTS_REQUESTS : "solicita (titular)"
   USERS |o--o{ DATA_RIGHTS_REQUESTS : "resuelve"
@@ -817,12 +891,15 @@ enum SalesImportStatus {
 }
 
 enum UnitOfMeasure {
-  UNIT
+  UNIT [note: 'Unidades: contenidos y cantidad suelta enteros']
   KG
-  G
   L
-  ML
-  PACK
+}
+
+enum InventoryTemplateRowKind {
+  ITEM [note: 'Artículo: nombre o <Vacío>; único tipo que lleva producto']
+  BLANK [note: 'Fila sin texto']
+  SECTION [note: 'Rótulo que cierra su grupo']
 }
 
 enum InventoryMovementType {
@@ -1497,14 +1574,35 @@ Table store_closures {
 
 Table products {
   id uuid [pk, default: `gen_random_uuid()`]
-  sku varchar(40) [not null, unique]
+  sku varchar(40) [unique, note: 'SKU del proveedor; opcional, único cuando existe']
   name varchar(120) [not null]
+  alternative_names "varchar(120)[]" [not null, default: '{}', note: 'Otros nombres, mismo SKU']
   category varchar(60)
   unit UnitOfMeasure [not null]
+  package_name varchar(30) [note: 'bolsa, paquete, botella o pack']
+  box_content decimal(12,3) [note: '> 0; independiente del paquete']
+  packages_per_box integer [note: '>= 1; solo informativo']
+  package_content decimal(12,3) [note: '> 0']
+  loose_only boolean [not null, default: false, note: 'Solo cantidad suelta']
   min_stock decimal(12,3) [not null, default: 0]
   is_active boolean [not null, default: true]
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null]
+
+  Note: 'SPRINT-5-T01: catálogo con formato de caja y paquete'
+}
+
+Table inventory_template_rows {
+  id uuid [pk, default: `gen_random_uuid()`]
+  position integer [not null, unique, note: 'Número de fila de la hoja (>= 2); fijo']
+  kind InventoryTemplateRowKind [not null]
+  printed_text varchar(120) [note: 'NULL solo en BLANK']
+  section varchar(120) [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+  product_id uuid [unique, ref: - products.id, note: 'Solo en ITEM']
+
+  Note: 'SPRINT-5-T01: filas fijas de la plantilla; no se borran ni cambian de posición'
 }
 
 Table inventory_movements {
@@ -1528,26 +1626,55 @@ Table inventory_movements {
 
 Table inventory_counts {
   id uuid [pk, default: `gen_random_uuid()`]
-  status InventoryCountStatus [not null, default: 'OPEN']
+  status InventoryCountStatus [not null, default: 'OPEN', note: 'OPEN = En curso; CONFIRMED = Finalizado']
+  count_date date [not null, note: 'Fecha de la toma']
   counted_at timestamptz [not null, default: `now()`]
   notes varchar(255)
+  finalized_at timestamptz
+  template_snapshot jsonb [note: 'Copia de la plantilla al finalizar']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null]
   store_id uuid [not null, ref: > stores.id]
   created_by_id uuid [not null, ref: > users.id]
+  finalized_by_id uuid [ref: > users.id]
+
+  indexes {
+    (store_id, count_date)
+    finalized_by_id
+    store_id [unique, note: 'Parcial WHERE status = OPEN: una toma en curso por local']
+  }
+
+  Note: 'SPRINT-5-T01: CONFIRMED es inmutable y no se borra'
 }
 
 Table inventory_count_lines {
   id uuid [pk, default: `gen_random_uuid()`]
-  system_quantity decimal(12,3) [not null, note: 'Stock según sistema al contar']
-  counted_quantity decimal(12,3) [not null]
-  difference decimal(12,3) [not null, note: 'Mermas detectadas']
+  boxes integer [note: '>= 0']
+  packages integer [note: '>= 0']
+  loose_quantity decimal(12,3) [note: '>= 0']
+  counted_quantity decimal(12,3) [note: 'Total = cajas × caja + paquetes × paquete + suelta']
+  system_quantity decimal(12,3) [note: 'Reservada: stock esperado']
+  difference decimal(12,3) [note: 'Reservada: comparación contra el stock']
+  product_sku varchar(40)
+  product_name varchar(120) [not null]
+  unit UnitOfMeasure [not null]
+  package_name varchar(30)
+  box_content decimal(12,3)
+  packages_per_box integer
+  package_content decimal(12,3)
+  loose_only boolean [not null, default: false]
+  saved_at timestamptz [not null, default: `now()`, note: 'Lo asigna el trigger en cada INSERT y UPDATE']
   count_id uuid [not null, ref: > inventory_counts.id]
   product_id uuid [not null, ref: > products.id]
+  saved_by_id uuid [not null, ref: > users.id]
 
   indexes {
     (count_id, product_id) [unique]
+    product_id
+    saved_by_id
   }
+
+  Note: 'SPRINT-5-T01: copia el producto y su formato; inmutable con la toma CONFIRMED'
 }
 
 Table data_rights_requests {
