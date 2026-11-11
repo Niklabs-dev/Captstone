@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import type { ReactElement } from 'react';
 import { DailyTipsWorkspace } from '@/components/tips/DailyTipsWorkspace';
+import { TipPaymentAlertsPanel } from '@/components/tips/TipPaymentAlertsPanel';
 import {
   alertClass,
   buttonClass,
@@ -28,6 +29,7 @@ import {
 } from '@/lib/daily-tips';
 import { getSession } from '@/lib/session';
 import { fetchStores } from '@/lib/stores-backend';
+import { fetchTipPaymentAlerts } from '@/lib/tip-payment-alerts-backend';
 import { tipBusinessDate } from '@/lib/tips';
 
 export const metadata: Metadata = { title: 'Propinas | MoiFood' };
@@ -35,7 +37,8 @@ export const metadata: Metadata = { title: 'Propinas | MoiFood' };
 // SPRINT-4A-T07: propinas diarias por local y período para ADMINISTRADOR y
 // CONTADOR, con Excel del período y pago por lote. Los repartos por período
 // antiguos quedan como histórico de solo lectura en /propinas/historico
-// (SPRINT-4A-T08).
+// (SPRINT-4A-T08). Arriba se avisan las propinas No pagadas fuera del plazo
+// legal de pago (SPRINT-4A-T22), con enlace a este mismo filtro.
 export default async function TipsPage({
   searchParams,
 }: {
@@ -54,11 +57,15 @@ export default async function TipsPage({
     redirect('/dashboard?reason=forbidden');
   const token = (await cookies()).get(ACCESS_COOKIE)?.value;
   if (!token) redirect('/session-expired');
-  const stores = await fetchStores(token);
+  const [stores, alerts] = await Promise.all([
+    fetchStores(token),
+    fetchTipPaymentAlerts(token),
+  ]);
   if (!stores.ok) {
     if (stores.status === 401) redirect('/session-expired');
     throw new Error(stores.message);
   }
+  if (!alerts.ok && alerts.status === 401) redirect('/session-expired');
   const today = tipBusinessDate();
   const parsed = parseTipsFilters(await searchParams, today, stores.data);
   const { filters } = parsed;
@@ -83,6 +90,7 @@ export default async function TipsPage({
         </Link>
         .
       </p>
+      <TipPaymentAlertsPanel result={alerts} />
       <section aria-labelledby="tips-filter-title" className={filterPanelClass}>
         <h2 id="tips-filter-title" className={panelTitleClass}>
           Filtrar propinas

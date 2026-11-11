@@ -2,155 +2,206 @@ import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
+import { parseCalendarDate } from '../src/audit/utils/business-day.util.js';
 import { ROLE, type RoleCode } from '../src/auth/constants/roles.constants.js';
-import type { JwtPayload } from '../src/auth/types/auth.types.js';
+import type { AuthUser, JwtPayload } from '../src/auth/types/auth.types.js';
 import {
+  addDays,
   businessDateOf,
   formatDbDate,
   toDbDate,
 } from '../src/documents/utils/document-dates.util.js';
-import { PrismaClient } from '../src/generated/prisma/client.js';
+import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
+import { PrismaService } from '../src/prisma/prisma.service.js';
+import {
+  DEFAULT_TIP_LEGAL_PAYMENT_DAYS,
+  tipPaymentDaysOverdue,
+  tipPaymentDeadline,
+} from '../src/tips/alerts/tip-payment-deadline.js';
 import type {
   TipPaymentAlert,
   TipPaymentAlertCollection,
 } from '../src/tips/types/tip-payment-alerts.types.js';
-import { purgeTestAuditLogs } from './helpers/audit-cleanup.js';
+import { createDailyOperation } from './helpers/daily-operations.js';
+import { createTestMethod, dbDate } from './helpers/sales-consolidation.js';
 import {
-  confirmLegacyTipPool,
-  payLegacyTipPool,
-} from './helpers/legacy-tip-pools.js';
-import {
-  ensureDefaultPaymentMethods,
-  ensurePaymentMethod,
-  paymentMethodIdOf,
-} from './helpers/payment-methods.js';
+  createSwitchablePrisma,
+  type SwitchablePrisma,
+} from './helpers/switchable-prisma.js';
 
 type App = Parameters<typeof request>[0];
+type Tx = Prisma.TransactionClient;
 
+// Tests de integración HTTP de la alerta legal de pago de propinas
+// (SPRINT-4A-T22) contra PostgreSQL real con datos ficticios: una propina
+// diaria No pagada alerta cuando su fecha superó TIP_LEGAL_PAYMENT_DAYS días
+// hábiles (por defecto 7) y no el día límite; se agrupa por local y
+// trabajador; al pagar el período (SPRINT-4A-T06) desaparece; los registros
+// históricos tip_entries ya no alertan; acceso por rol. Las fechas son
+// relativas a hoy en Chile (el borde se calcula con overdueThrough de la
+// respuesta). Todo corre dentro de withinRollback: la base se revierte.
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const DOMAIN = '@tip-payment-alerts-test.invalid';
-const STORE_NAME = 'Subway Tip Payment Alerts Test';
-const HOLIDAYS = '2026-10-12';
+const LEGAL_DAYS = DEFAULT_TIP_LEGAL_PAYMENT_DAYS;
 
-function day(value: string): Date {
-  return new Date(`${value}T00:00:00.000Z`);
+class Rollback extends Error {
+  constructor() {
+    super('rollback de prueba');
+    this.name = 'Rollback';
+  }
+}
+
+interface Fixture {
+  tx: Tx;
+  storeId: string;
+  storeName: string;
+  admin: AuthUser;
+  accountant: AuthUser;
+  supervisor: AuthUser;
+  ana: AuthUser;
+  beto: AuthUser;
+}
+
+function shift(date: string, days: number): string {
+  const parsed = parseCalendarDate(date);
+  if (!parsed) throw new Error(`Fecha de prueba inválida: ${date}`);
+  return formatDbDate(toDbDate(addDays(parsed, days)));
+}
+
+function calendar(date: string) {
+  const parsed = parseCalendarDate(date);
+  if (!parsed) throw new Error(`Fecha de prueba inválida: ${date}`);
+  return parsed;
 }
 
 describe.skipIf(!databaseUrl)(
-  'API de alertas de siete días hábiles (SPRINT-3-T14)',
+  'API de alertas de propinas diarias no pagadas (SPRINT-4A-T22)',
+  { timeout: 60_000 },
   () => {
     let app: INestApplication<App>;
-    let prisma: PrismaClient;
     let jwt: JwtService;
-    let storeId: string;
-    const ids: Record<string, string> = {};
-    const tokens: Record<string, string> = {};
-    const todayText = formatDbDate(toDbDate(businessDateOf(new Date())));
+    let prisma: PrismaClient;
+    let switchable: SwitchablePrisma;
 
-    async function cleanup(): Promise<void> {
-      await prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
-        await tx.tipPoolReceipt.deleteMany({
-          where: { pool: { store: { name: STORE_NAME } } },
-        });
-        await tx.tipPoolSource.deleteMany({
-          where: { pool: { store: { name: STORE_NAME } } },
-        });
-        await tx.tipPoolLine.deleteMany({
-          where: { pool: { store: { name: STORE_NAME } } },
-        });
-        await tx.tipPool.deleteMany({ where: { store: { name: STORE_NAME } } });
-        await tx.tipAgreement.deleteMany({
-          where: { store: { name: STORE_NAME } },
-        });
-        await tx.workHoursRecord.deleteMany({
-          where: { store: { name: STORE_NAME } },
-        });
-        await tx.tipEntry.deleteMany({
-          where: { store: { name: STORE_NAME } },
-        });
-        // Medios de pago creados solo por estos tests (prefijo propio).
-        await tx.paymentMethod.deleteMany({
-          where: { code: { startsWith: 'TIPSTEST_ALERTS_' } },
-        });
-      });
-      await purgeTestAuditLogs(prisma, {
-        OR: [
-          { user: { email: { endsWith: DOMAIN } } },
-          { store: { name: STORE_NAME } },
-        ],
-      });
-      await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
-      await prisma.store.deleteMany({ where: { name: STORE_NAME } });
-    }
-
-    async function createUser(
-      name: string,
-      roleCode: RoleCode,
-      userStoreId: string | null,
-    ): Promise<void> {
-      const role = await prisma.role.findUniqueOrThrow({
-        where: { code: roleCode },
-      });
-      const user = await prisma.user.create({
-        data: {
-          email: `${name}${DOMAIN}`,
-          passwordHash: '$2b$04$hash-de-prueba',
-          firstName: name,
-          lastName: 'Alerta',
-          roleId: role.id,
-          storeId: userStoreId,
-        },
-      });
-      ids[name] = user.id;
+    function authorize(req: request.Test, user: AuthUser | null): request.Test {
+      if (!user) return req;
       const payload: JwtPayload = {
         sub: user.id,
         email: user.email,
-        role: roleCode,
-        storeId: userStoreId,
+        role: user.role,
+        storeId: user.storeId,
       };
-      tokens[name] = await jwt.signAsync(payload);
+      return req.set('Authorization', `Bearer ${jwt.sign(payload)}`);
     }
 
-    function server() {
-      return request(app.getHttpServer());
-    }
-
-    function listAlerts(token: string | null = tokens.accountant) {
-      const req = server().get('/tip-payment-alerts');
-      if (token) req.set('Authorization', `Bearer ${token}`);
-      return req;
-    }
-
-    async function ownAlerts(token?: string): Promise<TipPaymentAlert[]> {
-      const response = await listAlerts(token).expect(200);
-      const body = response.body as TipPaymentAlertCollection;
-      expect(typeof body.calculatedAt).toBe('string');
-      return body.items.filter((alert) => alert.store.id === storeId);
-    }
-
-    async function seedEntry(
-      businessDate: string,
-      paymentMethodCode: string,
-      amount: number,
-    ): Promise<string> {
-      const paymentMethodId = await paymentMethodIdOf(
-        prisma,
-        paymentMethodCode,
+    function listAlerts(user: AuthUser | null): request.Test {
+      return authorize(
+        request(app.getHttpServer()).get('/tip-payment-alerts'),
+        user,
       );
-      const entry = await prisma.tipEntry.create({
-        data: {
-          businessDate: day(businessDate),
-          paymentMethodId,
-          amount,
-          storeId,
-          responsibleId: ids.supervisor,
-        },
-        select: { id: true },
+    }
+
+    async function alertsOf(
+      f: Fixture,
+      user: AuthUser = f.accountant,
+    ): Promise<{ body: TipPaymentAlertCollection; own: TipPaymentAlert[] }> {
+      const body = (await listAlerts(user).expect(200))
+        .body as TipPaymentAlertCollection;
+      return {
+        body,
+        own: body.items.filter((alert) => alert.store.id === f.storeId),
+      };
+    }
+
+    async function createUser(
+      tx: Tx,
+      role: RoleCode,
+      storeId: string | null,
+      firstName: string,
+    ): Promise<AuthUser> {
+      const roleRecord = await tx.role.upsert({
+        where: { code: role },
+        update: {},
+        create: { code: role, name: role },
       });
-      return entry.id;
+      const id = randomUUID();
+      const email = `${id}${DOMAIN}`;
+      await tx.user.create({
+        data: {
+          id,
+          email,
+          passwordHash: '$2b$04$hash-de-prueba',
+          firstName,
+          lastName: 'Ficticia',
+          roleId: roleRecord.id,
+          storeId,
+        },
+      });
+      return { id, email, role, storeId };
+    }
+
+    async function createFixture(tx: Tx): Promise<Fixture> {
+      const storeName = `Subway Alertas Propinas ${randomUUID()}`;
+      const store = await tx.store.create({
+        data: {
+          name: storeName,
+          city: 'Melipilla',
+          address: 'Calle ficticia 1',
+        },
+      });
+      return {
+        tx,
+        storeId: store.id,
+        storeName,
+        admin: await createUser(tx, ROLE.ADMINISTRADOR, null, 'Admin'),
+        accountant: await createUser(tx, ROLE.CONTADOR, null, 'Contador'),
+        supervisor: await createUser(tx, ROLE.SUPERVISOR, store.id, 'Sofía'),
+        ana: await createUser(tx, ROLE.TRABAJADOR, store.id, 'Ana'),
+        beto: await createUser(tx, ROLE.TRABAJADOR, store.id, 'Beto'),
+      };
+    }
+
+    // Operación diaria con propina en efectivo repartida en partes iguales
+    // entre los participantes: cada uno queda con una propina No pagada.
+    async function seedDay(
+      f: Fixture,
+      businessDate: string,
+      cashTipAmount: number,
+      participants: readonly AuthUser[],
+    ): Promise<void> {
+      await createDailyOperation(f.tx, {
+        storeId: f.storeId,
+        responsibleId: f.supervisor.id,
+        businessDate,
+        cashTipAmount,
+        participantIds: participants.map((user) => user.id),
+      });
+    }
+
+    async function withinRollback(
+      run: (fixture: Fixture) => Promise<void>,
+    ): Promise<void> {
+      try {
+        await prisma.$transaction(
+          async (tx) => {
+            switchable.use(tx);
+            const fixture = await createFixture(tx);
+            await run(fixture);
+            // Los lotes de pago se concilian al commit (constraint trigger
+            // diferido): se verifican como lo haría el commit.
+            await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
+            throw new Rollback();
+          },
+          { maxWait: 30_000, timeout: 50_000 },
+        );
+      } catch (error) {
+        if (!(error instanceof Rollback)) throw error;
+      } finally {
+        switchable.use(null);
+      }
     }
 
     beforeAll(async () => {
@@ -160,11 +211,17 @@ describe.skipIf(!databaseUrl)(
       process.env.JWT_REFRESH_EXPIRES_IN = '7d';
       process.env.DOCUMENTS_STORAGE_PATH = './storage/test-documents';
       process.env.DOCUMENTS_MAX_SIZE_MB = '1';
-      process.env.TIP_ALERT_HOLIDAYS = HOLIDAYS;
+      // Plazo por defecto y sin feriados: el borde depende solo de hoy.
+      delete process.env.TIP_LEGAL_PAYMENT_DAYS;
+      process.env.TIP_ALERT_HOLIDAYS = '';
 
+      switchable = createSwitchablePrisma();
       const moduleFixture: TestingModule = await Test.createTestingModule({
         imports: [AppModule],
-      }).compile();
+      })
+        .overrideProvider(PrismaService)
+        .useValue(switchable.service)
+        .compile();
       app = moduleFixture.createNestApplication();
       app.useGlobalPipes(
         new ValidationPipe({
@@ -175,219 +232,161 @@ describe.skipIf(!databaseUrl)(
       );
       await app.init();
       jwt = app.get(JwtService);
-
       prisma = new PrismaClient({
         adapter: new PrismaPg({ connectionString: databaseUrl }),
       });
-      await cleanup();
-
-      for (const code of Object.values(ROLE)) {
-        await prisma.role.upsert({
-          where: { code },
-          update: {},
-          create: { code, name: code },
-        });
-      }
-      await ensureDefaultPaymentMethods(prisma);
-
-      const store = await prisma.store.create({
-        data: { name: STORE_NAME, city: 'Melipilla', address: 'Calle 123' },
-      });
-      storeId = store.id;
-      await createUser('accountant', ROLE.CONTADOR, null);
-      await createUser('admin', ROLE.ADMINISTRADOR, null);
-      await createUser('supervisor', ROLE.SUPERVISOR, storeId);
-      await createUser('worker', ROLE.TRABAJADOR, storeId);
-      await prisma.tipAgreement.create({
-        data: {
-          name: 'Pacto Alertas Test',
-          rule: 'PROPORTIONAL_TO_HOURS',
-          validFrom: day('2026-01-01'),
-          storeId,
-          createdById: ids.supervisor,
-        },
-      });
-    }, 60_000);
+    });
 
     afterAll(async () => {
-      await cleanup();
       await prisma.$disconnect();
       await app.close();
     });
 
-    it('lista solo tarjeta pendiente, aplica feriados y ordena primero las vencidas', async () => {
-      const olderId = await seedEntry('2026-10-01', 'DEBIT_CARD', 3000);
-      const holidayId = await seedEntry('2026-10-02', 'DEBIT_CARD', 4000);
-      const upcomingId = await seedEntry(todayText, 'CREDIT_CARD', 5000);
-      await seedEntry('2026-10-01', 'CASH', 6000);
-      await seedEntry('2026-10-01', 'TRANSFER', 7000);
-
-      const alerts = await ownAlerts();
-      expect(alerts.map((alert) => alert.tipEntryId)).toEqual([
-        olderId,
-        holidayId,
-        upcomingId,
-      ]);
-      expect(alerts[0]).toMatchObject({
-        businessDate: '2026-10-01',
-        paymentMethod: 'DEBIT_CARD',
-        paymentMethodName: 'Tarjeta de débito',
-        amount: 3000,
-        pool: null,
-        deadline: '2026-10-13',
-        status: 'OVERDUE',
-      });
-      expect(alerts[0].daysRemaining).toBeLessThan(0);
-      expect(alerts[1]).toMatchObject({
-        businessDate: '2026-10-02',
-        amount: 4000,
-        pool: null,
-        deadline: '2026-10-14',
-        status: 'OVERDUE',
-      });
-      expect(alerts[2]).toMatchObject({
-        businessDate: todayText,
-        paymentMethod: 'CREDIT_CARD',
-        amount: 5000,
-        pool: null,
-        status: 'UPCOMING',
-      });
-      expect(alerts[2].daysRemaining).toBeGreaterThanOrEqual(0);
-      expect(alerts.map((alert) => alert.amount)).not.toContain(6000);
-      expect(alerts.map((alert) => alert.amount)).not.toContain(7000);
-    });
-
-    it('sigue alertando con medios conciliables desactivados y omite externos', async () => {
-      // Tarjeta histórica desactivada: la deuda con el trabajador sigue
-      // vigente y la alerta conserva código y nombre del catálogo.
-      const legacyCard = await ensurePaymentMethod(prisma, {
-        code: 'TIPSTEST_ALERTS_CARD_HIST',
-        name: 'Tarjeta histórica',
-        behavior: 'RECONCILABLE_CARD',
-        isActive: false,
-        availableForTips: true,
-      });
-      const legacyId = await seedEntry(
-        '2026-10-03',
-        'TIPSTEST_ALERTS_CARD_HIST',
-        2500,
-      );
-
-      // Externo activo (no conciliable): nunca genera alerta de plazo.
-      await ensurePaymentMethod(prisma, {
-        code: 'TIPSTEST_ALERTS_JUNAEB',
-        name: 'Junaeb test',
-        behavior: 'EXTERNAL_OTHER',
-        isActive: true,
-        availableForTips: false,
-      });
-      await seedEntry('2026-10-03', 'TIPSTEST_ALERTS_JUNAEB', 3500);
-
-      const alerts = await ownAlerts();
-      const legacy = alerts.find((alert) => alert.tipEntryId === legacyId);
-      expect(legacy).toMatchObject({
-        paymentMethod: legacyCard.code,
-        paymentMethodName: 'Tarjeta histórica',
-        amount: 2500,
-        status: 'OVERDUE',
-      });
-      expect(alerts.map((alert) => alert.amount)).not.toContain(3500);
-
-      await prisma.tipEntry.deleteMany({
-        where: { id: { in: [legacyId] } },
+    it('informa el plazo vigente y la última fecha vencida de hoy', async () => {
+      await withinRollback(async (f) => {
+        const { body } = await alertsOf(f);
+        const today = formatDbDate(toDbDate(businessDateOf(new Date())));
+        expect(body.legalPaymentDays).toBe(LEGAL_DAYS);
+        expect(body.asOf).toBe(today);
+        expect(typeof body.calculatedAt).toBe('string');
+        // overdueThrough es la última fecha cuyo límite ya pasó; la
+        // siguiente todavía está en plazo hoy (o vence hoy).
+        const lastOverdue = tipPaymentDeadline(
+          calendar(body.overdueThrough),
+          LEGAL_DAYS,
+          new Set(),
+        );
+        expect(formatDbDate(toDbDate(lastOverdue)) < today).toBe(true);
+        const firstInTime = tipPaymentDeadline(
+          calendar(shift(body.overdueThrough, 1)),
+          LEGAL_DAYS,
+          new Set(),
+        );
+        expect(formatDbDate(toDbDate(firstInTime)) >= today).toBe(true);
       });
     });
 
-    it('mantiene DRAFT y CONFIRMED, y un reparto histórico pagado ya no alerta', async () => {
-      const entryId = await seedEntry(todayText, 'DEBIT_CARD', 9000);
-      const hours = await prisma.workHoursRecord.create({
-        data: {
-          periodStart: day(todayText),
-          periodEnd: day(todayText),
-          hoursWorked: 10,
-          storeId,
-          workerId: ids.worker,
-          recordedById: ids.supervisor,
-        },
-        select: { id: true },
-      });
-      // Las alertas siguen sobre los registros diarios históricos
-      // (tip_entries). El reparto proporcional que los usa como fuente se
-      // construye directamente en la base, como lo hacía el motor anterior,
-      // y se confirma y paga con el helper de repartos históricos: desde
-      // SPRINT-4A-T08 la API ya no confirma ni paga repartos.
-      const agreement = await prisma.tipAgreement.findFirstOrThrow({
-        where: { storeId },
-        select: { id: true, name: true },
-      });
-      const created = await prisma.tipPool.create({
-        data: {
-          storeId,
-          periodStart: day(todayText),
-          periodEnd: day(todayText),
-          totalAmount: 9000,
-          agreementId: agreement.id,
-          agreementSnapshot: {
-            id: agreement.id,
-            name: agreement.name,
-            rule: 'PROPORTIONAL_TO_HOURS',
-            validFrom: '2026-01-01',
-            validTo: null,
+    it('alerta lo No pagado con más días que el plazo, no el día límite, y agrupa por trabajador', async () => {
+      await withinRollback(async (f) => {
+        const { body: before } = await alertsOf(f);
+        const cutoff = before.overdueThrough;
+        const older = shift(cutoff, -10);
+        // Vencidas: dos días de Ana (uno compartido con Beto).
+        await seedDay(f, older, 10_000, [f.ana, f.beto]);
+        await seedDay(f, cutoff, 3_000, [f.ana]);
+        // En plazo (el día siguiente al borde): no alerta.
+        await seedDay(f, shift(cutoff, 1), 8_000, [f.ana, f.beto]);
+
+        const { body, own } = await alertsOf(f);
+        const today = calendar(body.asOf);
+        const deadline = tipPaymentDeadline(
+          calendar(older),
+          LEGAL_DAYS,
+          new Set(),
+        );
+        expect(own).toEqual([
+          {
+            store: { id: f.storeId, name: f.storeName },
+            worker: { id: f.ana.id, name: 'Ana Ficticia' },
+            allocationCount: 2,
+            amount: 8_000,
+            oldestBusinessDate: older,
+            newestBusinessDate: cutoff,
+            deadline: formatDbDate(toDbDate(deadline)),
+            daysOverdue: tipPaymentDaysOverdue(deadline, today),
           },
-          calculatedById: ids.accountant,
-          sources: { create: { tipEntryId: entryId, amount: 9000 } },
-          lines: {
-            create: {
-              userId: ids.worker,
-              workHoursRecordId: hours.id,
-              hoursWorked: 10,
-              amount: 9000,
-            },
+          {
+            store: { id: f.storeId, name: f.storeName },
+            worker: { id: f.beto.id, name: 'Beto Ficticia' },
+            allocationCount: 1,
+            amount: 5_000,
+            oldestBusinessDate: older,
+            newestBusinessDate: older,
+            deadline: formatDbDate(toDbDate(deadline)),
+            daysOverdue: tipPaymentDaysOverdue(deadline, today),
           },
-        },
-        select: { id: true },
+        ]);
+        expect(own[0].daysOverdue).toBeGreaterThanOrEqual(1);
+        // Los totales incluyen estas alertas (otras suites pueden tener las
+        // suyas en la misma base).
+        expect(body.totals.alertCount).toBe(body.items.length);
+        expect(body.totals.amount).toBe(
+          body.items.reduce((sum, alert) => sum + alert.amount, 0),
+        );
+        expect(body.totals.amount - before.totals.amount).toBe(13_000);
+        expect(body.totals.maxDaysOverdue).toBeGreaterThanOrEqual(
+          own[0].daysOverdue,
+        );
       });
+    });
 
-      const draftAlert = (await ownAlerts()).find(
-        (alert) => alert.tipEntryId === entryId,
-      );
-      expect(draftAlert).toMatchObject({
-        status: 'UPCOMING',
-        pool: { id: created.id, status: 'DRAFT' },
-      });
+    it('al pagar el período con el lote de T06 la alerta desaparece', async () => {
+      await withinRollback(async (f) => {
+        const { body: before } = await alertsOf(f);
+        const cutoff = before.overdueThrough;
+        await seedDay(f, shift(cutoff, -3), 6_000, [f.ana, f.beto]);
+        expect((await alertsOf(f)).own).toHaveLength(2);
 
-      await confirmLegacyTipPool(prisma, created.id, ids.accountant);
-      const confirmedAlert = (await ownAlerts()).find(
-        (alert) => alert.tipEntryId === entryId,
-      );
-      expect(confirmedAlert).toMatchObject({
-        status: 'UPCOMING',
-        pool: { id: created.id, status: 'CONFIRMED' },
-      });
+        // Pagar solo un período que no incluye la propina no la resuelve.
+        await authorize(
+          request(app.getHttpServer())
+            .post('/daily-tips/payment-batches')
+            .send({
+              storeId: f.storeId,
+              from: shift(cutoff, -2),
+              to: shift(cutoff, -2),
+            }),
+          f.accountant,
+        ).expect(409);
+        expect((await alertsOf(f)).own).toHaveLength(2);
 
-      await payLegacyTipPool(prisma, created.id, ids.accountant, todayText);
-      expect(
-        (await ownAlerts()).some((alert) => alert.tipEntryId === entryId),
-      ).toBe(false);
-      const paidPool = await prisma.tipPool.findUniqueOrThrow({
-        where: { id: created.id },
-        select: { status: true, paymentDate: true },
+        await authorize(
+          request(app.getHttpServer())
+            .post('/daily-tips/payment-batches')
+            .send({
+              storeId: f.storeId,
+              from: shift(cutoff, -3),
+              to: cutoff,
+            }),
+          f.accountant,
+        ).expect(201);
+        expect((await alertsOf(f)).own).toEqual([]);
+        expect((await alertsOf(f, f.admin)).own).toEqual([]);
       });
-      expect(paidPool.status).toBe('PAID');
-      expect(formatDbDate(paidPool.paymentDate ?? new Date(0))).toBe(todayText);
-      expect(
-        (await ownAlerts()).some((alert) => alert.pool?.id === created.id),
-      ).toBe(false);
+    });
+
+    it('los registros históricos tip_entries ya no generan alertas', async () => {
+      await withinRollback(async (f) => {
+        const { body: before } = await alertsOf(f);
+        const card = await createTestMethod(f.tx, 'Tarjeta alertas', 1);
+        // Registro con tarjeta antiguo y sin reparto: antes alertaba.
+        await f.tx.tipEntry.create({
+          data: {
+            businessDate: dbDate(shift(before.overdueThrough, -20)),
+            paymentMethodId: card.id,
+            amount: 4_000,
+            storeId: f.storeId,
+            responsibleId: f.supervisor.id,
+          },
+        });
+        const { body, own } = await alertsOf(f);
+        expect(own).toEqual([]);
+        expect(body.totals.amount).toBe(before.totals.amount);
+        // El dato histórico sigue guardado.
+        expect(
+          await f.tx.tipEntry.count({ where: { storeId: f.storeId } }),
+        ).toBe(1);
+      });
     });
 
     it('permite contador y administrador, y rechaza otros roles o ausencia de JWT', async () => {
-      expect((await listAlerts(tokens.admin).expect(200)).body).toHaveProperty(
-        'items',
-      );
-      for (const token of [tokens.supervisor, tokens.worker]) {
-        await listAlerts(token).expect(403);
-      }
-      await listAlerts(null).expect(401);
+      await withinRollback(async (f) => {
+        await listAlerts(f.admin).expect(200);
+        await listAlerts(f.accountant).expect(200);
+        await listAlerts(f.supervisor).expect(403);
+        await listAlerts(f.ana).expect(403);
+        await listAlerts(null).expect(401);
+      });
     });
   },
 );

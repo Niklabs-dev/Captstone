@@ -217,6 +217,9 @@ export function DailyTipsWorkspace({
     setPreview(null);
     setNotice(batch ? paymentSuccessMessage(batch) : '');
     setActionError(batch ? '' : message);
+    // La alerta de propinas vencidas (SPRINT-4A-T22) es del servidor: se
+    // vuelve a consultar para que lo pagado deje de aparecer.
+    router.refresh();
     await refresh();
   }
 

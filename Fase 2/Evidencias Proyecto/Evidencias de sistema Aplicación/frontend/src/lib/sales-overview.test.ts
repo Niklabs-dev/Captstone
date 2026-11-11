@@ -102,11 +102,29 @@ const LINE = {
   reason: 'Vuelto',
 };
 const ALERTS = { overdue: 1, upcoming: 2 };
+// Propinas diarias No pagadas fuera del plazo legal (SPRINT-4A-T22).
+const TIP_ALERTS = {
+  alertCount: 2,
+  allocationCount: 3,
+  amount: 12000,
+  oldestBusinessDate: '2026-10-20',
+  newestBusinessDate: '2026-10-28',
+  maxDaysOverdue: 9,
+};
+const NO_TIP_ALERTS = {
+  alertCount: 0,
+  allocationCount: 0,
+  amount: 0,
+  oldestBusinessDate: null,
+  newestBusinessDate: null,
+  maxDaysOverdue: 0,
+};
 function dashboard(overrides: Record<string, unknown> = {}): unknown {
   return {
     businessDate: '2026-11-07',
     today: '2026-11-08',
     alertsAsOf: '2026-11-08',
+    tipLegalPaymentDays: 7,
     timeZone: 'America/Santiago',
     calculatedAt: '2026-11-08T12:00:00.000Z',
     paymentMethods: METHODS,
@@ -116,14 +134,14 @@ function dashboard(overrides: Record<string, unknown> = {}): unknown {
         importStatus: STATUS,
         sales: SALES,
         dailyOperation: OPERATION,
-        alerts: { dtRegistration: ALERTS, tipPayment: ALERTS },
+        alerts: { dtRegistration: ALERTS, tipPayment: TIP_ALERTS },
       },
       {
         store: OTHER,
         importStatus: CLOSED,
         sales: null,
         dailyOperation: null,
-        alerts: { dtRegistration: ALERTS, tipPayment: ALERTS },
+        alerts: { dtRegistration: ALERTS, tipPayment: NO_TIP_ALERTS },
       },
     ],
     cashDifferences: [LINE],
@@ -139,7 +157,7 @@ function dashboard(overrides: Record<string, unknown> = {}): unknown {
       cashDifferences: DIFFERENCES,
       importStatus: SUMMARY,
       dtRegistrationAlerts: ALERTS,
-      tipPaymentAlerts: ALERTS,
+      tipPaymentAlerts: TIP_ALERTS,
     },
     ...overrides,
   };
@@ -207,6 +225,11 @@ test('El panel conserva null como ausencia de datos y las alertas vigentes', () 
     parsed.paymentMethods.map((method) => method.paymentMethod),
     ['CASH', 'OLD'],
   );
+  // Alertas de propinas con monto, días y atraso, y el plazo vigente.
+  assert.equal(parsed.tipLegalPaymentDays, 7);
+  assert.deepEqual(parsed.stores[0].alerts.tipPayment, TIP_ALERTS);
+  assert.deepEqual(parsed.stores[1].alerts.tipPayment, NO_TIP_ALERTS);
+  assert.deepEqual(parsed.totals.tipPaymentAlerts, TIP_ALERTS);
 });
 
 test('El panel rechaza contratos antiguos o inconsistentes', () => {
@@ -226,6 +249,15 @@ test('El panel rechaza contratos antiguos o inconsistentes', () => {
   netted.totals.cashDifferences = { ...DIFFERENCES, shortageAmount: 2500 };
   assert.equal(parseSalesDashboard(netted), null);
   assert.equal(parseSalesDashboard(null), null);
+  // Contrato previo a SPRINT-4A-T22: alertas de propinas como cuentas y sin
+  // plazo legal.
+  assert.equal(
+    parseSalesDashboard(dashboard({ tipLegalPaymentDays: undefined })),
+    null,
+  );
+  const legacyTips = dashboard() as { totals: Record<string, unknown> };
+  legacyTips.totals.tipPaymentAlerts = ALERTS;
+  assert.equal(parseSalesDashboard(legacyTips), null);
 });
 
 test('El reporte valida días, medios dinámicos y estados', () => {

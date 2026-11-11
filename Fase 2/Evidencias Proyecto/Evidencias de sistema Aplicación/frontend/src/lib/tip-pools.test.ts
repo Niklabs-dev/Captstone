@@ -4,7 +4,6 @@ import {
   groupPoolHistory,
   parsePool,
   parsePools,
-  parseAlerts,
   parseReceipts,
   poolError,
   poolReceiptHref,
@@ -70,32 +69,6 @@ test('La proyección no expone datos adicionales de responsables ni local', () =
   assert.deepEqual(parsed.store, { id, name: 'Prueba' });
   assert.deepEqual(parsed.calculatedBy, { id, name: 'Prueba' });
   assert.ok(!JSON.stringify(parsed).includes('private'));
-});
-test('Alertas conservan plazos del backend y proyectan datos conocidos', () => {
-  const value = {
-    calculatedAt: pool.calculatedAt,
-    items: [
-      {
-        id,
-        store: person,
-        businessDate: '2026-01-01',
-        amount: 5,
-        deadline: '2026-01-12',
-        daysRemaining: -2,
-        status: 'OVERDUE',
-        pool: null,
-      },
-    ],
-  };
-  assert.equal(parseAlerts(value)?.items[0].daysRemaining, -2);
-  assert.ok(!JSON.stringify(parseAlerts(value)).includes('private'));
-  assert.equal(
-    parseAlerts({
-      ...value,
-      items: [{ ...value.items[0], deadline: 'inválida' }],
-    }),
-    null,
-  );
 });
 test('Constancias verifican identidad de reparto y eliminan extras', () => {
   const receipt = {

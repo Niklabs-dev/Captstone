@@ -698,31 +698,47 @@ Las mutaciones generan `TIP_ENTRY_CREATED`, `TIP_ENTRY_UPDATED` y
 `TIP_ENTRY_DELETED` en auditoría. El detalle se limita a local, responsable,
 fecha, medio y monto, sin correo, nombre, RUT ni contraseña.
 
-## Alerta legal de entrega de propinas
+## Alerta legal de pago de propinas (SPRINT-4A-T22)
 
-Su fuente de captura era el registro diario por medio (hoy histórico desde
-SPRINT-4R-T01); la fuente operativa del monto con tarjeta es la
-[Operación diaria](#operación-diaria-sprint-4r-t01).
+Avisa las propinas diarias por trabajador (`daily_tip_allocations`,
+SPRINT-4A-T03) que siguen **No pagadas** después de los días legales de pago.
 
 | Endpoint | Roles | Descripción |
 | --- | --- | --- |
-| `GET /tip-payment-alerts` | `CONTADOR`, `ADMINISTRADOR` | `{ items, calculatedAt }`: propinas con débito o crédito pendientes de entrega, con registro, local, reparto asociado (o `null`), `deadline`, `daysRemaining` y `status` `UPCOMING`/`OVERDUE`. Primero las vencidas y luego las de fecha límite más próxima. |
+| `GET /tip-payment-alerts` | `CONTADOR`, `ADMINISTRADOR` | `{ legalPaymentDays, asOf, overdueThrough, items, totals, calculatedAt }`. Cada elemento de `items` agrupa por local y trabajador las propinas vencidas: `store`, `worker`, `allocationCount` (días), `amount`, `oldestBusinessDate`, `newestBusinessDate`, `deadline` (límite de la más antigua) y `daysOverdue` (días corridos de atraso). Primero las de mayor atraso. `totals` resume cantidad de alertas, días, monto, fechas y mayor atraso. |
 
-Cada registro con tarjeta inicia su propio plazo en `businessDate`: la fecha
-límite es el séptimo día hábil posterior, excluyendo el día de recepción,
-sábados, domingos y feriados. La alerta incluye registros aún sin reparto y
-repartos `DRAFT` o `CONFIRMED`; desaparece cuando el reparto vinculado pasa a
-`PAID` y queda registrado el pago. No se almacena como una fila independiente.
-Desde SPRINT-4A-T08 ningún reparto por período cambia de estado, así que la
-alerta solo informa los registros históricos que quedaron sin pagar; la
-interfaz la muestra junto a los repartos anteriores (`/propinas/historico`).
+**Plazo.** `TIP_LEGAL_PAYMENT_DAYS` días hábiles (lunes a viernes, sin los
+feriados de `TIP_ALERT_HOLIDAYS`) contados desde el día siguiente a la fecha
+de negocio de la propina, en hora de Chile (`America/Santiago`). Por defecto
+son **7**: el «séptimo día hábil» de la alerta legal original (SPRINT-3-T14),
+que el PO mantiene; como por convenio se puede pactar pagar en más días, la
+variable lo amplía sin cambiar código. Debe ser un entero entre 1 y 260; vacía
+o ausente usa 7 y un valor inválido impide iniciar el backend. Está en
+`.env.example` y `docker-compose.yml` la propaga al contenedor
+(`${TIP_LEGAL_PAYMENT_DAYS:-7}`).
 
-`daysRemaining` se calcula con la fecha de Chile (`America/Santiago`): es 0 en
-el día límite y negativo al vencer, descontando solo días hábiles. Si el plazo
-vence el viernes, el fin de semana siguiente ya figura `OVERDUE` con 0 días
-hábiles transcurridos. `calculatedAt` indica el instante de la consulta.
+**Borde.** La alerta exige *más* días que el plazo: el día límite (`deadline`)
+todavía está en plazo y la propina alerta desde el día siguiente
+(`daysOverdue` 1). Con el plazo por defecto, una propina del viernes 2 de
+octubre de 2026 vence el martes 13 y alerta desde el miércoles 14; si el plazo
+vence un viernes, alerta desde el sábado. `overdueThrough` es la última fecha
+de negocio vencida hoy: la consulta filtra `status = UNPAID` y
+`business_date <= overdueThrough`.
 
-El calendario se configura con `TIP_ALERT_HOLIDAYS`, una lista separada por
+**Resolución.** Al pagar el período con `POST /daily-tips/payment-batches`
+(SPRINT-4A-T06) las propinas pasan a `PAID` y la alerta desaparece. No se
+almacena como fila: se calcula en cada consulta. El panel de ventas
+(`GET /sales-dashboard`) muestra el mismo cálculo por local
+(`alerts.tipPayment`) y en total (`totals.tipPaymentAlerts`), con
+`tipLegalPaymentDays`.
+
+**Alertas anteriores.** Hasta SPRINT-4A-T22 la alerta se calculaba sobre los
+registros diarios por medio `tip_entries` con tarjeta y solo se resolvía al
+pagar un reparto por período, flujo retirado en SPRINT-4A-T08: ya no podían
+resolverse. Esos registros dejaron de generar alertas; sus datos y tablas se
+conservan como histórico de solo lectura.
+
+El calendario de feriados se configura con `TIP_ALERT_HOLIDAYS`, una lista separada por
 comas de feriados chilenos `YYYY-MM-DD` (sin comillas), por ejemplo:
 
 ```dotenv

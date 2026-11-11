@@ -15,6 +15,9 @@ import { TipPaymentAlertCollectionDto } from './dto/tip-payment-alert-response.d
 import { TipPaymentAlertsService } from './tip-payment-alerts.service.js';
 import type { TipPaymentAlertCollection } from './types/tip-payment-alerts.types.js';
 
+// Alerta legal de pago de propinas (SPRINT-3-T14; desde SPRINT-4A-T22 sobre
+// las propinas diarias y con plazo TIP_LEGAL_PAYMENT_DAYS). Solo CONTADOR y
+// ADMINISTRADOR, como antes: el SUPERVISOR no paga propinas.
 @ApiTags('tip-payment-alerts')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
@@ -27,13 +30,13 @@ export class TipPaymentAlertsController {
 
   @Get()
   @ApiOperation({
-    summary: 'Lista las propinas con tarjeta pendientes de entrega',
+    summary: 'Lista las propinas diarias no pagadas fuera del plazo legal',
     description:
-      'Calcula el séptimo día hábil desde cada registro cuyo medio de pago tiene comportamiento RECONCILABLE_CARD en el catálogo, excluyendo sábados, domingos y los feriados de TIP_ALERT_HOLIDAYS. Incluye registros sin reparto y repartos DRAFT o CONFIRMED; los PAID desaparecen. Los medios desactivados con registros pendientes siguen alertando. Primero las vencidas y luego las más próximas.',
+      'Agrupa por local y trabajador las propinas diarias (daily_tip_allocations) en estado UNPAID cuya fecha de negocio superó el plazo legal de pago: TIP_LEGAL_PAYMENT_DAYS días hábiles (7 por defecto; lunes a viernes sin los feriados de TIP_ALERT_HOLIDAYS), contados desde el día siguiente a la fecha de la propina en hora de Chile. El día límite todavía está en plazo: la alerta aparece desde el día siguiente. Al pagar el período con POST /daily-tips/payment-batches las propinas pasan a PAID y la alerta desaparece. Los registros históricos tip_entries del reparto por período ya no generan alertas.',
   })
   @ApiOkResponse({
     description:
-      'Alertas con fecha límite, días hábiles restantes y estado, calculadas en hora de Chile.',
+      'Alertas con cantidad de días, monto, fecha más antigua y días de atraso, más el plazo vigente y los totales.',
     type: TipPaymentAlertCollectionDto,
   })
   @ApiForbiddenResponse({

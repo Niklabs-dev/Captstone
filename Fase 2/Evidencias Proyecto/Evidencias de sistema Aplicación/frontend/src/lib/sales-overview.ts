@@ -1,4 +1,8 @@
 import { isRecord } from './auth';
+import {
+  parseTipPaymentAlertSummary,
+  type TipPaymentAlertSummary,
+} from './tip-payment-alerts';
 import { formatClp, isTipDate } from './tips';
 import { isUuid } from './users';
 
@@ -102,12 +106,14 @@ export interface StoreDashboard {
   importStatus: ImportStatusInfo;
   sales: ImportedSales | null;
   dailyOperation: DailyOperationFigures | null;
-  alerts: { dtRegistration: AlertCounts; tipPayment: AlertCounts };
+  // Propinas diarias No pagadas fuera del plazo legal (SPRINT-4A-T22).
+  alerts: { dtRegistration: AlertCounts; tipPayment: TipPaymentAlertSummary };
 }
 export interface SalesDashboard {
   businessDate: string;
   today: string;
   alertsAsOf: string;
+  tipLegalPaymentDays: number;
   paymentMethods: PaymentMethodColumn[];
   stores: StoreDashboard[];
   cashDifferences: CashDifferenceLine[];
@@ -119,7 +125,7 @@ export interface SalesDashboard {
     cashDifferences: CashDifferenceTotals;
     importStatus: ImportStatusSummary;
     dtRegistrationAlerts: AlertCounts;
-    tipPaymentAlerts: AlertCounts;
+    tipPaymentAlerts: TipPaymentAlertSummary;
   };
 }
 export interface ReportDay {
@@ -428,7 +434,7 @@ function parseStoreDashboard(value: unknown): StoreDashboard | null {
   const sales = nullable(value.sales, parseImportedSales);
   const dailyOperation = nullable(value.dailyOperation, parseFigures);
   const dtRegistration = parseAlerts(value.alerts.dtRegistration);
-  const tipPayment = parseAlerts(value.alerts.tipPayment);
+  const tipPayment = parseTipPaymentAlertSummary(value.alerts.tipPayment);
   if (
     !store ||
     !importStatus ||
@@ -453,6 +459,8 @@ export function parseSalesDashboard(value: unknown): SalesDashboard | null {
     !isTipDate(value.businessDate) ||
     !isTipDate(value.today) ||
     !isTipDate(value.alertsAsOf) ||
+    !count(value.tipLegalPaymentDays) ||
+    value.tipLegalPaymentDays === 0 ||
     !isRecord(value.totals)
   )
     return null;
@@ -465,7 +473,7 @@ export function parseSalesDashboard(value: unknown): SalesDashboard | null {
   const differences = parseDifferenceTotals(totals.cashDifferences);
   const importStatus = parseStatusSummary(totals.importStatus);
   const dtRegistrationAlerts = parseAlerts(totals.dtRegistrationAlerts);
-  const tipPaymentAlerts = parseAlerts(totals.tipPaymentAlerts);
+  const tipPaymentAlerts = parseTipPaymentAlertSummary(totals.tipPaymentAlerts);
   if (
     !paymentMethods ||
     !stores ||
@@ -484,6 +492,7 @@ export function parseSalesDashboard(value: unknown): SalesDashboard | null {
     businessDate: value.businessDate,
     today: value.today,
     alertsAsOf: value.alertsAsOf,
+    tipLegalPaymentDays: value.tipLegalPaymentDays,
     paymentMethods,
     stores,
     cashDifferences,
