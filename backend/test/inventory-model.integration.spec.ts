@@ -640,6 +640,44 @@ describe.skipIf(!databaseUrl)(
         });
       });
 
+      it('la base asigna saved_at en cada INSERT y UPDATE (trigger)', async () => {
+        await withinRollback(async (tx) => {
+          const base = await createBase(tx);
+          const fajita = await createProduct(tx, FAJITA);
+          const count = await openCount(tx, base);
+          // now() es la hora de inicio de la transacción: es la que debe
+          // quedar, aunque la aplicación envíe otra.
+          const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`
+            SELECT now() AS now`;
+          const stale = new Date('2020-01-01T00:00:00.000Z');
+          const product = await tx.product.findUniqueOrThrow({
+            where: { id: fajita.id },
+          });
+          const line = await tx.inventoryCountLine.create({
+            data: {
+              countId: count.id,
+              productId: product.id,
+              productName: product.name,
+              unit: product.unit,
+              savedAt: stale,
+              savedById: base.supervisorId,
+            },
+          });
+          expect(line.savedAt).toEqual(now);
+
+          const updated = await tx.inventoryCountLine.update({
+            where: { id: line.id },
+            data: {
+              boxes: 1,
+              countedQuantity: '5',
+              boxContent: product.boxContent,
+              savedAt: stale,
+            },
+          });
+          expect(updated.savedAt).toEqual(now);
+        });
+      });
+
       it('conserva la copia del formato aunque después cambie el producto', async () => {
         await withinRollback(async (tx) => {
           const base = await createBase(tx);
