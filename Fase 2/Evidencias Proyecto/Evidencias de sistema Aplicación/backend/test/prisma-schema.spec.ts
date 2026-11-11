@@ -777,4 +777,34 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(down).toContain('DROP INDEX "inventory_counts_store_id_open_key"');
     expect(down).toContain('DELETE FROM "_prisma_migrations"');
   });
+
+  it('bloquea la toma sin deadlock y asigna saved_at (SPRINT-5-T01, revisión)', () => {
+    const sql = readMigration('inventario_bloqueo_finalizacion');
+    // Solo reemplaza la función del trigger de líneas: FOR NO KEY UPDATE en
+    // vez de FOR SHARE y saved_at asignado por la base.
+    expect(sql).toContain(
+      'CREATE OR REPLACE FUNCTION "inventory_count_lines_require_open"()',
+    );
+    expect(sql).toMatch(/WHERE c\."id" = "target"\s+FOR NO KEY UPDATE;/);
+    expect(sql).not.toMatch(/^\s+FOR SHARE;/m);
+    expect(sql).toContain('NEW."saved_at" := now();');
+    expect(sql).toContain("USING ERRCODE = 'insufficient_privilege'");
+    expect(sql).not.toContain('CREATE TRIGGER');
+    expect(sql).not.toContain('ALTER TABLE');
+
+    // La reversa restaura la versión de 20261111120000.
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('inventario_bloqueo_finalizacion'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toMatch(/WHERE c\."id" = "target"\s+FOR SHARE;/);
+    expect(down).not.toContain('NEW."saved_at" := now();');
+    expect(down).toContain('BEGIN;');
+    expect(down).toContain(
+      'WHERE "migration_name" = \'20261111130000_inventario_bloqueo_finalizacion\'',
+    );
+  });
 });
