@@ -303,14 +303,18 @@ export function SalesByMethodTable({
 
 // Cada diferencia de efectivo distinta de cero, con signo y motivo, sin
 // compensar sobrantes con faltantes.
+// operationHref elige el detalle según la vista: el panel (administrador) o
+// los reportes (administrador y contador, SPRINT-4A-T23).
 export function CashDifferencesTable({
   lines,
   caption,
   emptyText,
+  operationHref = operationDetailHref,
 }: {
   lines: readonly CashDifferenceLine[];
   caption: string;
   emptyText: string;
+  operationHref?: (operationId: string) => string;
 }): ReactElement {
   if (lines.length === 0) return <EmptyState>{emptyText}</EmptyState>;
   return (
@@ -362,7 +366,7 @@ export function CashDifferencesTable({
             </td>
             <td className={`${tableCellClass} whitespace-nowrap`}>
               <Link
-                href={operationDetailHref(line.operationId)}
+                href={operationHref(line.operationId)}
                 prefetch={false}
                 className={buttonClass}
                 aria-label={`Ver operación diaria de ${line.store.name} del ${formatCalendarDate(line.businessDate)}`}

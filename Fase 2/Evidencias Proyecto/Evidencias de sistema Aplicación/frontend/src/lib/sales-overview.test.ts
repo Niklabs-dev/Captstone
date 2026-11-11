@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import {
   addDays,
   calendarError,
+  canOpenSalesImports,
+  canReadSalesReports,
   calendarFormError,
   closureFormError,
   formatAmount,
@@ -11,6 +13,7 @@ import {
   voucherPresentation,
   methodAmount,
   missingSalesDays,
+  operationDaySales,
   operationDetailHref,
   parseCalendarInput,
   parseClosureInput,
@@ -20,6 +23,8 @@ import {
   parseSalesDashboard,
   parseSalesDays,
   parseSalesReport,
+  reportDayHref,
+  reportOperationDetailHref,
   reportQuery,
   salesDayPresentation,
   salesOverviewError,
@@ -522,6 +527,55 @@ test('Fechas, días de la semana, enlaces y mensajes', () => {
   );
   assert.equal(salesOverviewError(500), salesOverviewError(502));
   assert.match(salesOverviewError(403), /administrador/);
+  assert.match(salesOverviewError(403), /contador/);
   assert.match(calendarError(409), /Ya existe un cierre/);
   assert.equal(calendarError(418), calendarError(502));
+});
+
+test('Administrador y contador leen los reportes; solo el administrador abre la importación (SPRINT-4A-T23)', () => {
+  assert.equal(canReadSalesReports('ADMINISTRADOR'), true);
+  assert.equal(canReadSalesReports('CONTADOR'), true);
+  assert.equal(canReadSalesReports('SUPERVISOR'), false);
+  assert.equal(canReadSalesReports('TRABAJADOR'), false);
+  assert.equal(canOpenSalesImports('ADMINISTRADOR'), true);
+  for (const role of ['CONTADOR', 'SUPERVISOR', 'TRABAJADOR'] as const)
+    assert.equal(canOpenSalesImports(role), false);
+  assert.equal(
+    reportOperationDetailHref(OPERATION_ID),
+    `/admin/reportes-ventas/operaciones/${OPERATION_ID}`,
+  );
+  assert.equal(
+    reportDayHref(STORE.id, '2026-11-07'),
+    `/admin/reportes-ventas?from=2026-11-07&to=2026-11-07&storeId=${STORE.id}`,
+  );
+});
+
+test('Las ventas del día de la operación salen de la importación vigente, por medio de pago (SPRINT-4A-T23)', () => {
+  const parsed = parseSalesReport(report());
+  assert.ok(parsed);
+  // Día importado: cada medio del catálogo con su monto, incluido el cero.
+  assert.deepEqual(operationDaySales(parsed, STORE.id, '2026-11-07'), {
+    importStatus: STATUS,
+    sales: { importId: IMPORT_ID, version: 2, totalAmount: 675530 },
+    methods: [
+      { ...METHODS[0], amount: 675530 },
+      { ...METHODS[1], amount: 0 },
+    ],
+  });
+  // Sin Excel vigente: sin ventas ni medios, con el estado del día.
+  assert.deepEqual(operationDaySales(parsed, STORE.id, '2026-11-06'), {
+    importStatus: CLOSED,
+    sales: null,
+    methods: [],
+  });
+  // Local o día que el reporte no informa: ausencia, nunca un cero.
+  for (const [storeId, date] of [
+    [OTHER.id, '2026-11-07'],
+    [STORE.id, '2026-11-05'],
+  ] as const)
+    assert.deepEqual(operationDaySales(parsed, storeId, date), {
+      importStatus: null,
+      sales: null,
+      methods: [],
+    });
 });

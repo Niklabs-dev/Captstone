@@ -1263,22 +1263,34 @@ describe.skipIf(!databaseUrl)(
         );
         expect(Buffer.compare(download.body as Buffer, JPEG)).toBe(0);
 
+        // SPRINT-4A-T23: ADMINISTRADOR y CONTADOR (roles globales) revisan
+        // el voucher de cualquier local para contrastar las diferencias.
+        for (const reader of [f.admin, f.accountant]) {
+          const copy = await getVoucher(created.id, reader).expect(200);
+          expect(Buffer.compare(copy.body as Buffer, JPEG)).toBe(0);
+        }
         await getVoucher(created.id, f.otherSupervisor).expect(403);
         await getVoucher(created.id, f.worker).expect(403);
         await getVoucher(created.id, null).expect(401);
         await getVoucher(MISSING_ID, f.supervisor).expect(404);
 
-        const audit = await f.tx.auditLog.findFirstOrThrow({
+        // Cada lectura queda auditada con su actor, también la del contador.
+        const audits = await f.tx.auditLog.findMany({
           where: {
             action: AUDIT_ACTION.DAILY_OPERATION_VOUCHER_DOWNLOADED,
             entityId: created.id,
           },
         });
-        expect(audit.storeId).toBe(f.storeId);
-        expect(audit.detail).toMatchObject({
-          operationId: created.id,
-          integrity: 'VALID',
-        });
+        expect(audits.map((audit) => audit.userId).sort()).toEqual(
+          [f.supervisor.id, f.admin.id, f.accountant.id].sort(),
+        );
+        for (const audit of audits) {
+          expect(audit.storeId).toBe(f.storeId);
+          expect(audit.detail).toMatchObject({
+            operationId: created.id,
+            integrity: 'VALID',
+          });
+        }
       });
     });
 

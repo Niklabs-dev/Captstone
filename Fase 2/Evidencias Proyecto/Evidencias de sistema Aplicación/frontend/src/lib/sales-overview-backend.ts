@@ -5,11 +5,13 @@ import {
   type SalesImportDetail,
 } from './sales-imports';
 import {
+  operationDaySales,
   parseSalesDashboard,
   parseSalesDays,
   parseSalesReport,
   reportQuery,
   salesOverviewError,
+  type OperationDaySales,
   type ReportFilters,
   type SalesDashboard,
   type SalesDays,
@@ -76,6 +78,39 @@ export function fetchDailyOperation(
   return read('/daily-operations/' + id, token, (value) =>
     parseDailyOperation(value),
   );
+}
+// SPRINT-4A-T23: detalle de solo lectura de la operación diaria con las
+// ventas del mismo local y día por medio de pago (reporte de ese único día),
+// para contrastar el voucher y la diferencia de efectivo. Si las ventas no se
+// pueden leer, la operación se muestra igual con su propio aviso.
+export interface OperationDetailData {
+  operation: DailyOperation;
+  daySales: BackendResult<OperationDaySales>;
+}
+export async function fetchOperationDetail(
+  token: string,
+  id: string,
+): Promise<BackendResult<OperationDetailData>> {
+  const operation = await fetchDailyOperation(token, id);
+  if (!operation.ok) return operation;
+  const { store, businessDate } = operation.data;
+  const report = await fetchSalesReport(token, {
+    from: businessDate,
+    to: businessDate,
+    storeId: store.id,
+  });
+  return {
+    ok: true,
+    data: {
+      operation: operation.data,
+      daySales: report.ok
+        ? {
+            ok: true,
+            data: operationDaySales(report.data, store.id, businessDate),
+          }
+        : report,
+    },
+  };
 }
 export function fetchSalesImport(
   token: string,

@@ -528,30 +528,32 @@ test(
         Buffer.from(await result.arrayBuffer()),
         Buffer.from('voucher-bytes'),
       );
-      // SPRINT-4A-T11: el administrador revisa el voucher desde el panel por
-      // el mismo BFF privado; CONTADOR y TRABAJADOR siguen sin acceso.
-      result = await send({
-        token: 'admin',
-        target: '/api/daily-operations/' + operationId + '/voucher',
-      });
-      assert.equal(result.status, 200);
-      assert.equal(result.headers.get('Content-Type'), 'image/jpeg');
-      assert.equal(result.headers.get('Cache-Control'), 'private, no-store');
-      assert.equal(result.headers.get('X-Content-Type-Options'), 'nosniff');
-      assert.deepEqual(
-        Buffer.from(await result.arrayBuffer()),
-        Buffer.from('voucher-bytes'),
-      );
-      for (const token of ['worker', 'accountant'])
-        assert.equal(
-          (
-            await send({
-              token,
-              target: '/api/daily-operations/' + operationId + '/voucher',
-            })
-          ).status,
-          403,
+      // SPRINT-4A-T11/T23: administrador y contador revisan el voucher por el
+      // mismo BFF privado (el backend audita cada lectura); el trabajador
+      // sigue sin acceso.
+      for (const token of ['admin', 'accountant']) {
+        result = await send({
+          token,
+          target: '/api/daily-operations/' + operationId + '/voucher',
+        });
+        assert.equal(result.status, 200);
+        assert.equal(result.headers.get('Content-Type'), 'image/jpeg');
+        assert.equal(result.headers.get('Cache-Control'), 'private, no-store');
+        assert.equal(result.headers.get('X-Content-Type-Options'), 'nosniff');
+        assert.deepEqual(
+          Buffer.from(await result.arrayBuffer()),
+          Buffer.from('voucher-bytes'),
         );
+      }
+      assert.equal(
+        (
+          await send({
+            token: 'worker',
+            target: '/api/daily-operations/' + operationId + '/voucher',
+          })
+        ).status,
+        403,
+      );
       for (const token of ['', 'invalid'])
         assert.equal(
           (

@@ -1,5 +1,9 @@
 import { AppModule } from '../src/app.module.js';
-import { ADMIN_ONLY_CONTROLLER_PATHS } from '../src/auth/constants/admin-only-routes.constants.js';
+import { RequestMethod } from '@nestjs/common';
+import {
+  ADMIN_AND_ACCOUNTANT_READ_CONTROLLER_PATHS,
+  ADMIN_ONLY_CONTROLLER_PATHS,
+} from '../src/auth/constants/admin-only-routes.constants.js';
 import { ROLE } from '../src/auth/constants/roles.constants.js';
 import { IS_PUBLIC_KEY } from '../src/auth/decorators/public.decorator.js';
 import { ROLES_KEY } from '../src/auth/decorators/roles.decorator.js';
@@ -21,6 +25,7 @@ const METHOD_METADATA = 'method';
 interface Endpoint {
   controller: string;
   handler: string;
+  method: unknown;
   roles: readonly string[] | undefined;
   isPublic: boolean;
 }
@@ -79,7 +84,14 @@ function endpointsOf(controller: Constructor): Endpoint[] {
       const isPublic =
         Reflect.getMetadata(IS_PUBLIC_KEY, handler) === true ||
         Reflect.getMetadata(IS_PUBLIC_KEY, controller) === true;
-      return { controller: controller.name, handler: name, roles, isPublic };
+      const method: unknown = Reflect.getMetadata(METHOD_METADATA, handler);
+      return {
+        controller: controller.name,
+        handler: name,
+        method,
+        roles,
+        isPublic,
+      };
     });
 }
 
@@ -103,6 +115,30 @@ describe('Rutas exclusivas del administrador (SPRINT-4R-T15)', () => {
         expect(endpoint, `${endpoint.controller}.${endpoint.handler}`).toEqual(
           expect.objectContaining({
             roles: [ROLE.ADMINISTRADOR],
+            isPublic: false,
+          }),
+        );
+      }
+    },
+  );
+
+  // SPRINT-4A-T23: los reportes de ventas son de solo lectura y los comparte
+  // el CONTADOR; ningún endpoint de escritura puede colarse en ellos.
+  it.each(ADMIN_AND_ACCOUNTANT_READ_CONTROLLER_PATHS)(
+    '%s existe, solo expone GET y exige ADMINISTRADOR o CONTADOR',
+    (path) => {
+      expect(ADMIN_ONLY_CONTROLLER_PATHS).not.toContain(path);
+      const matches = controllers.filter(
+        (controller) => controllerPath(controller) === path,
+      );
+      expect(matches).toHaveLength(1);
+      const endpoints = matches.flatMap(endpointsOf);
+      expect(endpoints.length).toBeGreaterThan(0);
+      for (const endpoint of endpoints) {
+        expect(endpoint, `${endpoint.controller}.${endpoint.handler}`).toEqual(
+          expect.objectContaining({
+            method: RequestMethod.GET,
+            roles: [ROLE.ADMINISTRADOR, ROLE.CONTADOR],
             isPublic: false,
           }),
         );

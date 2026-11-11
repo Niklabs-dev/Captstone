@@ -840,10 +840,11 @@ test('el voucher lo leen el administrador y el supervisor con local por el BFF (
     canReadDailyVoucher({ ...user, role: 'SUPERVISOR', storeId: null }),
     false,
   );
-  // El CONTADOR queda fuera hasta que el PO lo confirme.
+  // SPRINT-4A-T23: el CONTADOR (rol global) revisa el voucher de cualquier
+  // local para comprobar las diferencias de efectivo.
   assert.equal(
     canReadDailyVoucher({ ...user, role: 'CONTADOR', storeId: null }),
-    false,
+    true,
   );
   assert.equal(
     canReadDailyVoucher({ ...user, role: 'TRABAJADOR', storeId }),

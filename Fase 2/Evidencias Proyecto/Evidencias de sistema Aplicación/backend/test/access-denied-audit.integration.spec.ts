@@ -382,7 +382,18 @@ describe.skipIf(!databaseUrl)(
       async (role, userOf) => {
         await withinRollback(async (f) => {
           const user = userOf(f);
-          const calls = calendarRequests(f, user);
+          // SPRINT-4A-T23: el CONTADOR sí lee los reportes (solo lectura),
+          // sin registro de acceso denegado; el resto sigue negado.
+          const reportsAllowed = role === 'CONTADOR';
+          const all = calendarRequests(f, user);
+          const isReport = (route: string): boolean =>
+            route.startsWith('/sales-reports');
+          if (reportsAllowed)
+            for (const call of all.filter((item) => isReport(item.route)))
+              expect((await call.send()).status, call.route).toBe(200);
+          const calls = reportsAllowed
+            ? all.filter((call) => !isReport(call.route))
+            : all;
           for (const [index, call] of calls.entries()) {
             expect((await call.send()).status, call.route).toBe(403);
             await waitForDeniedLogs(f, user.id, index + 1);
@@ -395,7 +406,10 @@ describe.skipIf(!databaseUrl)(
             expect(log.detail).toMatchObject({ role, reason: 'ROLE' });
           }
           // El calendario pide un local en la ruta: queda como local pedido.
-          for (const log of logs.slice(3)) {
+          const firstStoreRoute = calls.findIndex((call) =>
+            call.route.startsWith('/stores/'),
+          );
+          for (const log of logs.slice(firstStoreRoute)) {
             expect(log.detail).toMatchObject({ requestedStoreId: f.storeA });
           }
         });

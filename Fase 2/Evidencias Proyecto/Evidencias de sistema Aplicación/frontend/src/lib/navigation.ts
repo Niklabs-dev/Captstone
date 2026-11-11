@@ -70,6 +70,14 @@ const MY_TIPS: NavigationItem = {
 // /propinas/historico (SPRINT-4A-T08), enlazado desde esta vista.
 const TIPS: NavigationItem = { href: '/propinas', label: 'Propinas' };
 
+// Reportes de ventas (SPRINT-4R-T14): desde SPRINT-4A-T23 también los
+// consulta el CONTADOR, en solo lectura, junto con el detalle de cada
+// operación diaria (voucher, diferencia y ventas por medio de pago).
+const SALES_REPORTS: NavigationItem = {
+  href: '/admin/reportes-ventas',
+  label: 'Reportes de ventas',
+};
+
 // Una sola fuente de enlaces para todas las vistas; los permisos siguen en el servidor.
 export function getNavigationItems(
   role: Role | null,
@@ -101,13 +109,19 @@ export function getNavigationItems(
         { href: '/admin/medios-pago', label: 'Medios de pago' },
         { href: '/admin/importacion-ventas', label: 'Importar ventas' },
         { href: '/admin/panel-ventas', label: 'Panel de ventas' },
-        { href: '/admin/reportes-ventas', label: 'Reportes de ventas' },
+        SALES_REPORTS,
         { href: '/admin/calendario-locales', label: 'Calendario de locales' },
         { href: '/liquidaciones', label: 'Liquidaciones' },
         TIPS,
       ]
     : role === 'CONTADOR'
-      ? [home, { href: '/liquidaciones', label: 'Liquidaciones' }, TIPS]
+      ? [
+          home,
+          { href: '/liquidaciones', label: 'Liquidaciones' },
+          TIPS,
+          // SPRINT-4A-T23: solo lectura, para revisar voucher y diferencias.
+          SALES_REPORTS,
+        ]
       : [home];
 }
 
@@ -156,6 +170,10 @@ export function getPageRedirect(role: Role, pathname: string): string | null {
   // contadores van a /propinas y el supervisor vuelve a su inicio.
   if (startsWith('/propinas/repartos'))
     return manager ? TIPS.href : getHomePath(role);
+  // SPRINT-4A-T23: el contador entra a los reportes y al detalle de solo
+  // lectura de sus operaciones; el resto de /admin sigue siendo exclusivo.
+  if (startsWith(SALES_REPORTS.href))
+    return manager ? null : '/dashboard?reason=forbidden';
   const inAdmin = pathname === '/admin' || pathname.startsWith('/admin/');
   if (inAdmin && role !== 'ADMINISTRADOR') return '/dashboard?reason=forbidden';
   return null;

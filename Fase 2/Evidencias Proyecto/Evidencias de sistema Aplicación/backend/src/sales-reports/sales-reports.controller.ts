@@ -22,15 +22,20 @@ import type {
   SalesReport,
 } from './types/sales-reports.types.js';
 
-// Reportes de ventas y diferencias por período y local (SPRINT-4R-T13):
-// exclusivos del ADMINISTRADOR.
+// Reportes de ventas y diferencias por período y local (SPRINT-4R-T13). Son
+// de solo lectura: desde SPRINT-4A-T23 también los consulta el CONTADOR (rol
+// global, todos los locales) para contrastar el voucher y la diferencia de
+// efectivo de la operación diaria con las ventas por medio de pago. La
+// importación de ventas, su confirmación y la corrección de la operación
+// diaria siguen fuera de su alcance.
 @ApiTags('sales-reports')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
 @ApiForbiddenResponse({
-  description: 'Solo el ADMINISTRADOR puede consultar los reportes.',
+  description:
+    'Solo el ADMINISTRADOR y el CONTADOR pueden consultar los reportes (solo lectura).',
 })
-@Roles(ROLE.ADMINISTRADOR)
+@Roles(ROLE.ADMINISTRADOR, ROLE.CONTADOR)
 @Controller('sales-reports')
 export class SalesReportsController {
   constructor(private readonly salesReports: SalesReportsService) {}
