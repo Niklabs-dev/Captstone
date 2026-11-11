@@ -666,4 +666,36 @@ describe('Esquema de base de datos (SPRINT-1-T04)', () => {
     expect(down).toContain('DROP TABLE "store_closures"');
     expect(down).toContain('DROP TABLE "store_operating_schedules"');
   });
+
+  it('omite solas las líneas en 0 sin alias, sin abrir huecos (SPRINT-4A-T21)', () => {
+    const sql = readMigration('importaciones_omision_automatica');
+    // Las omisiones existentes (T18) quedan MANUAL sin UPDATE; las nuevas
+    // son AUTOMATIC por defecto.
+    expect(sql).toContain(
+      'ADD COLUMN "resolution" "SalesImportResolution" NOT NULL DEFAULT \'MANUAL\'',
+    );
+    expect(sql).toContain(
+      'ALTER COLUMN "resolution" SET DEFAULT \'AUTOMATIC\'',
+    );
+    expect(sql).not.toContain('UPDATE "sales_import_skipped_lines"');
+    // Solo la omisión a mano exige cabecera resuelta a mano; el monto 0 lo
+    // sigue exigiendo el CHECK de 20261110070000 y no se retira.
+    expect(sql).toContain(
+      'IF NEW."resolution" = \'MANUAL\' AND "header_resolved_by" IS NULL THEN',
+    );
+    expect(sql).not.toContain('DROP CONSTRAINT');
+    expect(sql).toContain('tiene un alias configurado');
+
+    const dirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith('importaciones_omision_automatica'),
+    );
+    const down = readFileSync(
+      join(migrationsDir, dirs[0], 'down.sql'),
+      'utf-8',
+    );
+    expect(down).toContain(
+      'ALTER TABLE "sales_import_skipped_lines" DROP COLUMN "resolution"',
+    );
+    expect(down).not.toContain('NEW."resolution"');
+  });
 });

@@ -153,7 +153,7 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
-    it('un medio sin alias impide confirmar y no crea el alias', async () => {
+    it('una línea en 0 sin alias se omite sola y no impide confirmar (SPRINT-4A-T21)', async () => {
       await withinRollback(async (tx) => {
         const { subwayStoreId } = await configure(tx, {
           'T. DEBITO': 'DEBIT_CARD',
@@ -171,16 +171,85 @@ describe.skipIf(!databaseUrl)(
           report(`990 - ${subwayStoreId}`),
         );
 
+        expect(resolved.canConfirm).toBe(true);
+        expect(resolved.issues).toEqual([]);
+        expect(resolved.lines[3]).toMatchObject({
+          originalLabel: 'N.de Créd.',
+          amount: 0,
+          paymentMethod: null,
+          skipped: true,
+        });
+        expect(resolved.lines.slice(0, 3).map((line) => line.skipped)).toEqual([
+          false,
+          false,
+          false,
+        ]);
+        expect(await tx.paymentMethodAlias.count()).toBe(aliasesBefore);
+      });
+    });
+
+    it('un medio sin alias con valor impide confirmar y no crea el alias', async () => {
+      await withinRollback(async (tx) => {
+        const { subwayStoreId } = await configure(tx, {
+          'T. DEBITO': 'DEBIT_CARD',
+          EFECTIVO: 'CASH',
+        });
+        await tx.paymentMethodAlias.deleteMany({
+          where: {
+            system: 'MRCOMANDA',
+            normalizedLabel: { in: ['T. CREDITO', 'N.DE CRED.'] },
+          },
+        });
+        const aliasesBefore = await tx.paymentMethodAlias.count();
+
+        const resolved = await resolverFor(tx).resolve(
+          report(`990 - ${subwayStoreId}`),
+        );
+
         expect(resolved.canConfirm).toBe(false);
         expect(resolved.issues).toEqual([
           expect.objectContaining({
             code: 'PAYMENT_METHOD_NOT_CONFIGURED',
-            lineNumber: 4,
-            originalLabel: 'N.de Créd.',
+            lineNumber: 3,
+            originalLabel: 'T. CREDITO',
+            message: expect.stringContaining('crea uno nuevo') as string,
           }),
         ]);
-        expect(resolved.lines[3].paymentMethod).toBeNull();
+        expect(resolved.lines[2]).toMatchObject({
+          paymentMethod: null,
+          skipped: false,
+        });
+        // La línea en 0 sigue omitiéndose sola aunque haya otra pendiente.
+        expect(resolved.lines[3].skipped).toBe(true);
         expect(await tx.paymentMethodAlias.count()).toBe(aliasesBefore);
+      });
+    });
+
+    it('si todas las líneas están en 0 sin alias ninguna se omite sola (SPRINT-4A-T21)', async () => {
+      await withinRollback(async (tx) => {
+        const { subwayStoreId } = await configure(tx, {});
+        await tx.paymentMethodAlias.deleteMany({
+          where: { system: 'MRCOMANDA', normalizedLabel: 'N.DE CRED.' },
+        });
+        const resolved = await resolverFor(tx).resolve(
+          parseMrComandaReport([
+            buildReportSheet({
+              filters: ` - Todas las Empresas - Local: 990 - ${subwayStoreId} - Todos los Sectores`,
+              lines: [{ label: 'N.de Créd.', amount: 0, percentage: 0 }],
+              paymentsTotal: 0,
+              salesTotal: 0,
+            }),
+          ]),
+        );
+        expect(resolved.canConfirm).toBe(false);
+        expect(resolved.lines[0].skipped).toBe(false);
+        expect(resolved.issues).toEqual([
+          expect.objectContaining({
+            code: 'PAYMENT_METHOD_NOT_CONFIGURED',
+            lineNumber: 1,
+            message: expect.stringContaining('al menos una') as string,
+          }),
+        ]);
       });
     });
 
@@ -308,7 +377,7 @@ describe.skipIf(!databaseUrl || !samplePath)(
       await prisma.$disconnect();
     });
 
-    it('con 72597 configurado en Santa María identifica el archivo como Santa María sin pasos manuales', async () => {
+    it('con 72597 configurado en Santa María identifica el archivo como Santa María sin pasos manuales y omite sola «N.de Créd.» en 0', async () => {
       const report = await readMrComandaReport(
         await readFile(samplePath ?? ''),
       );
@@ -330,6 +399,10 @@ describe.skipIf(!databaseUrl || !samplePath)(
               update: { subwayStoreId: '72597', isActive: true },
               create: { ...santaMaria, subwayStoreId: '72597' },
             });
+            // SPRINT-4A-T21: «N.de Créd.» en 0 y sin alias se omite sola.
+            await tx.paymentMethodAlias.deleteMany({
+              where: { system: 'MRCOMANDA', normalizedLabel: 'N.DE CRED.' },
+            });
 
             const resolved = await new SalesImportResolverService(
               tx as unknown as PrismaService,
@@ -339,6 +412,21 @@ describe.skipIf(!databaseUrl || !samplePath)(
             expect(
               resolved.issues.filter((issue) =>
                 issue.code.startsWith('STORE_'),
+              ),
+            ).toEqual([]);
+            const note = resolved.lines.find(
+              (line) => line.originalLabel === 'N.de Créd.',
+            );
+            expect(note).toMatchObject({
+              amount: 0,
+              paymentMethod: null,
+              skipped: true,
+            });
+            expect(
+              resolved.issues.filter(
+                (issue) =>
+                  issue.code === 'PAYMENT_METHOD_NOT_CONFIGURED' &&
+                  issue.lineNumber === note?.lineNumber,
               ),
             ).toEqual([]);
             throw new Rollback();

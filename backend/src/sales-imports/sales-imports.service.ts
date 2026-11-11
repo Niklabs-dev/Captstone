@@ -17,7 +17,10 @@ import type {
   SalesImportResolutionDto,
 } from './dto/sales-import-request.dto.js';
 import { MrComandaReportError } from './parser/mrcomanda-report.errors.js';
-import type { ParsedMrComandaReport } from './parser/mrcomanda-report.types.js';
+import type {
+  ParsedMrComandaReport,
+  ParsedPaymentLine,
+} from './parser/mrcomanda-report.types.js';
 import { readMrComandaReport } from './parser/read-mrcomanda-report.js';
 import {
   type ManualResolutionPlan,
@@ -70,6 +73,8 @@ import {
 //   cabecera y sus líneas se crean juntas o no se crean.
 // - Solo totales diarios: no hay formulario manual de ventas ni se calculan
 //   propinas o descuadres desde el archivo.
+// - Omisión automática (SPRINT-4A-T21): una línea en 0 sin alias no bloquea
+//   la carga; se guarda como línea omitida AUTOMATIC junto con la cabecera.
 
 const PERSON_SELECT = {
   select: { id: true, firstName: true, lastName: true },
@@ -121,6 +126,7 @@ const DETAIL_SELECT = {
       originalLabel: true,
       amount: true,
       percentage: true,
+      resolution: true,
     },
   },
 } satisfies Prisma.SalesImportSelect;
@@ -222,6 +228,27 @@ function requireMethod(
   return method;
 }
 
+// Línea del plan sin medio asignado: applyChoices cubre todas, así que un
+// faltante es un error de programación.
+function requireLineMethod(
+  methodIds: ReadonlyMap<number, string>,
+  lineNumber: number,
+): string {
+  const id = methodIds.get(lineNumber);
+  if (id === undefined) {
+    throw new Error(`La línea ${lineNumber} no tiene medio de pago asignado`);
+  }
+  return id;
+}
+
+// Medio creado desde la vista previa (SPRINT-4A-T21): fuera de la
+// conciliación de vouchers y al final del orden; se ajusta después en la
+// administración de medios de pago.
+const NEW_METHOD_BEHAVIOR = 'EXTERNAL_OTHER' as const;
+const NEW_METHOD_SORT_STEP = 10;
+// sort_order es INTEGER: el orden nunca supera su máximo.
+const MAX_SORT_ORDER = 2_147_483_647;
+
 @Injectable()
 export class SalesImportsService {
   private readonly logger = new Logger(SalesImportsService.name);
@@ -315,19 +342,28 @@ export class SalesImportsService {
         // Cabecera y líneas en la misma transacción: si falla una línea no
         // queda una importación a medias.
         await tx.salesImportLine.createMany({
-          data: resolution.lines.map((line) => ({
-            importId: header.id,
-            lineNumber: line.lineNumber,
-            originalLabel: line.originalLabel,
-            normalizedLabel: line.normalizedLabel,
-            amount: BigInt(line.amount),
-            percentage: decimalOrNull(line.percentage),
-            paymentMethodId: requireMethod(
-              line.paymentMethod,
-              line.originalLabel,
-            ).id,
-          })),
+          data: resolution.lines
+            .filter((line) => !line.skipped)
+            .map((line) => ({
+              importId: header.id,
+              lineNumber: line.lineNumber,
+              originalLabel: line.originalLabel,
+              normalizedLabel: line.normalizedLabel,
+              amount: BigInt(line.amount),
+              percentage: decimalOrNull(line.percentage),
+              paymentMethodId: requireMethod(
+                line.paymentMethod,
+                line.originalLabel,
+              ).id,
+            })),
         });
+        // Líneas en 0 sin alias: se omiten solas (SPRINT-4A-T21). El trigger
+        // vuelve a exigir monto 0 y etiqueta sin alias.
+        await this.createSkippedLines(
+          tx,
+          header.id,
+          resolution.lines.filter((line) => line.skipped),
+        );
         return { id: header.id, created: true };
       });
       if (!outcome.created) {
@@ -467,7 +503,6 @@ export class SalesImportsService {
     const report = await this.readReport(file.buffer);
     const resolution = await this.resolver.resolve(report);
     const plan = await this.planResolution(resolution, dto);
-    const manualResolution = this.manualSummary(plan, report.subwayStoreId);
     const storeId = plan.store.id;
     const businessDate = dbDate(report.businessDate);
     const sha256Hash = this.storage.computeSha256(file.buffer);
@@ -490,7 +525,12 @@ export class SalesImportsService {
         if (existing !== null) {
           // Reintento del mismo archivo ya vigente en ese local: idempotente.
           if (existing.status === 'ACTIVE') {
-            return { id: existing.id, confirmed: false, superseded: null };
+            return {
+              id: existing.id,
+              confirmed: false,
+              superseded: null,
+              methodIds: new Map<number, string>(),
+            };
           }
           throw new ConflictException(
             existing.status === 'PENDING'
@@ -512,7 +552,12 @@ export class SalesImportsService {
           });
         }
 
-        await this.rememberChoices(tx, plan, currentUser, origin);
+        const methodIds = await this.applyChoices(
+          tx,
+          plan,
+          currentUser,
+          origin,
+        );
 
         const now = new Date();
         const last = await tx.salesImport.aggregate({
@@ -547,36 +592,25 @@ export class SalesImportsService {
           select: { id: true },
         });
         await tx.salesImportLine.createMany({
-          data: plan.lines.map(({ line, paymentMethodId, resolution }) => ({
+          data: plan.lines.map(({ line, resolution }) => ({
             importId: header.id,
             lineNumber: line.lineNumber,
             originalLabel: line.originalLabel,
             normalizedLabel: line.normalizedLabel,
             amount: BigInt(line.amount),
             percentage: decimalOrNull(line.percentage),
-            paymentMethodId,
+            paymentMethodId: requireLineMethod(methodIds, line.lineNumber),
             resolution,
           })),
         });
-        if (plan.skipped.length > 0) {
-          await tx.salesImportSkippedLine.createMany({
-            data: plan.skipped.map((line) => ({
-              importId: header.id,
-              lineNumber: line.lineNumber,
-              originalLabel: line.originalLabel,
-              normalizedLabel: line.normalizedLabel,
-              amount: BigInt(line.amount),
-              percentage: decimalOrNull(line.percentage),
-            })),
-          });
-        }
+        await this.createSkippedLines(tx, header.id, plan.skipped);
         const superseded = await this.promote(
           tx,
           header.id,
           active,
           currentUser,
         );
-        return { id: header.id, confirmed: true, superseded };
+        return { id: header.id, confirmed: true, superseded, methodIds };
       });
       if (!outcome.confirmed) {
         await this.removeOrphanFile(stored.relativePath);
@@ -585,12 +619,17 @@ export class SalesImportsService {
         import: await this.findOne(outcome.id),
         confirmed: outcome.confirmed,
         superseded: outcome.superseded,
-        manualResolution,
+        manualResolution: this.manualSummary(
+          plan,
+          report.subwayStoreId,
+          outcome.methodIds,
+        ),
       };
     } catch (error) {
       await this.removeOrphanFile(stored.relativePath);
       // Otra carga o un cambio de equivalencias ganó la carrera (mismo
-      // archivo, ID Subway o alias creado al mismo tiempo).
+      // archivo, ID Subway, alias o código de un medio nuevo creado al mismo
+      // tiempo).
       if (isUniqueViolation(error)) {
         throw new ConflictException(
           'Otro cambio se guardó al mismo tiempo para este archivo, local o medio: vuelve a cargar el archivo',
@@ -728,6 +767,7 @@ export class SalesImportsService {
         originalLabel: line.originalLabel,
         amount: Number(line.amount),
         percentage: line.percentage === null ? null : Number(line.percentage),
+        resolution: line.resolution,
       })),
       versions: versions.map(toVersionRef),
     };
@@ -798,6 +838,7 @@ export class SalesImportsService {
         amount: line.amount,
         percentage: line.percentage,
         paymentMethod: line.paymentMethod,
+        skipped: line.skipped,
       })),
       import: detail,
       activeImport,
@@ -807,14 +848,14 @@ export class SalesImportsService {
 
   // Opciones de la resolución manual (SPRINT-4A-T18): locales activos con su
   // versión vigente en la fecha (solo si el local no se identificó) y medios
-  // activos del catálogo (solo si alguna línea no tiene alias).
+  // activos del catálogo (solo si alguna línea sin alias no se omite sola).
   private async resolutionOptions(
     resolution: ResolvedSalesReport,
     businessDate: Date,
   ): Promise<SalesImportResolutionOptions> {
     const needsStore = resolution.store === null;
     const needsMethods = resolution.lines.some(
-      (line) => line.paymentMethod === null,
+      (line) => line.paymentMethod === null && !line.skipped,
     );
     const [stores, actives, paymentMethods] = await Promise.all([
       needsStore
@@ -884,14 +925,13 @@ export class SalesImportsService {
 
   // Lee de la base lo que eligió el administrador y arma el plan (400 si la
   // resolución no es válida o está incompleta).
+  // El catálogo completo (activos e inactivos) es pequeño: se lee entero
+  // para validar los medios elegidos y que uno nuevo no repita a otro.
   private async planResolution(
     resolution: ResolvedSalesReport,
     dto: SalesImportResolutionDto,
   ): Promise<ManualResolutionPlan> {
-    const methodIds = dto.lines
-      .map((line) => line.paymentMethodId)
-      .filter((id): id is string => typeof id === 'string');
-    const [store, methods] = await Promise.all([
+    const [store, catalog] = await Promise.all([
       dto.store
         ? this.prisma.store.findUnique({
             where: { id: dto.store.storeId },
@@ -903,24 +943,19 @@ export class SalesImportsService {
             },
           })
         : Promise.resolve(null),
-      methodIds.length > 0
+      dto.lines.length > 0
         ? this.prisma.paymentMethod.findMany({
-            where: { id: { in: methodIds } },
             select: { id: true, code: true, name: true, isActive: true },
           })
         : Promise.resolve([]),
     ]);
-    return planManualResolution(
-      resolution,
-      dto,
-      store,
-      new Map(methods.map((method) => [method.id, method])),
-    );
+    return planManualResolution(resolution, dto, store, catalog);
   }
 
   private manualSummary(
     plan: ManualResolutionPlan,
     subwayStoreId: string | null,
+    methodIds: ReadonlyMap<number, string>,
   ): SalesImportManualResolutionSummary {
     return {
       store:
@@ -931,37 +966,68 @@ export class SalesImportsService {
               remembered: plan.rememberSubwayStoreId !== null,
             }
           : null,
-      lines: [
-        ...plan.lines
-          .filter((line) => line.resolution === 'MANUAL')
-          .map((line) => ({
-            lineNumber: line.line.lineNumber,
-            originalLabel: line.line.originalLabel,
-            action: 'ASSIGN' as const,
-            paymentMethodId: line.paymentMethodId,
-            remembered: line.remember,
-          })),
-        ...plan.skipped.map((line) => ({
-          lineNumber: line.lineNumber,
-          originalLabel: line.originalLabel,
-          action: 'SKIP' as const,
-          paymentMethodId: null,
-          remembered: false,
+      lines: plan.lines
+        .filter((line) => line.resolution === 'MANUAL')
+        .map((line) => ({
+          lineNumber: line.line.lineNumber,
+          originalLabel: line.line.originalLabel,
+          action:
+            line.target.kind === 'NEW'
+              ? ('CREATE' as const)
+              : ('ASSIGN' as const),
+          // null solo si un reintento idempotente no creó el medio nuevo
+          // (ese reintento no se audita).
+          paymentMethodId:
+            methodIds.get(line.line.lineNumber) ??
+            (line.target.kind === 'EXISTING'
+              ? line.target.paymentMethodId
+              : null),
+          remembered: line.remember,
         })),
-      ].sort((a, b) => a.lineNumber - b.lineNumber),
+      skippedLines: plan.skipped.map((line) => ({
+        lineNumber: line.lineNumber,
+        originalLabel: line.originalLabel,
+      })),
     };
   }
 
-  // «Recordar» (SPRINT-4A-T18): asigna el ID Subway al local elegido solo si
-  // sigue sin uno (nunca lo sobrescribe) y crea los alias de los medios
-  // elegidos. Cada cambio se audita en la misma transacción, con el mismo
-  // detalle que su endpoint de administración y el origen sales_import.
-  private async rememberChoices(
+  // Líneas omitidas solas (SPRINT-4A-T21): monto 0 y etiqueta sin alias.
+  private async createSkippedLines(
+    tx: Prisma.TransactionClient,
+    importId: string,
+    lines: readonly ParsedPaymentLine[],
+  ): Promise<void> {
+    if (lines.length === 0) return;
+    await tx.salesImportSkippedLine.createMany({
+      data: lines.map((line) => ({
+        importId,
+        lineNumber: line.lineNumber,
+        originalLabel: line.originalLabel,
+        normalizedLabel: line.normalizedLabel,
+        amount: BigInt(line.amount),
+        percentage: decimalOrNull(line.percentage),
+        resolution: 'AUTOMATIC' as const,
+      })),
+    });
+  }
+
+  // Aplica lo elegido a mano en la transacción de la confirmación y devuelve
+  // el medio de cada línea (número de línea → ID):
+  // - Medios nuevos (SPRINT-4A-T21): se dan de alta activos, EXTERNAL_OTHER,
+  //   no disponibles para propinas y al final del orden; dos líneas con el
+  //   mismo nombre comparten el medio. Se audita PAYMENT_METHOD_CREATED con
+  //   el mismo detalle que POST /payment-methods.
+  // - «Recordar» (SPRINT-4A-T18): asigna el ID Subway al local elegido solo
+  //   si sigue sin uno (nunca lo sobrescribe) y crea los alias de los medios
+  //   elegidos o creados.
+  // Cada cambio se audita en la misma transacción, con el origen
+  // sales_import.
+  private async applyChoices(
     tx: Prisma.TransactionClient,
     plan: ManualResolutionPlan,
     currentUser: AuthUser,
     origin: SalesImportAuditOrigin,
-  ): Promise<void> {
+  ): Promise<Map<number, string>> {
     const audit = {
       userId: currentUser.id,
       ipAddress: origin.ipAddress,
@@ -992,9 +1058,54 @@ export class SalesImportsService {
         },
       });
     }
-    for (const { line, paymentMethodId } of plan.lines.filter(
-      (planned) => planned.remember,
-    )) {
+
+    const methodIds = new Map<number, string>();
+    const createdByCode = new Map<string, string>();
+    for (const { line, target } of plan.lines) {
+      if (target.kind === 'EXISTING') {
+        methodIds.set(line.lineNumber, target.paymentMethodId);
+        continue;
+      }
+      const reused = createdByCode.get(target.code);
+      if (reused !== undefined) {
+        methodIds.set(line.lineNumber, reused);
+        continue;
+      }
+      const last = await tx.paymentMethod.aggregate({
+        _max: { sortOrder: true },
+      });
+      const data = {
+        code: target.code,
+        name: target.name,
+        sortOrder: Math.min(
+          (last._max.sortOrder ?? 0) + NEW_METHOD_SORT_STEP,
+          MAX_SORT_ORDER,
+        ),
+        behavior: NEW_METHOD_BEHAVIOR,
+        availableForTips: false,
+      };
+      // Un medio con el mismo código creado al mismo tiempo choca con la
+      // restricción única (409 en el llamador).
+      const method = await tx.paymentMethod.create({
+        data,
+        select: { id: true },
+      });
+      await tx.auditLog.create({
+        data: {
+          ...audit,
+          action: AUDIT_ACTION.PAYMENT_METHOD_CREATED,
+          entityType: 'payment_methods',
+          entityId: method.id,
+          storeId: null,
+          detail: { ...data, source: 'sales_import' },
+        },
+      });
+      createdByCode.set(target.code, method.id);
+      methodIds.set(line.lineNumber, method.id);
+    }
+
+    for (const { line } of plan.lines.filter((planned) => planned.remember)) {
+      const paymentMethodId = requireLineMethod(methodIds, line.lineNumber);
       const alias = await tx.paymentMethodAlias.create({
         data: {
           system: 'MRCOMANDA',
@@ -1021,6 +1132,7 @@ export class SalesImportsService {
         },
       });
     }
+    return methodIds;
   }
 
   // Limpieza de un archivo que quedó sin importación (descarte, duplicado

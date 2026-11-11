@@ -36,6 +36,8 @@ import {
   initialChoices,
   isResolvable,
   latestSalesImports,
+  NEW_METHOD_NAME_TAKEN,
+  previewTableLines,
   resolvedPreviewLines,
   salesFileError,
   salesImportDifferences,
@@ -88,13 +90,21 @@ function LinesTable({
   totalAmount,
   caption,
   skipped = [],
+  created = [],
   resolvable = false,
 }: {
   lines: SalesImportLine[];
   totalAmount: number;
   caption: string;
-  // Líneas omitidas a mano (monto 0): se listan aparte y no suman.
-  skipped?: readonly { lineNumber: number; originalLabel: string }[];
+  // Líneas omitidas (monto 0): se listan aparte y no suman. AUTOMATIC si se
+  // omitieron solas por no tener alias (SPRINT-4A-T21).
+  skipped?: readonly {
+    lineNumber: number;
+    originalLabel: string;
+    resolution: 'AUTOMATIC' | 'MANUAL';
+  }[];
+  // Líneas que crean un medio nuevo al confirmar (SPRINT-4A-T21).
+  created?: readonly number[];
   // En una vista previa que se resuelve a mano, lo pendiente es «Por elegir».
   resolvable?: boolean;
 }): ReactElement {
@@ -136,7 +146,10 @@ function LinesTable({
                 )}
                 {line.paymentMethod && line.resolution === 'MANUAL' && (
                   <span className="mt-1 block text-xs font-normal text-ink2">
-                    «{line.originalLabel}» · elegido a mano
+                    «{line.originalLabel}» ·{' '}
+                    {created.includes(line.lineNumber)
+                      ? 'medio nuevo, se crea al confirmar'
+                      : 'elegido a mano'}
                   </span>
                 )}
               </th>
@@ -155,7 +168,9 @@ function LinesTable({
               >
                 {line.originalLabel}
                 <span className="mt-1 block text-xs font-normal">
-                  Omitida (monto 0)
+                  {line.resolution === 'AUTOMATIC'
+                    ? 'Omitida sola (monto 0, sin medio reconocido)'
+                    : 'Omitida a mano (monto 0)'}
                 </span>
               </th>
               <td
@@ -516,7 +531,12 @@ export function SalesImportPanel({
       refreshHistory();
     } catch (cause) {
       setFailure(errorText(cause));
-      if (cause instanceof SalesImportRequestError && cause.status === 409)
+      // Un nombre repetido del medio nuevo se corrige sin volver a subir.
+      if (
+        cause instanceof SalesImportRequestError &&
+        cause.status === 409 &&
+        cause.message !== NEW_METHOD_NAME_TAKEN
+      )
         setStalePreview(true);
     } finally {
       inFlight.current = false;
@@ -609,7 +629,9 @@ export function SalesImportPanel({
   const resolved =
     preview && choices && resolvable
       ? resolvedPreviewLines(preview, choices)
-      : null;
+      : preview
+        ? { ...previewTableLines(preview), created: [] }
+        : null;
   const resolution =
     preview && choices && resolvable ? buildResolution(preview, choices) : null;
   const replacing =
@@ -844,6 +866,7 @@ export function SalesImportPanel({
             <LinesTable
               lines={resolved ? resolved.lines : preview.lines}
               skipped={resolved?.skipped}
+              created={resolved?.created}
               resolvable={resolvable}
               totalAmount={preview.totalAmount}
               caption="Medios de pago del archivo"

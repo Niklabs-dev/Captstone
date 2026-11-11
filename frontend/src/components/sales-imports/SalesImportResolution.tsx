@@ -2,10 +2,13 @@
 
 import type { ReactElement } from 'react';
 import { inputClass, labelClass } from '@/components/ui/styles';
+import { PAYMENT_METHOD_NAME_MAX } from '@/lib/payment-methods';
 import {
   chosenStore,
+  CREATE_METHOD,
+  newMethodNameError,
+  normalizeMethodName,
   pendingLines,
-  SKIP_LINE,
   storeRememberBlock,
   type LineChoice,
   type ResolutionChoices,
@@ -15,8 +18,10 @@ import { formatClp } from '@/lib/tips';
 
 // SPRINT-4A-T19: selectores para lo que la vista previa no identificó. El
 // sistema no adivina: el administrador elige el local activo y el medio de
-// cada línea sin alias (u «Omitir» si su monto es 0). «Recordar para
-// próximas cargas» viene marcado y se deshabilita cuando no se puede.
+// cada línea pendiente. «Recordar para próximas cargas» viene marcado y se
+// deshabilita cuando no se puede. SPRINT-4A-T21: las líneas en 0 sin alias
+// se omiten solas (no aparecen aquí) y cada línea con valor puede crear su
+// medio con la etiqueta como nombre editable; crear siempre recuerda.
 
 const checkboxRowClass =
   'mt-2 flex min-h-11 cursor-pointer items-center gap-3 text-sm text-ink2';
@@ -103,8 +108,11 @@ export function SalesImportResolution({
         const current = choices.lines[line.lineNumber] ?? {
           choice: '',
           remember: true,
+          name: normalizeMethodName(line.originalLabel),
         };
-        const skipped = current.choice === SKIP_LINE;
+        const creating = current.choice === CREATE_METHOD;
+        const nameError = newMethodNameError(preview, choices, line.lineNumber);
+        const nameId = `new-method-name-${line.lineNumber}`;
         return (
           <div key={line.lineNumber} className="min-w-0">
             <label className={labelClass}>
@@ -127,16 +135,45 @@ export function SalesImportResolution({
                     {method.name}
                   </option>
                 ))}
-                {line.amount === 0 && (
-                  <option value={SKIP_LINE}>Omitir (monto 0)</option>
-                )}
+                <option value={CREATE_METHOD}>
+                  Crear medio de pago «{line.originalLabel}»
+                </option>
               </select>
             </label>
+            {creating && (
+              <div className="mt-3 min-w-0">
+                <label className={labelClass}>
+                  Nombre del medio nuevo
+                  <input
+                    type="text"
+                    value={current.name}
+                    maxLength={PAYMENT_METHOD_NAME_MAX}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      onLineChange(line.lineNumber, {
+                        ...current,
+                        name: event.target.value,
+                      })
+                    }
+                    className={`${inputClass} mt-2`}
+                    aria-invalid={nameError !== null}
+                    aria-describedby={`${nameId}-help`}
+                  />
+                </label>
+                <p
+                  id={`${nameId}-help`}
+                  className={`mt-2 text-xs ${nameError ? 'text-crit' : 'text-muted'}`}
+                >
+                  {nameError ??
+                    'Se crea activo, fuera de la conciliación de vouchers y sin propinas; ajústalo después en Medios de pago.'}
+                </p>
+              </div>
+            )}
             <label className={checkboxRowClass}>
               <input
                 type="checkbox"
-                checked={current.remember && !skipped}
-                disabled={disabled || skipped}
+                checked={current.remember || creating}
+                disabled={disabled || creating}
                 onChange={(event) =>
                   onLineChange(line.lineNumber, {
                     ...current,
@@ -147,7 +184,9 @@ export function SalesImportResolution({
               />
               <span>
                 Recordar para próximas cargas
-                {skipped ? ' (una línea omitida no se recuerda)' : ''}
+                {creating
+                  ? ' (el medio nuevo siempre recuerda la etiqueta)'
+                  : ''}
               </span>
             </label>
           </div>

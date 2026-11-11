@@ -9,13 +9,21 @@ import type {
 // (SPRINT-4R-T09). Solo consulta: nunca asigna IDs a locales ni crea alias.
 // Un local o medio sin equivalencia queda como problema y la vista previa no
 // guarda nada (canConfirm = false). Desde SPRINT-4A-T18 el problema no
-// bloquea: el administrador elige a mano el local o el medio (o omite una
-// línea en 0) y confirma con POST /sales-imports/confirm-with-resolution.
+// bloquea: el administrador elige a mano el local o el medio (o crea el
+// medio, SPRINT-4A-T21) y confirma con
+// POST /sales-imports/confirm-with-resolution.
 //
 // Desde SPRINT-4A-T17 el local se identifica por el ID Subway del encabezado
 // (72597 en «208 - 72597») contra stores.subway_store_id, y debe estar
 // activo. El número interno de MrComanda (208) se ignora y
 // store_external_codes ya no se consulta.
+//
+// Desde SPRINT-4A-T21 (decisión del PO) una línea sin alias con monto 0 se
+// omite sola (skipped = true): no es un problema ni pide resolución, y se
+// guarda como línea omitida AUTOMATIC. Una línea sin alias con valor sigue
+// siendo un problema: se elige su medio o se crea uno desde la vista previa.
+// Excepción: si TODAS las líneas quedarían omitidas no se omite ninguna (la
+// importación necesita al menos una línea de venta) y todas piden su medio.
 
 export interface ResolvedStore {
   id: string;
@@ -30,6 +38,8 @@ export interface ResolvedPaymentMethod {
 
 export interface ResolvedPaymentLine extends ParsedPaymentLine {
   paymentMethod: ResolvedPaymentMethod | null;
+  // SPRINT-4A-T21: true si la línea no tiene alias, está en 0 y se omite sola.
+  skipped: boolean;
 }
 
 // Problemas del local (SPRINT-4A-T17):
@@ -99,20 +109,26 @@ export class SalesImportResolverService {
     const byLabel = new Map(
       aliases.map((alias) => [alias.normalizedLabel, alias.paymentMethod]),
     );
+    const skippable = (line: ParsedPaymentLine): boolean =>
+      line.amount === 0 && !byLabel.has(line.normalizedLabel);
+    // Al menos una línea debe quedar como venta: si todas se omitirían, no
+    // se omite ninguna.
+    const autoSkip = !report.lines.every(skippable);
     const lines = report.lines.map((line): ResolvedPaymentLine => {
       const paymentMethod = byLabel.get(line.normalizedLabel) ?? null;
-      if (!paymentMethod) {
+      const skipped = autoSkip && skippable(line);
+      if (!paymentMethod && !skipped) {
         issues.push({
           code: 'PAYMENT_METHOD_NOT_CONFIGURED',
           lineNumber: line.lineNumber,
           originalLabel: line.originalLabel,
           message:
             line.amount === 0
-              ? `El medio de pago «${line.originalLabel}» no tiene un alias configurado. Elige su medio del catálogo u omítelo (su monto es 0).`
-              : `El medio de pago «${line.originalLabel}» no tiene un alias configurado. Elige su medio del catálogo para confirmar.`,
+              ? `El medio de pago «${line.originalLabel}» no tiene un alias configurado. Todas las líneas del reporte están en 0 y al menos una debe quedar asociada: elige su medio del catálogo o crea uno nuevo.`
+              : `El medio de pago «${line.originalLabel}» no tiene un alias configurado. Elige su medio del catálogo o crea uno nuevo para confirmar.`,
         });
       }
-      return { ...line, paymentMethod };
+      return { ...line, paymentMethod, skipped };
     });
 
     return {

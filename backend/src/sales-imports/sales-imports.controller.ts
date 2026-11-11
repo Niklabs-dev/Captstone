@@ -109,13 +109,15 @@ export class SalesImportsController {
       'su contenido): fecha de negocio desde el «Período», emisión, local, ' +
       'medios de pago y total. Identifica el local activo por el ID Subway ' +
       'del encabezado (72597 en «Local: 208 - 72597»; el número interno de ' +
-      'MrComanda se ignora) y cada medio por sus alias configurados. Si todo ' +
-      'resuelve, guarda el archivo en el ' +
+      'MrComanda se ignora) y cada medio por sus alias configurados. Una ' +
+      'línea en 0 sin alias se omite sola (skipped = true) y no impide ' +
+      'confirmar (SPRINT-4A-T21). Si todo resuelve, guarda el archivo en el ' +
       'volumen privado y crea la importación PENDING con su siguiente versión ' +
+      '(con las líneas omitidas registradas) ' +
       '(201, outcome CREATED). El mismo archivo para el mismo local y fecha ' +
       'devuelve la importación existente sin duplicarla (200, EXISTING). Si ' +
       'el local no se identifica (sin ID Subway reconocible, ID no asignado ' +
-      'o local inactivo) o falta configurar algún medio responde 200 con outcome ' +
+      'o local inactivo) o falta configurar algún medio con valor responde 200 con outcome ' +
       'UNRESOLVED, la lista de problemas y sin guardar nada. activeImport ' +
       'indica la versión vigente que la confirmación reemplazaría.',
   })
@@ -201,8 +203,13 @@ export class SalesImportsController {
       'el mismo archivo junto con la resolución (campo resolution, JSON con ' +
       'el esquema SalesImportResolutionDto). Nada se adivina: store.storeId ' +
       'elige un local activo cuando el ID Subway no lo identificó, y cada ' +
-      'línea sin alias trae ASSIGN con un medio activo del catálogo o SKIP ' +
-      '(solo si su monto es 0). remember guarda la elección para próximas ' +
+      'línea pendiente (sin alias y con skipped = false) trae ASSIGN con un ' +
+      'medio activo del catálogo o CREATE con el nombre de un medio nuevo ' +
+      '(SPRINT-4A-T21): se da de alta activo, EXTERNAL_OTHER y sin propinas, ' +
+      'con el alias de la etiqueta, auditado (PAYMENT_METHOD_CREATED y ' +
+      'PAYMENT_METHOD_ALIAS_CREATED) en la misma transacción. Las líneas en ' +
+      '0 sin alias se omiten solas y no se envían; ninguna línea con valor ' +
+      'se puede omitir. remember guarda la elección para próximas ' +
       'cargas: asigna el ID Subway del archivo al local elegido solo si el ' +
       'local no tiene uno (nunca lo sobrescribe) o crea el alias del medio; ' +
       'cada cambio queda auditado. El servidor exige que la resolución cubra ' +
@@ -215,12 +222,12 @@ export class SalesImportsController {
   })
   @ApiOkResponse({
     description:
-      'Importación vigente con sus líneas, las omitidas, quién resolvió a mano y todas sus versiones.',
+      'Importación vigente con sus líneas (las de un medio nuevo, MANUAL), las omitidas, quién resolvió a mano y todas sus versiones.',
     type: SalesImportDetailDto,
   })
   @ApiBadRequestResponse({
     description:
-      'Falta el archivo, la resolución es inválida o incompleta (local o línea sin elegir, local o medio inactivo, omitir una línea con monto distinto de 0, recordar un ID ya configurado) o el archivo ya no tiene datos por identificar. No se guarda nada.',
+      'Falta el archivo, la resolución es inválida o incompleta (local o línea sin elegir, local o medio inactivo, una acción distinta de ASSIGN o CREATE, una línea que se omite sola, un nombre de medio nuevo inválido o que no genera un código válido, recordar un ID ya configurado) o el archivo ya no tiene datos por identificar. No se guarda nada.',
   })
   @ApiPayloadTooLargeResponse({
     description:
@@ -237,7 +244,7 @@ export class SalesImportsController {
   })
   @ApiConflictResponse({
     description:
-      'La versión vigente cambió desde la vista previa (incluye la vigente actual), el archivo ya tiene otra versión pendiente o reemplazada en ese local, o una equivalencia cambió al mismo tiempo.',
+      'La versión vigente cambió desde la vista previa (incluye la vigente actual), el archivo ya tiene otra versión pendiente o reemplazada en ese local, una equivalencia cambió al mismo tiempo, o el medio nuevo repite el nombre o el código de un medio existente (code PAYMENT_METHOD_NAME_TAKEN: se elige en el selector o se reactiva).',
     type: SalesImportConflictDto,
   })
   async confirmWithResolution(

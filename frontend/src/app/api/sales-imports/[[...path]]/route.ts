@@ -11,7 +11,7 @@ import {
   parseSalesImportPreview,
   parseSalesImportSummary,
   reportErrorMessage,
-  resolvedConfirmError,
+  resolvedConfirmFailure,
   SALES_PREVIEW_CONFLICT,
   salesImportError,
 } from '@/lib/sales-imports';
@@ -180,9 +180,11 @@ async function confirmWithResolution(
   if (!upstream.ok) {
     const error: unknown = await upstream.json().catch(() => null);
     // Solo los errores del archivo (código conocido) traen su mensaje; el
-    // resto usa textos propios, nunca el mensaje del servidor.
+    // resto usa textos propios (incluido el nombre repetido de un medio
+    // nuevo), nunca el mensaje del servidor.
     const message =
-      reportErrorMessage(error) ?? resolvedConfirmError(upstream.status);
+      reportErrorMessage(error) ??
+      resolvedConfirmFailure(upstream.status, error);
     return failure(upstream.status, message);
   }
   const parsed = parseSalesImportDetail(

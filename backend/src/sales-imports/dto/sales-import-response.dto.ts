@@ -118,6 +118,14 @@ export class SalesImportSkippedLineDto {
     nullable: true,
   })
   percentage: number | null;
+
+  @ApiProperty({
+    description:
+      'AUTOMATIC si se omitió sola por estar en 0 sin alias (SPRINT-4A-T21); MANUAL si la omitió el administrador (importaciones anteriores).',
+    enum: RESOLUTIONS,
+    example: 'AUTOMATIC',
+  })
+  resolution: string;
 }
 
 export class SalesImportVersionDto {
@@ -317,7 +325,7 @@ export class SalesImportDetailDto extends SalesImportSummaryDto {
 
   @ApiProperty({
     description:
-      'Líneas omitidas a mano al importar (monto 0); vacío si no se omitió ninguna.',
+      'Líneas omitidas al importar (monto 0; ver resolution); vacío si no se omitió ninguna.',
     type: SalesImportSkippedLineDto,
     isArray: true,
   })
@@ -413,6 +421,13 @@ export class SalesImportPreviewLineDto {
     nullable: true,
   })
   paymentMethod: SalesImportPaymentMethodDto | null;
+
+  @ApiProperty({
+    description:
+      'true si la línea no tiene alias y está en 0: se omite sola al importar y no se elige (no es un problema). Si todas las líneas estuvieran en 0 sin alias, ninguna se omite.',
+    example: true,
+  })
+  skipped: boolean;
 }
 
 export class SalesImportStoreOptionDto {
@@ -454,7 +469,7 @@ export class SalesImportResolutionOptionsDto {
 
   @ApiProperty({
     description:
-      'Medios activos del catálogo para las líneas sin alias; vacío si todas se identificaron.',
+      'Medios activos del catálogo para las líneas pendientes (sin alias y no omitidas); vacío si no hay ninguna. Cada línea pendiente también puede crear un medio nuevo (acción CREATE).',
     type: SalesImportPaymentMethodDto,
     isArray: true,
   })
@@ -479,7 +494,7 @@ export class SalesImportPreviewDto {
 
   @ApiProperty({
     description:
-      'Datos que no se identificaron y hay que elegir a mano (vacío si no hay).',
+      'Datos que no se identificaron y hay que elegir a mano (vacío si no hay). Las líneas en 0 sin alias se omiten solas y no aparecen aquí.',
     type: SalesImportIssueDto,
     isArray: true,
   })
@@ -624,4 +639,12 @@ export class SalesImportConflictDto {
     nullable: true,
   })
   activeImport: SalesImportVersionDto | null;
+
+  @ApiProperty({
+    description:
+      'Solo en la confirmación con resolución: PAYMENT_METHOD_NAME_TAKEN si el medio nuevo (CREATE) repite el nombre o el código de un medio existente (SPRINT-4A-T21).',
+    example: 'PAYMENT_METHOD_NAME_TAKEN',
+    required: false,
+  })
+  code?: string;
 }
