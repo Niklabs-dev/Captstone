@@ -31,3 +31,20 @@ export function isValidPaymentMethodCode(code: string): boolean {
   }
   return code.split('_').every((token) => TOKEN_PATTERN.test(token));
 }
+
+// Código para un medio creado desde la vista previa de la importación de
+// ventas (SPRINT-4A-T21), derivado de su nombre: sin tildes, en mayúsculas y
+// con cada tramo que no sea letra o dígito como un "_" («N.de Créd.» →
+// "N_DE_CRED"). Se recorta a PAYMENT_METHOD_CODE_MAX_LENGTH; quien lo use
+// debe validarlo con isValidPaymentMethodCode (un nombre sin letras ASCII ni
+// dígitos produce un código vacío o inválido).
+export function paymentMethodCodeFromName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/gu, '_')
+    .replace(/^_+|_+$/gu, '')
+    .slice(0, PAYMENT_METHOD_CODE_MAX_LENGTH)
+    .replace(/_+$/u, '');
+}

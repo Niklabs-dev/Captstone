@@ -1,14 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  CREATE_METHOD,
   MAX_SALES_FILE_BYTES,
-  SKIP_LINE,
+  NEW_METHOD_NAME_TAKEN,
   buildResolution,
   effectiveActiveImport,
   initialChoices,
   isResolvable,
+  newMethodCode,
+  newMethodNameError,
   parseResolutionBody,
+  pendingLines,
+  previewTableLines,
   resolvedConfirmError,
+  resolvedConfirmFailure,
   resolvedPreviewLines,
   storeRememberBlock,
   fileDateDiffers,
@@ -237,7 +243,16 @@ test('La descarga informa un archivo alterado', async () => {
 });
 
 // SPRINT-4A-T19: vista previa UNRESOLVED con resolución manual. Caso real del
-// 05/11: Santa María sin ID Subway asignado y «N.de Créd.» en 0 sin alias.
+// 05/11: Santa María sin ID Subway asignado y «N.de Créd.» en 0 sin alias
+// (desde SPRINT-4A-T21 se omite sola).
+const noteLine = {
+  lineNumber: 2,
+  originalLabel: 'N.de Créd.',
+  amount: 0,
+  percentage: 0,
+  paymentMethod: null,
+  skipped: true,
+};
 const santaMaria = 'a9000000-0000-4000-8000-000000000010';
 const transfer = 'a9000000-0000-4000-8000-000000000011';
 const unresolved = {
@@ -249,24 +264,9 @@ const unresolved = {
   subwayStoreId: '72597',
   externalStoreCode: '208 - 72597',
   totalAmount: 873_260,
-  lines: [
-    { ...line, amount: 873_260 },
-    {
-      lineNumber: 2,
-      originalLabel: 'N.de Créd.',
-      amount: 0,
-      percentage: 0,
-      paymentMethod: null,
-    },
-  ],
-  issues: [
-    { code: 'STORE_NOT_CONFIGURED', message: 'Elige el local.' },
-    {
-      code: 'PAYMENT_METHOD_NOT_CONFIGURED',
-      message: 'Elige el medio.',
-      lineNumber: 2,
-    },
-  ],
+  lines: [{ ...line, amount: 873_260 }, noteLine],
+  // SPRINT-4A-T21: la línea en 0 sin alias no es un problema.
+  issues: [{ code: 'STORE_NOT_CONFIGURED', message: 'Elige el local.' }],
   resolutionOptions: {
     stores: [
       {
@@ -294,7 +294,8 @@ test('Proyecta las opciones de la resolución manual', () => {
   assert.ok(parsed);
   assert.equal(isResolvable(parsed), true);
   assert.equal(parsed.subwayStoreId, '72597');
-  assert.equal(parsed.issues[1].lineNumber, 2);
+  assert.equal(parsed.issues.length, 1);
+  assert.equal(parsed.lines[1].skipped, true);
   assert.deepEqual(
     parsed.resolutionOptions?.stores.map((store) => store.name),
     ['Santa María', 'Calera'],
@@ -314,28 +315,19 @@ test('Proyecta las opciones de la resolución manual', () => {
   assert.equal(isResolvable(created), false);
 });
 
-test('Confirmar se habilita solo con todo resuelto (05/11: Santa María y N.de Créd. omitida)', () => {
+test('Confirmar se habilita solo con todo resuelto (05/11: Santa María y N.de Créd. omitida sola)', () => {
   const parsed = parseSalesImportPreview(unresolved);
   assert.ok(parsed);
+  // SPRINT-4A-T21: la línea en 0 sin alias no es pendiente.
+  assert.deepEqual(pendingLines(parsed), []);
   const empty = initialChoices(parsed);
-  assert.deepEqual(empty, {
-    storeId: '',
-    rememberStore: true,
-    lines: { 2: { choice: '', remember: true } },
-  });
+  assert.deepEqual(empty, { storeId: '', rememberStore: true, lines: {} });
   assert.equal(buildResolution(parsed, empty), null);
-  const storeOnly = { ...empty, storeId: santaMaria };
-  assert.equal(buildResolution(parsed, storeOnly), null);
-  const ready = {
-    ...storeOnly,
-    lines: { 2: { choice: SKIP_LINE, remember: true } },
-  };
+  const ready = { ...empty, storeId: santaMaria };
   assert.deepEqual(buildResolution(parsed, ready), {
     expectedActiveImportId: null,
     store: { storeId: santaMaria, remember: true },
-    lines: [
-      { lineNumber: 2, action: 'SKIP', paymentMethodId: null, remember: false },
-    ],
+    lines: [],
   });
   // El total sigue cuadrando: la omitida está en 0 y queda aparte.
   const shown = resolvedPreviewLines(parsed, ready);
@@ -347,15 +339,164 @@ test('Confirmar se habilita solo con todo resuelto (05/11: Santa María y N.de C
     shown.skipped.map((item) => item.originalLabel),
     ['N.de Créd.'],
   );
-  const assigned = resolvedPreviewLines(parsed, {
-    ...ready,
-    lines: { 2: { choice: transfer, remember: false } },
-  });
-  assert.equal(assigned.lines[1].paymentMethod?.name, 'Transferencia');
-  assert.equal(assigned.lines[1].resolution, 'MANUAL');
 });
 
-test('No ofrece omitir líneas con monto ni recordar lo que no se puede', () => {
+test('Una vista previa confirmable lista aparte la línea omitida sola', () => {
+  const parsed = parseSalesImportPreview({
+    ...preview,
+    lines: [line, { ...noteLine, lineNumber: 2 }],
+  });
+  assert.ok(parsed);
+  const table = previewTableLines(parsed);
+  assert.deepEqual(
+    table.lines.map((item) => item.originalLabel),
+    ['EFECTIVO'],
+  );
+  assert.deepEqual(
+    table.skipped.map((item) => item.originalLabel),
+    ['N.de Créd.'],
+  );
+  // Contratos anteriores sin skipped: nada se omite solo.
+  const legacy = parseSalesImportPreview(preview);
+  assert.equal(legacy?.lines[0].skipped, false);
+  for (const bad of [
+    { ...noteLine, skipped: 'sí' },
+    { ...noteLine, amount: 500 },
+    { ...noteLine, paymentMethod: method },
+  ])
+    assert.equal(
+      parseSalesImportPreview({ ...preview, lines: [line, bad] }),
+      null,
+    );
+});
+
+// Línea con valor sin alias: se elige un medio activo o se crea uno nuevo.
+const coupon = {
+  lineNumber: 3,
+  originalLabel: 'CUPÓN  RAPPI ',
+  amount: 50_000,
+  percentage: null,
+  paymentMethod: null,
+  skipped: false,
+};
+const withCoupon = {
+  ...unresolved,
+  totalAmount: 923_260,
+  lines: [...unresolved.lines, coupon],
+  issues: [
+    ...unresolved.issues,
+    {
+      code: 'PAYMENT_METHOD_NOT_CONFIGURED',
+      message: 'Elige o crea el medio.',
+      lineNumber: 3,
+    },
+  ],
+};
+
+test('Una línea con valor se asigna a un medio activo o crea uno nuevo (SPRINT-4A-T21)', () => {
+  const parsed = parseSalesImportPreview(withCoupon);
+  assert.ok(parsed);
+  const empty = initialChoices(parsed);
+  // El nombre sugerido es la etiqueta con los espacios normalizados.
+  assert.deepEqual(empty.lines, {
+    3: { choice: '', remember: true, name: 'CUPÓN RAPPI' },
+  });
+  const base = { ...empty, storeId: santaMaria };
+  assert.equal(buildResolution(parsed, base), null);
+
+  const assigned = {
+    ...base,
+    lines: { 3: { choice: transfer, remember: false, name: 'CUPÓN RAPPI' } },
+  };
+  assert.deepEqual(buildResolution(parsed, assigned)?.lines, [
+    {
+      lineNumber: 3,
+      action: 'ASSIGN',
+      paymentMethodId: transfer,
+      name: null,
+      remember: false,
+    },
+  ]);
+  const shownAssigned = resolvedPreviewLines(parsed, assigned);
+  assert.equal(shownAssigned.lines[1].paymentMethod?.name, 'Transferencia');
+  assert.equal(shownAssigned.lines[1].resolution, 'MANUAL');
+
+  const creating = {
+    ...base,
+    lines: {
+      3: { choice: CREATE_METHOD, remember: false, name: '  Cupón   Rappi ' },
+    },
+  };
+  // Crear siempre recuerda la etiqueta, aunque el checkbox venga desmarcado.
+  assert.deepEqual(buildResolution(parsed, creating)?.lines, [
+    {
+      lineNumber: 3,
+      action: 'CREATE',
+      paymentMethodId: null,
+      name: 'Cupón Rappi',
+      remember: true,
+    },
+  ]);
+  const shown = resolvedPreviewLines(parsed, creating);
+  assert.deepEqual(shown.created, [3]);
+  assert.deepEqual(shown.lines[1].paymentMethod, {
+    id: '',
+    code: 'CUPON_RAPPI',
+    name: 'Cupón Rappi',
+  });
+  assert.equal(
+    shown.lines.reduce((sum, item) => sum + item.amount, 0),
+    parsed.totalAmount,
+  );
+});
+
+test('El nombre del medio nuevo no repite uno existente ni queda inválido', () => {
+  const parsed = parseSalesImportPreview(withCoupon);
+  assert.ok(parsed);
+  const choose = (name: string) => ({
+    storeId: santaMaria,
+    rememberStore: true,
+    lines: { 3: { choice: CREATE_METHOD, remember: true, name } },
+  });
+  for (const [name, message] of [
+    ['', /Ingresa el nombre/],
+    ['12', /al menos una letra/],
+    ['ÆØ', /al menos dos letras o números/],
+    [' transferencia ', /Ya existe el medio «Transferencia»/],
+    ['cash', /Ya existe el medio «Efectivo»/],
+  ] as const) {
+    assert.match(newMethodNameError(parsed, choose(name), 3) ?? '', message);
+    assert.equal(buildResolution(parsed, choose(name)), null);
+  }
+  assert.equal(newMethodNameError(parsed, choose('Cupón Rappi'), 3), null);
+  assert.equal(newMethodCode('N.de Créd.'), 'N_DE_CRED');
+  // Dos nombres distintos con el mismo código se rechazan; el mismo nombre
+  // crea un solo medio para ambas líneas.
+  const two = parseSalesImportPreview({
+    ...withCoupon,
+    lines: [
+      ...withCoupon.lines,
+      { ...coupon, lineNumber: 4, originalLabel: 'X' },
+    ],
+  });
+  assert.ok(two);
+  const twice = (second: string) => ({
+    storeId: santaMaria,
+    rememberStore: true,
+    lines: {
+      3: { choice: CREATE_METHOD, remember: true, name: 'Cupones' },
+      4: { choice: CREATE_METHOD, remember: true, name: second },
+    },
+  });
+  assert.match(
+    newMethodNameError(two, twice('cupones'), 4) ?? '',
+    /mismo nombre/,
+  );
+  assert.equal(newMethodNameError(two, twice('Cupones'), 4), null);
+  assert.equal(buildResolution(two, twice('Cupones'))?.lines.length, 2);
+});
+
+test('No ofrece omitir líneas ni recordar lo que no se puede', () => {
   const parsed = parseSalesImportPreview({
     ...unresolved,
     lines: [
@@ -366,15 +507,17 @@ test('No ofrece omitir líneas con monto ni recordar lo que no se puede', () => 
         amount: 73_260,
         percentage: null,
         paymentMethod: null,
+        skipped: false,
       },
     ],
   });
   assert.ok(parsed);
+  // Sin elegir medio para la línea con valor no hay resolución.
   assert.equal(
     buildResolution(parsed, {
       storeId: santaMaria,
       rememberStore: true,
-      lines: { 2: { choice: SKIP_LINE, remember: false } },
+      lines: { 2: { choice: 'SKIP', remember: false, name: '' } },
     }),
     null,
   );
@@ -388,7 +531,7 @@ test('No ofrece omitir líneas con monto ni recordar lo que no se puede', () => 
   const choices = {
     storeId: other,
     rememberStore: true,
-    lines: { 2: { choice: transfer, remember: true } },
+    lines: { 2: { choice: transfer, remember: true, name: '' } },
   };
   assert.equal(effectiveActiveImport(parsed, choices)?.id, id);
   assert.deepEqual(buildResolution(parsed, choices), {
@@ -399,6 +542,7 @@ test('No ofrece omitir líneas con monto ni recordar lo que no se puede', () => 
         lineNumber: 2,
         action: 'ASSIGN',
         paymentMethodId: transfer,
+        name: null,
         remember: true,
       },
     ],
@@ -412,32 +556,110 @@ test('El BFF solo reenvía una resolución con el contrato exacto', () => {
   const valid = {
     expectedActiveImportId: null,
     store: { storeId: santaMaria, remember: true },
-    lines: [{ lineNumber: 2, action: 'SKIP', remember: false }],
+    lines: [
+      {
+        lineNumber: 2,
+        action: 'ASSIGN',
+        paymentMethodId: transfer,
+        remember: false,
+      },
+      {
+        lineNumber: 3,
+        action: 'CREATE',
+        name: ' Cupón  Rappi ',
+        remember: true,
+      },
+    ],
   };
   assert.deepEqual(parseResolutionBody(valid), {
     ...valid,
     lines: [
-      { lineNumber: 2, action: 'SKIP', paymentMethodId: null, remember: false },
+      {
+        lineNumber: 2,
+        action: 'ASSIGN',
+        paymentMethodId: transfer,
+        name: null,
+        remember: false,
+      },
+      {
+        lineNumber: 3,
+        action: 'CREATE',
+        paymentMethodId: null,
+        name: 'Cupón Rappi',
+        remember: true,
+      },
     ],
   });
   for (const bad of [
     { ...valid, extra: true },
     { ...valid, expectedActiveImportId: 'x' },
     { ...valid, store: { storeId: santaMaria } },
-    { ...valid, lines: [{ lineNumber: 2, action: 'SKIP', remember: true }] },
+    // SPRINT-4A-T21: ya no se omiten líneas a mano.
+    { ...valid, lines: [{ lineNumber: 2, action: 'SKIP', remember: false }] },
+    { ...valid, lines: [{ lineNumber: 2, action: 'ASSIGN', remember: false }] },
     {
       ...valid,
       lines: [
-        { lineNumber: 2, action: 'SKIP', paymentMethodId: id, remember: false },
+        {
+          lineNumber: 2,
+          action: 'ASSIGN',
+          paymentMethodId: transfer,
+          name: 'X',
+          remember: false,
+        },
       ],
     },
-    { ...valid, lines: [{ lineNumber: 2, action: 'ASSIGN', remember: false }] },
-    { ...valid, lines: [{ lineNumber: 0, action: 'SKIP', remember: false }] },
+    {
+      ...valid,
+      lines: [
+        { lineNumber: 3, action: 'CREATE', name: 'Cupón', remember: false },
+      ],
+    },
+    {
+      ...valid,
+      lines: [
+        {
+          lineNumber: 3,
+          action: 'CREATE',
+          name: 'Cupón',
+          paymentMethodId: transfer,
+          remember: true,
+        },
+      ],
+    },
+    {
+      ...valid,
+      lines: [{ lineNumber: 3, action: 'CREATE', name: '123', remember: true }],
+    },
+    {
+      ...valid,
+      lines: [
+        {
+          lineNumber: 0,
+          action: 'ASSIGN',
+          paymentMethodId: transfer,
+          remember: false,
+        },
+      ],
+    },
     { ...valid, lines: 'x' },
   ])
     assert.equal(parseResolutionBody(bad), null);
   assert.match(resolvedConfirmError(400), /datos elegidos/);
   assert.match(resolvedConfirmError(409), /Vuelve a subir/);
+  // El nombre repetido de un medio nuevo tiene su propio texto, nunca el del
+  // servidor.
+  assert.equal(
+    resolvedConfirmFailure(409, {
+      code: 'PAYMENT_METHOD_NAME_TAKEN',
+      message: 'texto interno',
+    }),
+    NEW_METHOD_NAME_TAKEN,
+  );
+  assert.match(
+    resolvedConfirmFailure(409, { message: 'texto interno' }),
+    /Vuelve a subir/,
+  );
 });
 
 test('El detalle conserva lo resuelto a mano y acepta contratos anteriores', () => {
@@ -448,19 +670,39 @@ test('El detalle conserva lo resuelto a mano y acepta contratos anteriores', () 
     lines: [{ ...line, resolution: 'MANUAL' }],
     skippedLines: [
       { lineNumber: 2, originalLabel: 'N.de Créd.', amount: 0, percentage: 0 },
+      {
+        lineNumber: 3,
+        originalLabel: 'NOTA',
+        amount: 0,
+        percentage: 0,
+        resolution: 'AUTOMATIC',
+      },
     ],
   });
   assert.ok(manual);
   assert.equal(manual.storeResolution, 'MANUAL');
   assert.deepEqual(manual.resolvedBy, { id, name: 'Admin Prueba' });
   assert.equal(manual.lines[0].resolution, 'MANUAL');
-  assert.equal(manual.skippedLines.length, 1);
+  // Sin resolution (SPRINT-4A-T18) la omisión fue a mano.
+  assert.deepEqual(
+    manual.skippedLines.map((item) => item.resolution),
+    ['MANUAL', 'AUTOMATIC'],
+  );
   const legacy = parseSalesImportDetail(detail);
   assert.ok(legacy);
   assert.equal(legacy.storeResolution, 'AUTOMATIC');
   assert.deepEqual(legacy.skippedLines, []);
   assert.equal(
     parseSalesImportDetail({ ...detail, storeResolution: 'OTRO' }),
+    null,
+  );
+  assert.equal(
+    parseSalesImportDetail({
+      ...detail,
+      skippedLines: [
+        { lineNumber: 2, originalLabel: 'N', amount: 0, resolution: 'OTRA' },
+      ],
+    }),
     null,
   );
 });

@@ -1,6 +1,8 @@
 import {
   isValidPaymentMethodCode,
   normalizePaymentMethodCode,
+  PAYMENT_METHOD_CODE_MAX_LENGTH,
+  paymentMethodCodeFromName,
 } from './payment-method-code.util.js';
 
 describe('normalizePaymentMethodCode', () => {
@@ -46,5 +48,31 @@ describe('isValidPaymentMethodCode', () => {
     expect(
       isValidPaymentMethodCode(normalizePaymentMethodCode(' tarjeta debito ')),
     ).toBe(true);
+  });
+});
+
+describe('paymentMethodCodeFromName (SPRINT-4A-T21)', () => {
+  it('deriva un código válido del nombre: sin tildes, mayúsculas y "_"', () => {
+    expect(paymentMethodCodeFromName('N.de Créd.')).toBe('N_DE_CRED');
+    expect(paymentMethodCodeFromName('  Cupón  Ñuñoa ')).toBe('CUPON_NUNOA');
+    expect(paymentMethodCodeFromName('Pago-QR 2')).toBe('PAGO_QR_2');
+    expect(
+      isValidPaymentMethodCode(paymentMethodCodeFromName('N.de Créd.')),
+    ).toBe(true);
+  });
+
+  it('recorta al largo máximo sin dejar un "_" al final', () => {
+    const code = paymentMethodCodeFromName(`${'A'.repeat(39)} B`);
+    expect(code).toBe('A'.repeat(39));
+    expect(code.length).toBeLessThanOrEqual(PAYMENT_METHOD_CODE_MAX_LENGTH);
+  });
+
+  it('un nombre sin letras ASCII ni dígitos no produce un código válido', () => {
+    expect(isValidPaymentMethodCode(paymentMethodCodeFromName('ÆØ'))).toBe(
+      false,
+    );
+    expect(isValidPaymentMethodCode(paymentMethodCodeFromName('123'))).toBe(
+      false,
+    );
   });
 });

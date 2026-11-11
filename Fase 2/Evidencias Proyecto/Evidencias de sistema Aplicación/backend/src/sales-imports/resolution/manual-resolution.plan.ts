@@ -1,6 +1,11 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { SalesImportResolution } from '../../generated/prisma/client.js';
 import type { SalesImportResolutionDto } from '../dto/sales-import-request.dto.js';
+import {
+  isValidPaymentMethodCode,
+  paymentMethodCodeFromName,
+} from '../../payment-methods/utils/payment-method-code.util.js';
+import { normalizeExternalLabel } from '../normalization/normalize-external-label.js';
 import type { ParsedPaymentLine } from '../parser/mrcomanda-report.types.js';
 import type {
   ResolvedSalesReport,
@@ -12,6 +17,11 @@ import type {
 // servicio le entrega el local y los medios elegidos ya leídos de la base) y
 // valida TODO antes de escribir: si falta algo o una elección no es válida,
 // lanza 400 y no se guarda nada. Nunca adivina: solo aplica lo elegido.
+//
+// SPRINT-4A-T21: las líneas en 0 sin alias se omiten solas (skipped en la
+// resolución) y no se eligen; cada línea pendiente se asocia a un medio
+// activo (ASSIGN) o a uno nuevo (CREATE) que se da de alta junto con el alias
+// de su etiqueta. Un nombre ya usado por otro medio responde 409.
 
 export interface ManualStoreCandidate {
   id: string;
@@ -27,11 +37,24 @@ export interface ManualMethodCandidate {
   isActive: boolean;
 }
 
+// Medio que se da de alta desde la vista previa (SPRINT-4A-T21): activo,
+// EXTERNAL_OTHER y no disponible para propinas (se ajusta después en la
+// administración de medios de pago).
+export interface PlannedNewMethod {
+  name: string;
+  code: string;
+}
+
+export type PlannedTarget =
+  | { kind: 'EXISTING'; paymentMethodId: string }
+  | ({ kind: 'NEW' } & PlannedNewMethod);
+
 export interface PlannedLine {
   line: ParsedPaymentLine;
-  paymentMethodId: string;
+  target: PlannedTarget;
   resolution: SalesImportResolution;
-  // Crear el alias de la etiqueta hacia el medio (solo líneas MANUAL).
+  // Crear el alias de la etiqueta hacia el medio (solo líneas MANUAL; en un
+  // medio nuevo, siempre).
   remember: boolean;
 }
 
@@ -41,15 +64,16 @@ export interface ManualResolutionPlan {
   // ID Subway que «recordar» asigna al local elegido; null si no se recuerda.
   rememberSubwayStoreId: string | null;
   lines: PlannedLine[];
+  // Líneas en 0 sin alias, omitidas automáticamente.
   skipped: ParsedPaymentLine[];
 }
 
+// Los mismos caracteres de control que rechaza la administración de medios.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
+
 function quoted(labels: readonly string[]): string {
   return labels.map((label) => `«${label}»`).join(', ');
-}
-
-function clp(amount: number): string {
-  return `$${amount.toLocaleString('es-CL')}`;
 }
 
 function planStore(
@@ -122,14 +146,72 @@ function planStore(
   };
 }
 
+function conflict(message: string): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: 'PAYMENT_METHOD_NAME_TAKEN',
+    message,
+  });
+}
+
+// Medio nuevo para una acción CREATE (SPRINT-4A-T21): el nombre ya llega
+// normalizado por el DTO; el código se deriva del nombre. No repite el nombre
+// (sin distinguir tildes ni mayúsculas) ni el código de un medio existente,
+// activo o no: si ya existe se elige en el selector (o se reactiva), no se
+// duplica.
+function planNewMethod(
+  name: string | null | undefined,
+  label: string,
+  catalog: readonly ManualMethodCandidate[],
+): PlannedNewMethod {
+  if (typeof name !== 'string' || name.length === 0) {
+    throw new BadRequestException(
+      `Indica el nombre del medio de pago nuevo para ${label}.`,
+    );
+  }
+  if (CONTROL_CHARACTERS.test(name)) {
+    throw new BadRequestException(
+      `El nombre del medio nuevo para ${label} tiene caracteres de control: quítalos.`,
+    );
+  }
+  const code = paymentMethodCodeFromName(name);
+  if (!isValidPaymentMethodCode(code)) {
+    throw new BadRequestException(
+      `El nombre «${name}» no permite generar un código para el medio nuevo de ${label}: usa al menos dos letras o dígitos sin tildes especiales, con al menos una letra.`,
+    );
+  }
+  const key = normalizeExternalLabel(name);
+  const sameName = catalog.find(
+    (method) => normalizeExternalLabel(method.name) === key,
+  );
+  if (sameName !== undefined) {
+    throw conflict(
+      sameName.isActive
+        ? `Ya existe el medio de pago «${sameName.name}»: elígelo en el selector en vez de crearlo.`
+        : `Ya existe el medio de pago «${sameName.name}», pero está inactivo: reactívalo en Medios de pago o usa otro nombre.`,
+    );
+  }
+  const sameCode = catalog.find((method) => method.code === code);
+  if (sameCode !== undefined) {
+    throw conflict(
+      `El nombre «${name}» genera el código ${code}, que ya usa el medio «${sameCode.name}»: elige ese medio o usa otro nombre.`,
+    );
+  }
+  return { name, code };
+}
+
 function planLines(
   resolved: ResolvedSalesReport,
   dto: SalesImportResolutionDto,
-  methods: ReadonlyMap<string, ManualMethodCandidate>,
+  catalog: readonly ManualMethodCandidate[],
 ): Pick<ManualResolutionPlan, 'lines' | 'skipped'> {
+  const methods = new Map(catalog.map((method) => [method.id, method]));
+  // Pendientes: sin alias y sin omitirse solas (las líneas en 0 sin alias
+  // se omiten automáticamente, SPRINT-4A-T21).
   const pending = new Map(
     resolved.lines
-      .filter((line) => line.paymentMethod === null)
+      .filter((line) => line.paymentMethod === null && !line.skipped)
       .map((line) => [line.lineNumber, line]),
   );
   const choices = new Map<number, SalesImportResolutionDto['lines'][number]>();
@@ -141,7 +223,7 @@ function planLines(
     }
     if (!pending.has(choice.lineNumber)) {
       throw new BadRequestException(
-        `La línea ${choice.lineNumber} no está pendiente de identificar (ya tiene alias o no existe). Vuelve a cargar la vista previa.`,
+        `La línea ${choice.lineNumber} no está pendiente de identificar (ya tiene alias, se omite sola por estar en 0 o no existe). Vuelve a cargar la vista previa.`,
       );
     }
     choices.set(choice.lineNumber, choice);
@@ -157,40 +239,60 @@ function planLines(
 
   const lines: PlannedLine[] = [];
   const skipped: ParsedPaymentLine[] = [];
+  // Medios nuevos por código: dos líneas con el mismo nombre comparten el
+  // medio; dos nombres distintos que generan el mismo código no.
+  const created = new Map<string, PlannedNewMethod>();
   for (const line of resolved.lines) {
     if (line.paymentMethod !== null) {
       lines.push({
         line,
-        paymentMethodId: line.paymentMethod.id,
+        target: { kind: 'EXISTING', paymentMethodId: line.paymentMethod.id },
         resolution: 'AUTOMATIC',
         remember: false,
       });
       continue;
     }
+    if (line.skipped) {
+      skipped.push(line);
+      continue;
+    }
     const choice = choices.get(line.lineNumber);
     if (choice === undefined) continue;
     const label = `«${line.originalLabel}»`;
-    if (choice.action === 'SKIP') {
+    if (choice.action === 'CREATE') {
       if (
         choice.paymentMethodId !== undefined &&
         choice.paymentMethodId !== null
       ) {
         throw new BadRequestException(
-          `La línea ${label} se omite, así que no lleva medio de pago.`,
+          `La línea ${label} crea un medio nuevo, así que no lleva un medio del catálogo.`,
         );
       }
-      if (choice.remember) {
+      if (!choice.remember) {
         throw new BadRequestException(
-          `Solo se recuerda una línea asociada a un medio de pago: ${label} se omite.`,
+          `Al crear un medio para ${label} su etiqueta siempre se recuerda: envía remember en true.`,
         );
       }
-      if (line.amount !== 0) {
+      const method = planNewMethod(choice.name, label, catalog);
+      const previous = created.get(method.code);
+      if (previous !== undefined && previous.name !== method.name) {
         throw new BadRequestException(
-          `${label} tiene un monto de ${clp(line.amount)}: asócialo a un medio de pago (solo se omiten líneas en 0).`,
+          `Los nombres «${previous.name}» y «${method.name}» generan el mismo código ${method.code}: usa el mismo nombre para crear un solo medio o nombres distintos.`,
         );
       }
-      skipped.push(line);
+      created.set(method.code, method);
+      lines.push({
+        line,
+        target: { kind: 'NEW', ...method },
+        resolution: 'MANUAL',
+        remember: true,
+      });
       continue;
+    }
+    if (choice.name !== undefined && choice.name !== null) {
+      throw new BadRequestException(
+        `La línea ${label} se asocia a un medio del catálogo, así que no lleva el nombre de un medio nuevo.`,
+      );
     }
     const method =
       typeof choice.paymentMethodId === 'string'
@@ -208,27 +310,24 @@ function planLines(
     }
     lines.push({
       line,
-      paymentMethodId: method.id,
+      target: { kind: 'EXISTING', paymentMethodId: method.id },
       resolution: 'MANUAL',
       remember: choice.remember,
     });
   }
-  if (lines.length === 0) {
-    throw new BadRequestException(
-      'Asocia al menos una línea a un medio de pago: no se puede omitir todo el reporte.',
-    );
-  }
   return { lines, skipped };
 }
 
+// catalog: todos los medios del catálogo (activos e inactivos), para validar
+// los elegidos y que un medio nuevo no repita a uno existente.
 export function planManualResolution(
   resolved: ResolvedSalesReport,
   dto: SalesImportResolutionDto,
   chosenStore: ManualStoreCandidate | null,
-  methods: ReadonlyMap<string, ManualMethodCandidate>,
+  catalog: readonly ManualMethodCandidate[],
 ): ManualResolutionPlan {
   const pendingLines = resolved.lines.some(
-    (line) => line.paymentMethod === null,
+    (line) => line.paymentMethod === null && !line.skipped,
   );
   if (resolved.store !== null && !pendingLines) {
     throw new BadRequestException(
@@ -237,6 +336,6 @@ export function planManualResolution(
   }
   return {
     ...planStore(resolved, dto, chosenStore),
-    ...planLines(resolved, dto, methods),
+    ...planLines(resolved, dto, catalog),
   };
 }

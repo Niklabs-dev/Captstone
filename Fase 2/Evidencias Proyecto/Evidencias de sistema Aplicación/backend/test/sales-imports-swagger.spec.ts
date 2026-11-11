@@ -176,6 +176,33 @@ describe('Swagger de la importación de ventas (SPRINT-4R-T10)', () => {
     );
   });
 
+  // SPRINT-4A-T21: las líneas en 0 sin alias se omiten solas y una línea
+  // pendiente puede crear su medio (CREATE con name); ya no existe SKIP.
+  it('documenta la omisión automática y la creación de medios', () => {
+    const line = schema('SalesImportLineResolutionDto');
+    expect(line.properties.action).toMatchObject({
+      enum: ['ASSIGN', 'CREATE'],
+    });
+    expect(line.properties.name).toMatchObject({
+      type: 'string',
+      maxLength: 100,
+      nullable: true,
+    });
+    expect(line.properties.name).toHaveProperty('example');
+    expect(
+      schema('SalesImportPreviewLineDto').properties.skipped,
+    ).toMatchObject({ type: 'boolean' });
+    expect(
+      schema('SalesImportSkippedLineDto').properties.resolution,
+    ).toMatchObject({ enum: ['AUTOMATIC', 'MANUAL'] });
+    expect(Object.keys(schema('SalesImportConflictDto').properties)).toContain(
+      'code',
+    );
+    const op = operation('post', '/sales-imports/confirm-with-resolution');
+    expect(op.description).toContain('CREATE');
+    expect(op.description).not.toContain('SKIP');
+  });
+
   it('la confirmación exige expectedActiveImportId (UUID o null)', () => {
     const confirm = schema('ConfirmSalesImportDto');
     expect(confirm.required).toContain('expectedActiveImportId');

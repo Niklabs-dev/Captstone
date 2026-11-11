@@ -556,10 +556,64 @@ describe.skipIf(!databaseUrl)(
         });
       });
 
-      it('un medio sin alias (N.de Créd.) responde UNRESOLVED con la línea afectada', async () => {
+      it('una línea en 0 sin alias (N.de Créd.) se omite sola y se confirma por el flujo normal (SPRINT-4A-T21)', async () => {
         await withinRollback(async (f) => {
           await f.tx.paymentMethodAlias.deleteMany({
             where: { system: 'MRCOMANDA', normalizedLabel: 'N.DE CRED.' },
+          });
+          const preview = await previewOk(f, await excel(f));
+
+          expect(preview).toMatchObject({
+            outcome: 'CREATED',
+            canConfirm: true,
+            issues: [],
+            store: { id: f.storeId },
+            resolutionOptions: null,
+          });
+          expect(preview.lines[3]).toMatchObject({
+            originalLabel: 'N.de Créd.',
+            paymentMethod: null,
+            skipped: true,
+          });
+          const saved = preview.import as SalesImportDetail;
+          expect(saved.storeResolution).toBe('AUTOMATIC');
+          expect(saved.resolvedBy).toBeNull();
+          expect(saved.lines.map((line) => line.originalLabel)).toEqual([
+            'T. DEBITO',
+            'EFECTIVO',
+            'T. CREDITO',
+          ]);
+          expect(saved.skippedLines).toEqual([
+            {
+              lineNumber: 4,
+              originalLabel: 'N.de Créd.',
+              amount: 0,
+              percentage: 0,
+              resolution: 'AUTOMATIC',
+            },
+          ]);
+
+          const confirmed = await confirm(saved.id, null, f.admin)
+            .expect(200)
+            .then((response) => response.body as SalesImportDetail);
+          expect(confirmed).toMatchObject({
+            status: 'ACTIVE',
+            totalAmount: 650_000,
+            skippedLines: [{ originalLabel: 'N.de Créd.' }],
+          });
+          // Omitir no crea equivalencias.
+          expect(
+            await f.tx.paymentMethodAlias.count({
+              where: { system: 'MRCOMANDA', normalizedLabel: 'N.DE CRED.' },
+            }),
+          ).toBe(0);
+        });
+      });
+
+      it('un medio sin alias con valor responde UNRESOLVED con la línea afectada', async () => {
+        await withinRollback(async (f) => {
+          await f.tx.paymentMethodAlias.deleteMany({
+            where: { system: 'MRCOMANDA', normalizedLabel: 'T. CREDITO' },
           });
           const response = await uploadPreview(await excel(f), f.admin).expect(
             200,
@@ -571,11 +625,14 @@ describe.skipIf(!databaseUrl)(
           expect(preview.issues).toEqual([
             expect.objectContaining({
               code: 'PAYMENT_METHOD_NOT_CONFIGURED',
-              lineNumber: 4,
-              originalLabel: 'N.de Créd.',
+              lineNumber: 3,
+              originalLabel: 'T. CREDITO',
             }),
           ]);
-          expect(preview.lines[3].paymentMethod).toBeNull();
+          expect(preview.lines[2]).toMatchObject({
+            paymentMethod: null,
+            skipped: false,
+          });
           expect(await storedFiles()).toHaveLength(0);
         });
       });

@@ -9,9 +9,13 @@ import {
   IsInt,
   IsObject,
   IsOptional,
+  IsString,
   IsUUID,
+  Matches,
   Max,
+  MaxLength,
   Min,
+  MinLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
@@ -109,11 +113,32 @@ export class ListSalesImportsQueryDto {
 
 // Resolución manual de lo que la vista previa no identificó (SPRINT-4A-T18).
 // Nada se adivina: el administrador elige el local y el medio de cada línea
-// sin alias, o la omite si su monto es 0. «remember» guarda la elección para
-// próximas cargas (ID Subway del local o alias del medio).
+// sin alias. «remember» guarda la elección para próximas cargas (ID Subway
+// del local o alias del medio).
+//
+// SPRINT-4A-T21 (decisión del PO): las líneas en 0 sin alias se omiten solas
+// y no van en la resolución, así que ya no existe la acción SKIP (ninguna
+// línea con valor se puede omitir). CREATE da de alta un medio nuevo con el
+// nombre indicado (por defecto, la etiqueta del informe) y crea el alias de
+// la etiqueta hacia él, en la misma transacción de la confirmación.
 
-export const LINE_RESOLUTION_ACTIONS = ['ASSIGN', 'SKIP'] as const;
+export const LINE_RESOLUTION_ACTIONS = ['ASSIGN', 'CREATE'] as const;
 export type LineResolutionAction = (typeof LINE_RESOLUTION_ACTIONS)[number];
+
+// Mismo largo y normalización del nombre que el alta de medios de pago
+// (CreatePaymentMethodDto): sin caracteres de formato invisibles, sin
+// espacios al inicio o al final y con los espacios internos colapsados.
+export const NEW_PAYMENT_METHOD_NAME_MAX_LENGTH = 100;
+const LETTER_PATTERN = /\p{L}/u;
+
+function normalizeMethodName({ value }: { value: unknown }): unknown {
+  return typeof value === 'string'
+    ? value
+        .replace(/\p{Cf}/gu, '')
+        .trim()
+        .replace(/\s+/gu, ' ')
+    : value;
+}
 
 // Las líneas de «Medios de pago» de un reporte diario son pocas; el límite
 // solo acota el cuerpo.
@@ -150,18 +175,18 @@ export class SalesImportLineResolutionDto {
 
   @ApiProperty({
     description:
-      'ASSIGN asocia la línea a un medio activo del catálogo; SKIP la omite (solo si su monto es 0).',
+      'ASSIGN asocia la línea a un medio activo del catálogo; CREATE crea un medio nuevo (activo) con el nombre indicado y el alias de la etiqueta hacia él. Las líneas en 0 sin alias se omiten solas y no se envían.',
     enum: LINE_RESOLUTION_ACTIONS,
-    example: 'SKIP',
+    example: 'CREATE',
   })
   @IsIn(LINE_RESOLUTION_ACTIONS, {
-    message: 'lines.action debe ser ASSIGN o SKIP',
+    message: 'lines.action debe ser ASSIGN o CREATE',
   })
   action: LineResolutionAction;
 
   @ApiProperty({
     description:
-      'Medio del catálogo para ASSIGN (obligatorio); debe omitirse o ser null en SKIP.',
+      'Medio del catálogo para ASSIGN (obligatorio); debe omitirse o ser null en CREATE.',
     example: 'b9000000-0000-4000-8000-000000000004',
     format: 'uuid',
     type: String,
@@ -175,14 +200,39 @@ export class SalesImportLineResolutionDto {
   )
   @IsUUID(undefined, {
     message:
-      'lines.paymentMethodId debe ser el UUID de un medio en ASSIGN y omitirse en SKIP',
+      'lines.paymentMethodId debe ser el UUID de un medio en ASSIGN y omitirse en CREATE',
   })
   paymentMethodId?: string | null;
 
   @ApiProperty({
     description:
-      'Recordar para próximas cargas: crea el alias de la etiqueta hacia el medio elegido. Solo en ASSIGN.',
-    example: false,
+      'Nombre del medio nuevo para CREATE (obligatorio; se sugiere la etiqueta del informe y se puede editar). Se normalizan los espacios, debe incluir al menos una letra y no puede repetir el nombre ni el código de un medio existente (409). Debe omitirse o ser null en ASSIGN.',
+    example: 'N.de Créd.',
+    maxLength: NEW_PAYMENT_METHOD_NAME_MAX_LENGTH,
+    type: String,
+    nullable: true,
+    required: false,
+  })
+  @ValidateIf(
+    (line: SalesImportLineResolutionDto) =>
+      line.action === 'CREATE' ||
+      (line.name !== undefined && line.name !== null),
+  )
+  @Transform(normalizeMethodName)
+  @IsString({ message: 'lines.name debe ser texto en CREATE' })
+  @MinLength(1, { message: 'lines.name es obligatorio en CREATE' })
+  @MaxLength(NEW_PAYMENT_METHOD_NAME_MAX_LENGTH, {
+    message: `lines.name admite a lo más ${NEW_PAYMENT_METHOD_NAME_MAX_LENGTH} caracteres`,
+  })
+  @Matches(LETTER_PATTERN, {
+    message: 'lines.name debe incluir al menos una letra',
+  })
+  name?: string | null;
+
+  @ApiProperty({
+    description:
+      'Recordar para próximas cargas: crea el alias de la etiqueta hacia el medio elegido. En CREATE el alias siempre se crea y debe ser true.',
+    example: true,
   })
   @IsBoolean({ message: 'lines.remember debe ser true o false' })
   remember: boolean;
@@ -223,7 +273,7 @@ export class SalesImportResolutionDto {
 
   @ApiProperty({
     description:
-      'Una entrada por cada línea sin alias de la vista previa (ni más ni menos).',
+      'Una entrada por cada línea pendiente de la vista previa: sin alias y no omitida (skipped = false); ni más ni menos.',
     type: SalesImportLineResolutionDto,
     isArray: true,
   })
@@ -254,7 +304,7 @@ function parseResolution({ value }: { value: unknown }): unknown {
 }
 
 const RESOLUTION_EXAMPLE =
-  '{"expectedActiveImportId":null,"store":{"storeId":"1010021e-9bab-42d5-851c-417e9e2503bf","remember":true},"lines":[{"lineNumber":4,"action":"SKIP","remember":false}]}';
+  '{"expectedActiveImportId":null,"store":{"storeId":"1010021e-9bab-42d5-851c-417e9e2503bf","remember":true},"lines":[{"lineNumber":3,"action":"CREATE","name":"Cupón","remember":true}]}';
 
 // Solo para Swagger: el formulario multipart de
 // POST /sales-imports/confirm-with-resolution. El archivo llega por req.file

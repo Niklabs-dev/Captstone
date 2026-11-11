@@ -34,9 +34,10 @@ type Tx = Prisma.TransactionClient;
 // Resolución manual del local y de los medios no identificados al importar
 // (SPRINT-4A-T18), contra PostgreSQL real y por HTTP: la vista previa
 // UNRESOLVED ofrece las opciones, POST /sales-imports/confirm-with-resolution
-// importa y confirma con lo elegido (resolver, omitir, recordar) o responde
-// 400 sin guardar nada, y la base rechaza por sí misma las resoluciones que
-// abrirían un hueco. Todo corre en withinRollback; los archivos van a una
+// importa y confirma con lo elegido (resolver, crear el medio, recordar) o
+// responde 400 sin guardar nada, y la base rechaza por sí misma las
+// resoluciones que abrirían un hueco. Desde SPRINT-4A-T21 la línea en 0 sin
+// alias se omite sola y una línea con valor puede crear su medio. Todo corre en withinRollback; los archivos van a una
 // carpeta temporal que se elimina al terminar.
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -72,8 +73,9 @@ interface Resolution {
   store?: { storeId: string; remember: boolean } | null;
   lines: {
     lineNumber: number;
-    action: 'ASSIGN' | 'SKIP';
+    action: 'ASSIGN' | 'CREATE' | 'SKIP';
     paymentMethodId?: string | null;
+    name?: string | null;
     remember: boolean;
   }[];
 }
@@ -132,7 +134,7 @@ describe.skipIf(!databaseUrl)(
     }
 
     // Excel ficticio: T. DEBITO y EFECTIVO con alias; un cupón con monto y
-    // una nota en 0 sin alias. Suma 650.000.
+    // una nota en 0 sin alias (se omite sola). Suma 650.000.
     async function excel(
       f: Fixture,
       options: { subwayStoreId?: string; debit?: number } = {},
@@ -169,7 +171,6 @@ describe.skipIf(!databaseUrl)(
             paymentMethodId: f.methodIds['TRANSFER'],
             remember: false,
           },
-          { lineNumber: 4, action: 'SKIP', remember: false },
         ],
         ...overrides,
       };
@@ -395,10 +396,18 @@ describe.skipIf(!databaseUrl)(
             subwayStoreId: f.fileSubwayStoreId,
             import: null,
           });
+          // La nota en 0 se omite sola: no es un problema (SPRINT-4A-T21).
           expect(preview.issues.map((issue) => issue.code)).toEqual([
             'STORE_NOT_CONFIGURED',
             'PAYMENT_METHOD_NOT_CONFIGURED',
-            'PAYMENT_METHOD_NOT_CONFIGURED',
+          ]);
+          expect(
+            preview.lines.map((line) => [line.originalLabel, line.skipped]),
+          ).toEqual([
+            ['T. DEBITO', false],
+            ['EFECTIVO', false],
+            [f.couponLabel, false],
+            [f.noteLabel, true],
           ]);
           const options = preview.resolutionOptions;
           expect(options).not.toBeNull();
@@ -443,7 +452,7 @@ describe.skipIf(!databaseUrl)(
     });
 
     describe('resolver y omitir', () => {
-      it('importa con el local y el medio elegidos a mano, omite la línea en 0 y lo deja trazado', async () => {
+      it('importa con el local y el medio elegidos a mano, omite sola la línea en 0 y lo deja trazado', async () => {
         await withinRollback(async (f) => {
           const file = await excel(f);
           const response = await confirmResolved(
@@ -483,6 +492,7 @@ describe.skipIf(!databaseUrl)(
               originalLabel: f.noteLabel,
               amount: 0,
               percentage: 0,
+              resolution: 'AUTOMATIC',
             },
           ]);
           // Sin «recordar» no cambia ninguna equivalencia.
@@ -523,14 +533,8 @@ describe.skipIf(!databaseUrl)(
                   paymentMethodId: f.methodIds['TRANSFER'],
                   remembered: false,
                 },
-                {
-                  lineNumber: 4,
-                  originalLabel: f.noteLabel,
-                  action: 'SKIP',
-                  paymentMethodId: null,
-                  remembered: false,
-                },
               ],
+              skippedLines: [{ lineNumber: 4, originalLabel: f.noteLabel }],
             },
           });
 
@@ -640,12 +644,6 @@ describe.skipIf(!databaseUrl)(
                   paymentMethodId: f.methodIds['TRANSFER'],
                   remember: true,
                 },
-                {
-                  lineNumber: 4,
-                  action: 'ASSIGN',
-                  paymentMethodId: f.methodIds['CASH'],
-                  remember: true,
-                },
               ],
             }),
             f.admin,
@@ -653,7 +651,9 @@ describe.skipIf(!databaseUrl)(
             .expect(200)
             .then((response) => response.body as SalesImportDetail);
           expect(detail.storeResolution).toBe('MANUAL');
-          expect(detail.skippedLines).toEqual([]);
+          expect(detail.skippedLines.map((line) => line.originalLabel)).toEqual(
+            [f.noteLabel],
+          );
 
           const target = await f.tx.store.findUniqueOrThrow({
             where: { id: f.targetStoreId },
@@ -663,12 +663,10 @@ describe.skipIf(!databaseUrl)(
             where: { normalizedLabel: { in: [f.couponLabel, f.noteLabel] } },
             orderBy: { normalizedLabel: 'asc' },
           });
+          // La nota omitida sola no recibe alias.
           expect(
             aliases.map((alias) => [alias.label, alias.paymentMethodId]),
-          ).toEqual([
-            [f.couponLabel, f.methodIds['TRANSFER']],
-            [f.noteLabel, f.methodIds['CASH']],
-          ]);
+          ).toEqual([[f.couponLabel, f.methodIds['TRANSFER']]]);
 
           const storeAudit = await f.tx.auditLog.findFirstOrThrow({
             where: {
@@ -688,7 +686,7 @@ describe.skipIf(!databaseUrl)(
               entityId: { in: aliases.map((alias) => alias.id) },
             },
           });
-          expect(aliasAudits).toHaveLength(2);
+          expect(aliasAudits).toHaveLength(1);
           expect(aliasAudits[0].userId).toBe(f.admin.id);
 
           // Reimportar el mismo archivo: identificado, sin resolución.
@@ -702,7 +700,8 @@ describe.skipIf(!databaseUrl)(
             resolutionOptions: null,
             import: { id: detail.id },
           });
-          // Un archivo nuevo del mismo local se confirma sin elegir nada.
+          // Un archivo nuevo del mismo local se confirma sin elegir nada (la
+          // nota en 0 se vuelve a omitir sola).
           const next = await uploadPreview(
             await excel(f, { debit: 420_000 }),
             f.admin,
@@ -716,6 +715,12 @@ describe.skipIf(!databaseUrl)(
             activeImport: { id: detail.id },
           });
           expect(next.import?.storeResolution).toBe('AUTOMATIC');
+          expect(next.import?.skippedLines).toEqual([
+            expect.objectContaining({
+              originalLabel: f.noteLabel,
+              resolution: 'AUTOMATIC',
+            }),
+          ]);
         });
       });
 
@@ -754,6 +759,172 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
+    describe('crear el medio de pago (SPRINT-4A-T21)', () => {
+      function createResolution(f: Fixture, name: string): Resolution {
+        return fullResolution(f, {
+          lines: [{ lineNumber: 3, action: 'CREATE', name, remember: true }],
+        });
+      }
+
+      it('da de alta el medio activo con su alias y auditoría en la misma confirmación', async () => {
+        await withinRollback(async (f) => {
+          const name = `Cupón ${f.couponLabel.slice(6)}`;
+          const code = `CUPON_${f.couponLabel.slice(6)}`;
+          const file = await excel(f);
+          const detail = await confirmResolved(
+            file,
+            createResolution(f, `  ${name}  `),
+            f.admin,
+          )
+            .expect(200)
+            .then((response) => response.body as SalesImportDetail);
+
+          const method = await f.tx.paymentMethod.findUniqueOrThrow({
+            where: { code },
+          });
+          expect(method).toMatchObject({
+            name,
+            isActive: true,
+            behavior: 'EXTERNAL_OTHER',
+            availableForTips: false,
+          });
+          expect(detail.lines[2]).toMatchObject({
+            originalLabel: f.couponLabel,
+            amount: 100_000,
+            paymentMethod: { id: method.id, code, name },
+            resolution: 'MANUAL',
+          });
+          expect(detail.skippedLines.map((line) => line.originalLabel)).toEqual(
+            [f.noteLabel],
+          );
+          const alias = await f.tx.paymentMethodAlias.findUniqueOrThrow({
+            where: {
+              system_normalizedLabel: {
+                system: 'MRCOMANDA',
+                normalizedLabel: f.couponLabel,
+              },
+            },
+          });
+          expect(alias.paymentMethodId).toBe(method.id);
+
+          const created = await f.tx.auditLog.findFirstOrThrow({
+            where: {
+              action: AUDIT_ACTION.PAYMENT_METHOD_CREATED,
+              entityId: method.id,
+            },
+          });
+          expect(created.userId).toBe(f.admin.id);
+          expect(created.detail).toEqual({
+            code,
+            name,
+            sortOrder: method.sortOrder,
+            behavior: 'EXTERNAL_OTHER',
+            availableForTips: false,
+            source: 'sales_import',
+          });
+          expect(
+            await f.tx.auditLog.count({
+              where: {
+                action: AUDIT_ACTION.PAYMENT_METHOD_ALIAS_CREATED,
+                entityId: alias.id,
+              },
+            }),
+          ).toBe(1);
+          const confirmed = await f.tx.auditLog.findFirstOrThrow({
+            where: {
+              action: AUDIT_ACTION.SALES_IMPORT_CONFIRMED,
+              entityId: detail.id,
+            },
+          });
+          expect(confirmed.detail).toMatchObject({
+            manualResolution: {
+              lines: [
+                {
+                  lineNumber: 3,
+                  originalLabel: f.couponLabel,
+                  action: 'CREATE',
+                  paymentMethodId: method.id,
+                  remembered: true,
+                },
+              ],
+            },
+          });
+
+          // La siguiente carga del mismo cupón ya lo identifica por su alias.
+          const again = await uploadPreview(
+            await excel(f, { debit: 420_000 }),
+            f.admin,
+          )
+            .expect(200)
+            .then((response) => response.body as SalesImportPreview);
+          expect(again.issues.map((issue) => issue.code)).toEqual([
+            'STORE_NOT_CONFIGURED',
+          ]);
+          expect(again.lines[2].paymentMethod?.id).toBe(method.id);
+        });
+      });
+
+      it('no duplica un medio existente: 409 con código estable y sin guardar nada', async () => {
+        await withinRollback(async (f) => {
+          const file = await excel(f);
+          const methodsBefore = await f.tx.paymentMethod.count();
+          // Mismo nombre que un medio activo, sin distinguir mayúsculas.
+          const transfer = await f.tx.paymentMethod.findUniqueOrThrow({
+            where: { id: f.methodIds['TRANSFER'] },
+          });
+          const active = await confirmResolved(
+            file,
+            createResolution(f, ` ${transfer.name.toLowerCase()} `),
+            f.admin,
+          ).expect(409);
+          expect(active.body).toMatchObject({
+            code: 'PAYMENT_METHOD_NAME_TAKEN',
+            message: expect.stringContaining(
+              'elígelo en el selector',
+            ) as string,
+          });
+          const inactive = await f.tx.paymentMethod.findUniqueOrThrow({
+            where: { id: f.methodIds['INACTIVE'] },
+          });
+          const reactivate = await confirmResolved(
+            file,
+            createResolution(f, inactive.name.toUpperCase()),
+            f.admin,
+          ).expect(409);
+          expect(reactivate.body).toMatchObject({
+            code: 'PAYMENT_METHOD_NAME_TAKEN',
+            message: expect.stringContaining('reactívalo') as string,
+          });
+          expect(await f.tx.paymentMethod.count()).toBe(methodsBefore);
+          await expectNothingSaved(f);
+        });
+      });
+
+      it('si la confirmación falla, el medio nuevo tampoco queda creado', async () => {
+        await withinRollback(async (f) => {
+          const code = `CUPON_${f.couponLabel.slice(6)}`;
+          await confirmResolved(
+            await excel(f),
+            {
+              ...createResolution(f, `Cupón ${f.couponLabel.slice(6)}`),
+              expectedActiveImportId: randomUUID(),
+            },
+            f.admin,
+          ).expect(409);
+          expect(await f.tx.paymentMethod.count({ where: { code } })).toBe(0);
+          await expectNothingSaved(f);
+          expect(
+            await f.tx.auditLog.count({
+              where: {
+                action: AUDIT_ACTION.PAYMENT_METHOD_CREATED,
+                userId: f.admin.id,
+              },
+            }),
+          ).toBe(0);
+        });
+      });
+    });
+
     describe('rechazos', () => {
       it('responde 400 y no guarda nada si la resolución es inválida o incompleta', async () => {
         await withinRollback(async (f) => {
@@ -775,19 +946,49 @@ describe.skipIf(!databaseUrl)(
                 message: 'está inactivo',
               },
               {
-                resolution: fullResolution(f, {
-                  lines: [{ lineNumber: 4, action: 'SKIP', remember: false }],
-                }),
+                resolution: fullResolution(f, { lines: [] }),
                 message: `Falta elegir el medio de pago de «${f.couponLabel}»`,
+              },
+              // SPRINT-4A-T21: ninguna línea con valor se puede omitir (la
+              // acción SKIP ya no existe) y la línea en 0 no se resuelve.
+              {
+                resolution: fullResolution(f, {
+                  lines: [{ lineNumber: 3, action: 'SKIP', remember: false }],
+                }),
+                message: 'lines.action debe ser ASSIGN o CREATE',
               },
               {
                 resolution: fullResolution(f, {
                   lines: [
-                    { lineNumber: 3, action: 'SKIP', remember: false },
-                    { lineNumber: 4, action: 'SKIP', remember: false },
+                    ...fullResolution(f).lines,
+                    {
+                      lineNumber: 4,
+                      action: 'ASSIGN',
+                      paymentMethodId: f.methodIds['CASH'],
+                      remember: false,
+                    },
                   ],
                 }),
-                message: 'solo se omiten líneas en 0',
+                message: 'se omite sola por estar en 0',
+              },
+              {
+                resolution: fullResolution(f, {
+                  lines: [{ lineNumber: 3, action: 'CREATE', remember: true }],
+                }),
+                message: 'lines.name',
+              },
+              {
+                resolution: fullResolution(f, {
+                  lines: [
+                    {
+                      lineNumber: 3,
+                      action: 'CREATE',
+                      name: 'Cupón',
+                      remember: false,
+                    },
+                  ],
+                }),
+                message: 'siempre se recuerda',
               },
               {
                 resolution: fullResolution(f, {
@@ -798,7 +999,6 @@ describe.skipIf(!databaseUrl)(
                       paymentMethodId: f.methodIds['INACTIVE'],
                       remember: false,
                     },
-                    { lineNumber: 4, action: 'SKIP', remember: false },
                   ],
                 }),
                 message: 'está inactivo',
@@ -829,7 +1029,6 @@ describe.skipIf(!databaseUrl)(
                       action: 'ASSIGN',
                       remember: false,
                     },
-                    { lineNumber: 4, action: 'SKIP', remember: false },
                   ],
                 }),
                 message: 'paymentMethodId',
@@ -1012,23 +1211,27 @@ describe.skipIf(!databaseUrl)(
         });
       });
 
-      it('una línea omitida exige monto 0, cabecera resuelta a mano y etiqueta sin alias', async () => {
+      it('una línea omitida exige monto 0 y etiqueta sin alias; solo la omisión a mano exige cabecera resuelta a mano', async () => {
         await withinRollback(async (f) => {
           const manual = await header(f, {});
           const skipped = (
             importId: string,
             label: string,
             amount = 0n,
+            resolution: 'AUTOMATIC' | 'MANUAL' = 'AUTOMATIC',
+            lineNumber = 4,
           ): Promise<unknown> =>
             f.tx.salesImportSkippedLine.create({
               data: {
                 importId,
-                lineNumber: 4,
+                lineNumber,
                 originalLabel: label,
                 normalizedLabel: label,
                 amount,
+                resolution,
               },
             });
+          // Ninguna línea con valor se omite, por ninguna vía.
           expect(
             await rejected(f, () => skipped(manual, f.noteLabel, 500n)),
           ).toContain('sales_import_skipped_lines_amount_zero');
@@ -1047,19 +1250,36 @@ describe.skipIf(!databaseUrl)(
             sha256Hash: 'b'.repeat(64),
             version: 2,
           });
-          expect(
-            await rejected(f, () => skipped(automatic, f.noteLabel)),
-          ).toContain('Solo una importación resuelta a mano');
-
-          await skipped(manual, f.noteLabel);
+          // SPRINT-4A-T21: la omisión automática no exige resolución manual;
+          // la omisión a mano sí.
           expect(
             await rejected(f, () =>
-              f.tx.salesImportSkippedLine.updateMany({
-                where: { importId: manual },
-                data: { originalLabel: `${f.noteLabel} X` },
-              }),
+              skipped(automatic, f.noteLabel, 0n, 'MANUAL'),
             ),
-          ).toContain('son inmutables');
+          ).toContain('Solo una importación resuelta a mano');
+          expect(
+            await rejected(f, () => skipped(automatic, f.noteLabel, 1n)),
+          ).toContain('sales_import_skipped_lines_amount_zero');
+          await skipped(automatic, f.noteLabel);
+          const stored = await f.tx.salesImportSkippedLine.findFirstOrThrow({
+            where: { importId: automatic },
+          });
+          expect(stored.resolution).toBe('AUTOMATIC');
+
+          await skipped(manual, f.noteLabel, 0n, 'MANUAL');
+          for (const data of [
+            { originalLabel: `${f.noteLabel} X` },
+            { resolution: 'MANUAL' as const },
+          ]) {
+            expect(
+              await rejected(f, () =>
+                f.tx.salesImportSkippedLine.updateMany({
+                  where: { importId: automatic },
+                  data,
+                }),
+              ),
+            ).toContain('son inmutables');
+          }
         });
       });
     });

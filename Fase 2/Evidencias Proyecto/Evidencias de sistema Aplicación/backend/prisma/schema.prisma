@@ -1157,18 +1157,21 @@ model SalesImportLine {
   @@map("sales_import_lines")
 }
 
-/// Línea del reporte omitida a mano al importar (SPRINT-4A-T18): solo con
-/// monto 0 (CHECK) y sin alias configurado para su etiqueta (trigger). Se
-/// conserva para la trazabilidad, pero no es una venta: reportes y panel no
-/// la leen. Inmutable; se elimina solo con su importación PENDING.
+/// Línea del reporte omitida al importar (SPRINT-4A-T18; desde SPRINT-4A-T21
+/// se omite sola): solo con monto 0 (CHECK) y sin alias configurado para su
+/// etiqueta (trigger). Se conserva para la trazabilidad, pero no es una
+/// venta: reportes y panel no la leen. Inmutable; se elimina solo con su importación PENDING.
 model SalesImportSkippedLine {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  lineNumber      Int      @map("line_number")
-  originalLabel   String   @map("original_label") @db.VarChar(100)
-  normalizedLabel String   @map("normalized_label") @db.VarChar(100)
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lineNumber      Int                   @map("line_number")
+  originalLabel   String                @map("original_label") @db.VarChar(100)
+  normalizedLabel String                @map("normalized_label") @db.VarChar(100)
   amount          BigInt
-  percentage      Decimal? @db.Decimal(5, 2)
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  percentage      Decimal?              @db.Decimal(5, 2)
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// SPRINT-4A-T21: AUTOMATIC si se omitió sola (monto 0 sin alias); MANUAL
+  /// si la omitió el administrador (solo importaciones de SPRINT-4A-T18).
+  resolution      SalesImportResolution @default(AUTOMATIC)
 
   import   SalesImport @relation(fields: [importId], references: [id], onDelete: Cascade)
   importId String      @map("import_id") @db.Uuid

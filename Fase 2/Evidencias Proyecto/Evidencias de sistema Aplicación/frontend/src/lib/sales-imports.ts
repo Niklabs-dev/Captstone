@@ -1,4 +1,9 @@
 import { isRecord } from './auth';
+import {
+  isValidPaymentMethodCodeFormat,
+  PAYMENT_METHOD_CODE_MAX,
+  paymentMethodNameError,
+} from './payment-methods';
 import { isTipDate } from './tips';
 import { isUuid } from './users';
 
@@ -35,11 +40,18 @@ export interface SalesImportLine {
   // SPRINT-4A-T18: MANUAL si el medio lo eligió el administrador al importar.
   resolution: 'AUTOMATIC' | 'MANUAL';
 }
-// Línea omitida a mano al importar (siempre en 0, SPRINT-4A-T18).
+// Línea omitida al importar (siempre en 0): AUTOMATIC si se omitió sola por
+// no tener alias (SPRINT-4A-T21); MANUAL si la omitió el administrador
+// (SPRINT-4A-T18).
 export interface SalesImportSkippedLine {
   lineNumber: number;
   originalLabel: string;
   amount: number;
+  resolution: 'AUTOMATIC' | 'MANUAL';
+}
+// Línea de la vista previa: skipped si está en 0 sin alias y se omite sola.
+export interface SalesImportPreviewLine extends SalesImportLine {
+  skipped: boolean;
 }
 export interface SalesImportVersion {
   id: string;
@@ -102,7 +114,7 @@ export interface SalesImportPreview {
   subwayStoreId: string | null;
   store: SalesImportRef | null;
   totalAmount: number;
-  lines: SalesImportLine[];
+  lines: SalesImportPreviewLine[];
   import: SalesImportDetail | null;
   activeImport: SalesImportVersion | null;
   resolutionOptions: SalesImportResolutionOptions | null;
@@ -169,18 +181,46 @@ function parseSkippedLines(value: unknown): SalesImportSkippedLine[] | null {
   if (!Array.isArray(value)) return null;
   const lines: SalesImportSkippedLine[] = [];
   for (const item of value) {
+    // Antes de SPRINT-4A-T21 solo existían omisiones a mano: MANUAL.
+    const resolution =
+      isRecord(item) && item.resolution === undefined
+        ? 'MANUAL'
+        : isRecord(item)
+          ? resolutionOf(item.resolution)
+          : null;
     if (
       !isRecord(item) ||
       !integer(item.lineNumber) ||
       !text(item.originalLabel) ||
-      !integer(item.amount)
+      !integer(item.amount) ||
+      !resolution
     )
       return null;
     lines.push({
       lineNumber: item.lineNumber,
       originalLabel: item.originalLabel,
       amount: item.amount,
+      resolution,
     });
+  }
+  return lines;
+}
+// Contratos anteriores a SPRINT-4A-T21 no traen skipped: nada se omite solo.
+function parsePreviewLines(value: unknown): SalesImportPreviewLine[] | null {
+  if (!Array.isArray(value)) return null;
+  const lines: SalesImportPreviewLine[] = [];
+  for (const item of value) {
+    const parsed = parseLine(item);
+    if (
+      !parsed ||
+      !isRecord(item) ||
+      !(item.skipped === undefined || typeof item.skipped === 'boolean')
+    )
+      return null;
+    const skipped = item.skipped === true;
+    if (skipped && (parsed.paymentMethod !== null || parsed.amount !== 0))
+      return null;
+    lines.push({ ...parsed, skipped });
   }
   return lines;
 }
@@ -349,7 +389,7 @@ export function parseSalesImportPreview(
       ? null
       : parseResolutionOptions(value.resolutionOptions);
   const store = value.store === null ? null : parseRef(value.store);
-  const lines = parseLines(value.lines);
+  const lines = parsePreviewLines(value.lines);
   const saved =
     value.import === null ? null : parseSalesImportDetail(value.import);
   const activeImport =
@@ -404,43 +444,95 @@ export function parseConfirmBody(
 
 // Resolución manual de lo que la vista previa no identificó (SPRINT-4A-T18).
 // Nada se adivina: el administrador elige el local y el medio de cada línea
-// sin alias (o la omite si su monto es 0). «Recordar» viene marcado por
-// defecto y solo se envía cuando es posible.
-export const SKIP_LINE = 'SKIP';
+// pendiente. «Recordar» viene marcado por defecto y solo se envía cuando es
+// posible. Desde SPRINT-4A-T21 (decisión del PO) las líneas en 0 sin alias se
+// omiten solas y no se eligen; una línea con valor se asocia a un medio
+// activo o crea uno nuevo con su etiqueta como nombre (editable), que siempre
+// recuerda el alias. Ninguna línea con valor se puede omitir.
+export const CREATE_METHOD = 'CREATE';
 const MAX_RESOLUTION_LINES = 50;
 
 export interface LineChoice {
-  // ID del medio elegido, SKIP_LINE o '' si falta elegir.
+  // ID del medio elegido, CREATE_METHOD o '' si falta elegir.
   choice: string;
   remember: boolean;
+  // Nombre del medio nuevo (solo con CREATE_METHOD).
+  name: string;
 }
 export interface ResolutionChoices {
   storeId: string;
   rememberStore: boolean;
   lines: Record<number, LineChoice>;
 }
+export interface SalesImportLineResolution {
+  lineNumber: number;
+  action: 'ASSIGN' | 'CREATE';
+  paymentMethodId: string | null;
+  name: string | null;
+  remember: boolean;
+}
 export interface SalesImportResolutionInput {
   expectedActiveImportId: string | null;
   store: { storeId: string; remember: boolean } | null;
-  lines: {
-    lineNumber: number;
-    action: 'ASSIGN' | 'SKIP';
-    paymentMethodId: string | null;
-    remember: boolean;
-  }[];
+  lines: SalesImportLineResolution[];
+}
+
+// Mismo nombre que acepta el alta de medios: sin caracteres de formato, sin
+// espacios al inicio o al final y con los internos colapsados.
+export function normalizeMethodName(value: string): string {
+  return value
+    .replace(/\p{Cf}/gu, '')
+    .trim()
+    .replace(/\s+/gu, ' ');
+}
+// Comparación de nombres sin tildes ni mayúsculas, como el servidor.
+function nameKey(value: string): string {
+  return normalizeMethodName(value)
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toUpperCase();
+}
+// Código que el servidor deriva del nombre del medio nuevo («N.de Créd.» →
+// N_DE_CRED): sin tildes, mayúsculas y "_" entre letras y dígitos.
+export function newMethodCode(name: string): string {
+  return nameKey(name)
+    .replace(/[^A-Z0-9]+/gu, '_')
+    .replace(/^_+|_+$/gu, '')
+    .slice(0, PAYMENT_METHOD_CODE_MAX)
+    .replace(/_+$/u, '');
 }
 
 // La vista previa admite resolución manual: UNRESOLVED con opciones.
 export function isResolvable(preview: SalesImportPreview): boolean {
   return preview.outcome === 'UNRESOLVED' && preview.resolutionOptions !== null;
 }
-export function pendingLines(preview: SalesImportPreview): SalesImportLine[] {
-  return preview.lines.filter((line) => line.paymentMethod === null);
+// Pendientes: sin alias y sin omitirse solas.
+export function pendingLines(
+  preview: SalesImportPreview,
+): SalesImportPreviewLine[] {
+  return preview.lines.filter(
+    (line) => line.paymentMethod === null && !line.skipped,
+  );
+}
+// Líneas de la tabla de una vista previa sin resolver a mano: las omitidas
+// solas se listan aparte y no suman.
+export function previewTableLines(preview: SalesImportPreview): {
+  lines: SalesImportLine[];
+  skipped: SalesImportPreviewLine[];
+} {
+  return {
+    lines: preview.lines.filter((line) => !line.skipped),
+    skipped: preview.lines.filter((line) => line.skipped),
+  };
 }
 export function initialChoices(preview: SalesImportPreview): ResolutionChoices {
   const lines: Record<number, LineChoice> = {};
   for (const line of pendingLines(preview))
-    lines[line.lineNumber] = { choice: '', remember: true };
+    lines[line.lineNumber] = {
+      choice: '',
+      remember: true,
+      name: normalizeMethodName(line.originalLabel).slice(0, 100),
+    };
   return { storeId: '', rememberStore: true, lines };
 }
 export function chosenStore(
@@ -467,6 +559,35 @@ export function storeRememberBlock(
     return `${store.name} ya tiene el ID Subway ${store.subwayStoreId}; no se sobrescribe.`;
   return null;
 }
+// Motivo por el que el nombre del medio nuevo de la línea no sirve, o null.
+// Las mismas reglas del servidor, salvo los medios inactivos (que la vista
+// previa no recibe: el servidor responde 409 si el nombre ya existe).
+export function newMethodNameError(
+  preview: SalesImportPreview,
+  choices: ResolutionChoices,
+  lineNumber: number,
+): string | null {
+  const current = choices.lines[lineNumber];
+  if (!current || current.choice !== CREATE_METHOD) return null;
+  const invalid = paymentMethodNameError(current.name);
+  if (invalid) return invalid;
+  const name = normalizeMethodName(current.name);
+  const code = newMethodCode(name);
+  if (!isValidPaymentMethodCodeFormat(code))
+    return 'Usa al menos dos letras o números (sin símbolos especiales), con al menos una letra.';
+  const existing = preview.resolutionOptions?.paymentMethods.find(
+    (method) => nameKey(method.name) === nameKey(name) || method.code === code,
+  );
+  if (existing)
+    return `Ya existe el medio «${existing.name}»: elígelo en la lista en vez de crearlo.`;
+  for (const [key, other] of Object.entries(choices.lines)) {
+    if (Number(key) === lineNumber || other.choice !== CREATE_METHOD) continue;
+    const otherName = normalizeMethodName(other.name);
+    if (otherName !== name && newMethodCode(otherName) === code)
+      return `Se parece a «${otherName}», que crea otra línea: usa el mismo nombre para crear un solo medio o uno distinto.`;
+  }
+  return null;
+}
 // Vigente que se reemplazaría: la del local identificado o la del elegido.
 export function effectiveActiveImport(
   preview: SalesImportPreview,
@@ -476,12 +597,16 @@ export function effectiveActiveImport(
     ? (chosenStore(preview, choices)?.activeImport ?? null)
     : preview.activeImport;
 }
-// Líneas con el medio elegido a mano (las omitidas quedan fuera) para la
-// tabla y el total; el total sigue siendo la suma de las líneas.
+// Líneas con el medio elegido a mano (las omitidas solas quedan aparte) para
+// la tabla y el total; created lista las líneas que crean un medio nuevo.
 export function resolvedPreviewLines(
   preview: SalesImportPreview,
   choices: ResolutionChoices,
-): { lines: SalesImportLine[]; skipped: SalesImportLine[] } {
+): {
+  lines: SalesImportLine[];
+  skipped: SalesImportPreviewLine[];
+  created: number[];
+} {
   const methods = new Map(
     (preview.resolutionOptions?.paymentMethods ?? []).map((method) => [
       method.id,
@@ -489,22 +614,37 @@ export function resolvedPreviewLines(
     ]),
   );
   const lines: SalesImportLine[] = [];
-  const skipped: SalesImportLine[] = [];
+  const skipped: SalesImportPreviewLine[] = [];
+  const created: number[] = [];
   for (const line of preview.lines) {
+    if (line.skipped) {
+      skipped.push(line);
+      continue;
+    }
     if (line.paymentMethod) {
       lines.push(line);
       continue;
     }
-    const choice = choices.lines[line.lineNumber]?.choice ?? '';
-    if (choice === SKIP_LINE) skipped.push(line);
-    else
+    const current = choices.lines[line.lineNumber];
+    const choice = current?.choice ?? '';
+    const name = normalizeMethodName(current?.name ?? '');
+    if (choice === CREATE_METHOD && name) {
+      created.push(line.lineNumber);
       lines.push({
         ...line,
-        paymentMethod: methods.get(choice) ?? null,
-        resolution: methods.has(choice) ? 'MANUAL' : line.resolution,
+        // Medio aún sin ID: se crea al confirmar.
+        paymentMethod: { id: '', code: newMethodCode(name), name },
+        resolution: 'MANUAL',
       });
+      continue;
+    }
+    lines.push({
+      ...line,
+      paymentMethod: methods.get(choice) ?? null,
+      resolution: methods.has(choice) ? 'MANUAL' : line.resolution,
+    });
   }
-  return { lines, skipped };
+  return { lines, skipped, created };
 }
 // Cuerpo de la confirmación con resolución, o null si falta algo por elegir.
 export function buildResolution(
@@ -527,32 +667,30 @@ export function buildResolution(
       (method) => method.id,
     ),
   );
-  const lines: SalesImportResolutionInput['lines'] = [];
+  const lines: SalesImportLineResolution[] = [];
   for (const line of pendingLines(preview)) {
     const selected = choices.lines[line.lineNumber];
     if (!selected) return null;
-    if (selected.choice === SKIP_LINE) {
-      if (line.amount !== 0) return null;
+    if (selected.choice === CREATE_METHOD) {
+      if (newMethodNameError(preview, choices, line.lineNumber) !== null)
+        return null;
       lines.push({
         lineNumber: line.lineNumber,
-        action: 'SKIP',
+        action: 'CREATE',
         paymentMethodId: null,
-        remember: false,
+        name: normalizeMethodName(selected.name),
+        remember: true,
       });
     } else if (methods.has(selected.choice)) {
       lines.push({
         lineNumber: line.lineNumber,
         action: 'ASSIGN',
         paymentMethodId: selected.choice,
+        name: null,
         remember: selected.remember,
       });
     } else return null;
   }
-  // Al menos una línea debe quedar asociada a un medio (no se omite todo).
-  const assigned =
-    preview.lines.length -
-    lines.filter((line) => line.action === 'SKIP').length;
-  if (assigned === 0) return null;
   return {
     expectedActiveImportId: effectiveActiveImport(preview, choices)?.id ?? null,
     store,
@@ -588,15 +726,19 @@ export function parseResolutionBody(
       return null;
     store = { storeId: raw.storeId, remember: raw.remember };
   }
-  const lines: SalesImportResolutionInput['lines'] = [];
+  const lines: SalesImportLineResolution[] = [];
   for (const raw of value.lines) {
     if (
       !isRecord(raw) ||
       Object.keys(raw).some(
         (key) =>
-          !['lineNumber', 'action', 'paymentMethodId', 'remember'].includes(
-            key,
-          ),
+          ![
+            'lineNumber',
+            'action',
+            'paymentMethodId',
+            'name',
+            'remember',
+          ].includes(key),
       ) ||
       !integer(raw.lineNumber) ||
       raw.lineNumber < 1 ||
@@ -604,19 +746,28 @@ export function parseResolutionBody(
     )
       return null;
     const methodId = raw.paymentMethodId ?? null;
-    if (raw.action === 'ASSIGN' && isUuid(methodId))
+    const name = raw.name ?? null;
+    if (raw.action === 'ASSIGN' && isUuid(methodId) && name === null)
       lines.push({
         lineNumber: raw.lineNumber,
         action: 'ASSIGN',
         paymentMethodId: methodId,
+        name: null,
         remember: raw.remember,
       });
-    else if (raw.action === 'SKIP' && methodId === null && !raw.remember)
+    else if (
+      raw.action === 'CREATE' &&
+      methodId === null &&
+      raw.remember &&
+      typeof name === 'string' &&
+      paymentMethodNameError(name) === null
+    )
       lines.push({
         lineNumber: raw.lineNumber,
-        action: 'SKIP',
+        action: 'CREATE',
         paymentMethodId: null,
-        remember: false,
+        name: normalizeMethodName(name),
+        remember: true,
       });
     else return null;
   }
@@ -627,6 +778,19 @@ export function parseResolutionBody(
   };
 }
 
+// El medio nuevo repite el nombre o el código de uno existente (409 con code
+// PAYMENT_METHOD_NAME_TAKEN, SPRINT-4A-T21): se corrige sin volver a subir.
+export const NEW_METHOD_NAME_TAKEN =
+  'Ya existe un medio de pago con ese nombre (puede estar inactivo). Elígelo en la lista, reactívalo en Medios de pago o usa otro nombre.';
+export function resolvedConfirmFailure(status: number, body: unknown): string {
+  if (
+    status === 409 &&
+    isRecord(body) &&
+    body.code === 'PAYMENT_METHOD_NAME_TAKEN'
+  )
+    return NEW_METHOD_NAME_TAKEN;
+  return resolvedConfirmError(status);
+}
 // Errores de la confirmación con resolución: el 400 ya no es del archivo
 // sino de lo elegido; nunca se muestra el texto del servidor.
 export function resolvedConfirmError(status: number): string {

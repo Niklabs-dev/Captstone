@@ -35,12 +35,15 @@ export interface SalesImportLineResponse {
   resolution: SalesImportResolution;
 }
 
-// Línea del reporte omitida a mano (SPRINT-4A-T18): siempre con monto 0.
+// Línea del reporte omitida (siempre con monto 0): AUTOMATIC si se omitió
+// sola por no tener alias (SPRINT-4A-T21); MANUAL si la omitió el
+// administrador (importaciones de SPRINT-4A-T18).
 export interface SalesImportSkippedLineResponse {
   lineNumber: number;
   originalLabel: string;
   amount: number;
   percentage: number | null;
+  resolution: SalesImportResolution;
 }
 
 // Datos de la importación sin sus líneas (listado).
@@ -85,7 +88,7 @@ export interface SalesImportVersionRef {
 
 export interface SalesImportDetail extends SalesImportSummary {
   lines: SalesImportLineResponse[];
-  // Líneas omitidas a mano (monto 0); vacío si no se omitió ninguna.
+  // Líneas omitidas (monto 0); vacío si no se omitió ninguna.
   skippedLines: SalesImportSkippedLineResponse[];
   // Todas las versiones del mismo local y fecha (incluida esta), de la más
   // nueva a la más antigua.
@@ -108,6 +111,8 @@ export interface SalesImportPreviewLine {
   amount: number;
   percentage: number | null;
   paymentMethod: SalesImportPaymentMethodRef | null;
+  // SPRINT-4A-T21: true si no tiene alias, está en 0 y se omite sola.
+  skipped: boolean;
 }
 
 // Local activo que el administrador puede elegir a mano (SPRINT-4A-T18),
@@ -122,7 +127,8 @@ export interface SalesImportStoreOption {
 
 // Opciones para resolver a mano lo que no se identificó (SPRINT-4A-T18):
 // locales activos (vacío si el local se identificó) y medios activos del
-// catálogo (vacío si todas las líneas se identificaron).
+// catálogo (vacío si no hay líneas por elegir). Desde SPRINT-4A-T21 cada
+// línea pendiente también puede crear un medio nuevo (acción CREATE).
 export interface SalesImportResolutionOptions {
   stores: SalesImportStoreOption[];
   paymentMethods: SalesImportPaymentMethodRef[];
@@ -172,12 +178,19 @@ export interface SalesImportManualResolutionSummary {
     subwayStoreId: string | null;
     remembered: boolean;
   } | null;
+  // Líneas resueltas a mano: ASSIGN (medio existente) o CREATE (medio nuevo
+  // creado desde la vista previa, SPRINT-4A-T21; siempre recuerda su alias).
   lines: {
     lineNumber: number;
     originalLabel: string;
-    action: 'ASSIGN' | 'SKIP';
+    action: 'ASSIGN' | 'CREATE';
     paymentMethodId: string | null;
     remembered: boolean;
+  }[];
+  // Líneas en 0 sin alias omitidas automáticamente (SPRINT-4A-T21).
+  skippedLines: {
+    lineNumber: number;
+    originalLabel: string;
   }[];
 }
 
