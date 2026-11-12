@@ -1,5 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { UnitOfMeasure } from '../../generated/prisma/client.js';
+import {
+  InventoryTemplateRowKind,
+  UnitOfMeasure,
+} from '../../generated/prisma/client.js';
 
 // Respuestas de la API de productos de inventario (SPRINT-5-T03).
 
@@ -83,6 +86,14 @@ export class ProductResponseDto {
   isActive: boolean;
 
   @ApiProperty({
+    description: 'Fila de la plantilla que ocupa, o null sin fila.',
+    example: '6f1a3c1e-2b4d-4c8e-9a7f-0d1e2f3a4b5c',
+    nullable: true,
+    type: String,
+  })
+  templateRowId: string | null;
+
+  @ApiProperty({
     description: 'Sección de la plantilla, o null sin fila.',
     example: 'COSTO DE BEBIDAS',
     nullable: true,
@@ -91,8 +102,7 @@ export class ProductResponseDto {
   section: string | null;
 
   @ApiProperty({
-    description:
-      'Fila de la plantilla (2 a 183) o de las agregadas por la API (desde 1000).',
+    description: 'Número de fila de la plantilla (2 a 183), o null sin fila.',
     example: 99,
     nullable: true,
     type: Number,
@@ -126,7 +136,8 @@ export class ProductSectionDto {
   position: number;
 
   @ApiProperty({
-    description: 'Filas «<Vacío>» libres que quedan en la sección.',
+    description:
+      'Filas de artículo sin producto (artículos pendientes y «<Vacío>») de la sección.',
     example: 3,
   })
   freeRows: number;
@@ -145,8 +156,78 @@ export class ProductFieldErrorsDto {
   @ApiProperty({
     description: 'Mensaje por campo, para mostrarlo junto a cada uno.',
     example: {
-      boxContent: 'boxContent 6.000 no coincide con 2 × 2.500 = 5.000',
+      name: 'Ya existe un producto llamado «Lata Coca Cola»',
     },
   })
   errors: Record<string, string>;
+}
+
+export class TemplateRowSummaryDto {
+  @ApiProperty({
+    description: 'ID de la fila.',
+    example: '6f1a3c1e-2b4d-4c8e-9a7f-0d1e2f3a4b5c',
+  })
+  id: string;
+
+  @ApiProperty({
+    description: 'Número de fila en la hoja (fijo).',
+    example: 4,
+  })
+  position: number;
+
+  @ApiProperty({
+    description: 'Tipo de fila: artículo, sin texto o sección.',
+    enum: InventoryTemplateRowKind,
+    example: InventoryTemplateRowKind.ITEM,
+  })
+  kind: InventoryTemplateRowKind;
+
+  @ApiProperty({
+    description: 'Texto de la columna ARTÍCULO; null en las filas sin texto.',
+    example: 'Carne Fajita (Beef Steak Saborizado)',
+    nullable: true,
+    type: String,
+  })
+  printedText: string | null;
+
+  @ApiProperty({
+    description: 'Sección que cierra el grupo de la fila.',
+    example: 'COSTO PROTEÍNAS, QUESO SALSAS (SUBTOTAL)',
+  })
+  section: string;
+
+  @ApiProperty({
+    description: 'true en las filas de artículo «<Vacío>».',
+    example: false,
+  })
+  isEmptyRow: boolean;
+}
+
+export class TemplateRowResponseDto extends TemplateRowSummaryDto {
+  @ApiProperty({
+    description:
+      'Producto que ocupa la fila, o null. Al SUPERVISOR solo se le informan los activos.',
+    type: ProductResponseDto,
+    nullable: true,
+  })
+  product: ProductResponseDto | null;
+}
+
+export class PlacementSuggestionDto {
+  @ApiProperty({
+    description: 'Fila sugerida, o null si no queda ninguna libre.',
+    type: TemplateRowSummaryDto,
+    nullable: true,
+  })
+  row: TemplateRowSummaryDto | null;
+
+  @ApiProperty({
+    description:
+      'MATCH: coincide con el nombre o un nombre alternativo; EMPTY: fila «<Vacío>» libre; null: sin fila libre.',
+    enum: ['MATCH', 'EMPTY'],
+    nullable: true,
+    type: String,
+    example: 'MATCH',
+  })
+  reason: 'MATCH' | 'EMPTY' | null;
 }
