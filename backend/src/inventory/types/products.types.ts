@@ -1,9 +1,16 @@
-import type { UnitOfMeasure } from '../../generated/prisma/client.js';
+import type {
+  InventoryTemplateRowKind,
+  UnitOfMeasure,
+} from '../../generated/prisma/client.js';
 
 // Tipos de la API de productos de inventario (SPRINT-5-T03).
 
-/** Primera posición de las filas que la API agrega fuera de la plantilla. */
-export const EXTRA_TEMPLATE_ROW_START = 1000;
+/** Texto de las filas de artículo libres de la plantilla. */
+export const EMPTY_ITEM_TEXT = '<Vacío>';
+
+/** Nombres de paquete que acepta el catálogo. */
+export const PACKAGE_NAMES = ['bolsa', 'paquete', 'botella', 'pack'] as const;
+export type PackageName = (typeof PACKAGE_NAMES)[number];
 
 export interface ProductResponse {
   id: string;
@@ -19,7 +26,8 @@ export interface ProductResponse {
   looseOnly: boolean;
   hasFormat: boolean;
   isActive: boolean;
-  // Sección y posición en la plantilla; null si el producto no tiene fila.
+  // Fila de la plantilla; null si el producto no tiene fila.
+  templateRowId: string | null;
   section: string | null;
   templatePosition: number | null;
   createdAt: Date;
@@ -30,6 +38,7 @@ export interface ProductResponse {
 export interface ProductAuditSnapshot {
   sku: string | null;
   name: string;
+  alternativeNames: string[];
   unit: UnitOfMeasure;
   packageName: string | null;
   packagesPerBox: number | null;
@@ -44,6 +53,54 @@ export interface ProductAuditSnapshot {
 export interface ProductChange {
   product: ProductResponse;
   before: ProductAuditSnapshot | null;
-  // false si el cambio de estado no hizo nada (ya estaba así).
+  // false si la solicitud no cambió nada (no se audita).
+  changed: boolean;
+}
+
+/** Fila de la plantilla, sin su producto. */
+export interface TemplateRowSummary {
+  id: string;
+  position: number;
+  kind: InventoryTemplateRowKind;
+  printedText: string | null;
+  section: string;
+  // true en las filas de artículo con el texto «<Vacío>».
+  isEmptyRow: boolean;
+}
+
+/** Fila de la plantilla con su producto, en el orden de la hoja. */
+export interface TemplateRowResponse extends TemplateRowSummary {
+  product: ProductResponse | null;
+}
+
+export interface ProductSectionResponse {
+  name: string;
+  /** Fila de cierre de la sección. */
+  position: number;
+  /** Filas de artículo sin producto (artículos pendientes y «<Vacío>»). */
+  freeRows: number;
+}
+
+export type PlacementReason = 'MATCH' | 'EMPTY';
+
+export interface PlacementSuggestion {
+  row: TemplateRowSummary | null;
+  // MATCH: coincide con el nombre o un nombre alternativo; EMPTY: fila
+  // «<Vacío>» libre; null: no queda fila libre en la sección.
+  reason: PlacementReason | null;
+}
+
+// Valor auditado de una fila de la plantilla.
+export interface TemplateRowAuditSnapshot {
+  position: number;
+  printedText: string | null;
+  section: string;
+  productId: string | null;
+  productName: string | null;
+}
+
+export interface TemplateRowChange {
+  row: TemplateRowResponse;
+  before: TemplateRowAuditSnapshot;
   changed: boolean;
 }
