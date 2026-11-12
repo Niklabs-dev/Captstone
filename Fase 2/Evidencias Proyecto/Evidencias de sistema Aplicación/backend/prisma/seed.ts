@@ -19,7 +19,9 @@
 // de un usuario ya registrado. Las
 // fixtures de propinas se siembran solo con SEED_DEMO_DATA=true y
 // usan datos sintéticos (correos .invalid y contraseñas aleatorias
-// no divulgadas); en producción quedan apagadas.
+// no divulgadas); en producción quedan apagadas. La plantilla de
+// inventario (SPRINT-5-T02) se sincroniza por posición de fila; ver
+// prisma/inventory-template.ts.
 // =============================================================
 import 'dotenv/config';
 import { randomBytes } from 'node:crypto';
@@ -28,6 +30,11 @@ import { pathToFileURL } from 'node:url';
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcryptjs';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
+import {
+  INVENTORY_TEMPLATE_ROWS,
+  type InventoryTemplateSeedResult,
+  seedInventoryTemplate,
+} from './inventory-template.js';
 
 // Factor de costo bcrypt acorde a la guía de seguridad del proyecto (>= 12).
 const BCRYPT_ROUNDS = 12;
@@ -375,6 +382,7 @@ export interface SeedResult {
   documentTypeIds: Record<string, string>;
   storeIds: string[];
   paymentMethodIds: Record<string, string>;
+  inventoryTemplate: InventoryTemplateSeedResult;
   adminUserId: string;
   adminCreated: boolean;
 }
@@ -476,6 +484,12 @@ export async function seedDatabase(
     });
   }
 
+  // Plantilla de inventario y catálogo inicial (SPRINT-5-T02).
+  const inventoryTemplate = await seedInventoryTemplate(
+    db,
+    INVENTORY_TEMPLATE_ROWS,
+  );
+
   // Los datos demo son opt-in para no introducir usuarios, pactos ni
   // propinas artificiales en despliegues productivos.
   if (options.includeDemoData === true) {
@@ -491,6 +505,7 @@ export async function seedDatabase(
       documentTypeIds,
       storeIds,
       paymentMethodIds,
+      inventoryTemplate,
       adminUserId: existente.id,
       adminCreated: false,
     };
@@ -511,6 +526,7 @@ export async function seedDatabase(
     documentTypeIds,
     storeIds,
     paymentMethodIds,
+    inventoryTemplate,
     adminUserId: admin.id,
     adminCreated: true,
   };
@@ -686,6 +702,13 @@ async function main(): Promise<void> {
     console.log(
       `Alias MrComanda sincronizados (SPRINT-4R-T08): ` +
         `${BASE_PAYMENT_METHOD_ALIASES.map((a) => a.label).join(', ')}.`,
+    );
+    const plantilla = result.inventoryTemplate;
+    console.log(
+      `Plantilla de inventario sincronizada (SPRINT-5-T02): ` +
+        `${INVENTORY_TEMPLATE_ROWS.length} filas; ${plantilla.rowsCreated} creadas, ` +
+        `${plantilla.rowsUpdated} actualizadas, ${plantilla.productsCreated} productos ` +
+        `creados y ${plantilla.productsRenamed} renombrados.`,
     );
     if (options.includeDemoData === true) {
       console.log(
