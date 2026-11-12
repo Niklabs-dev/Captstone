@@ -31,6 +31,7 @@ export function getNavigationIcon(href: NavigationItem['href']) {
     '/admin/documentos': 'document',
     '/admin/alertas-dt': 'bell',
     '/admin/medios-pago': 'wallet',
+    '/admin/productos': 'store',
     '/admin/importacion-ventas': 'document',
     '/admin/panel-ventas': 'chart',
     '/admin/reportes-ventas': 'audit',
