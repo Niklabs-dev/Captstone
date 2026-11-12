@@ -14,6 +14,11 @@
 //   tipo, así que un error de carga no se podría corregir después.
 // - Solo inserta las filas que faltan. Una fila que ya existe no se toca: no
 //   se pisa el texto que editó el administrador ni se desasigna su producto.
+// - Si el texto de una fila existente difiere del de la plantilla, no se
+//   sobrescribe: se informa en `textDifferences` para que el administrador lo
+//   corrija desde la aplicación. La plantilla cambia seguido y es temporal
+//   (el cuadre pasará a la aplicación), así que el texto vigente lo mantiene
+//   el administrador y no cada despliegue (decisión del PO del 12/11/2026).
 // - Si la plantilla cambia el tipo de una fila existente, la carga se detiene
 //   antes de escribir nada.
 // - Toda la carga corre en una transacción.
@@ -93,10 +98,21 @@ export interface ResolvedInventoryTemplateRow {
   section: string;
 }
 
+/** Fila existente cuyo texto en la base no coincide con el de la plantilla. */
+export interface InventoryTemplateTextDifference {
+  position: number;
+  /** Texto guardado en la base (el que se imprime hoy). */
+  current: string | null;
+  /** Texto que trae la plantilla del repositorio. */
+  template: string | null;
+}
+
 export interface InventoryTemplateSeedResult {
   rowsCreated: number;
   /** Filas que ya existían y no se tocaron. */
   rowsKept: number;
+  /** Filas existentes con un texto distinto al de la plantilla (no se pisan). */
+  textDifferences: InventoryTemplateTextDifference[];
 }
 
 /** Estructura esperada de la plantilla, validada antes de escribir. */
@@ -549,14 +565,21 @@ async function syncInventoryTemplate(
   db: Prisma.TransactionClient,
   resolved: readonly ResolvedInventoryTemplateRow[],
 ): Promise<InventoryTemplateSeedResult> {
-  const result: InventoryTemplateSeedResult = { rowsCreated: 0, rowsKept: 0 };
+  const result: InventoryTemplateSeedResult = {
+    rowsCreated: 0,
+    rowsKept: 0,
+    textDifferences: [],
+  };
   if (resolved.length === 0) return result;
 
   const existing = await db.inventoryTemplateRow.findMany({
     where: { position: { in: resolved.map((r) => r.seed.position) } },
-    select: { position: true, kind: true },
+    select: { position: true, kind: true, printedText: true },
   });
   const byPosition = new Map(existing.map((e) => [e.position, e.kind]));
+  const textByPosition = new Map(
+    existing.map((e) => [e.position, e.printedText]),
+  );
 
   const conflicts = resolved
     .filter((r) => {
@@ -572,6 +595,18 @@ async function syncInventoryTemplate(
       `La plantilla cambia el tipo de filas existentes (son fijas): ${conflicts.join('; ')}.`,
     );
   }
+
+  result.textDifferences = resolved
+    .filter(
+      (r) =>
+        textByPosition.has(r.seed.position) &&
+        textByPosition.get(r.seed.position) !== r.printedText,
+    )
+    .map((r) => ({
+      position: r.seed.position,
+      current: textByPosition.get(r.seed.position) ?? null,
+      template: r.printedText,
+    }));
 
   const missing = resolved.filter((r) => !byPosition.has(r.seed.position));
   if (missing.length > 0) {
