@@ -716,6 +716,14 @@ compara el seed contra ella.
   no se toca, así que una segunda carga no duplica filas, no desasigna
   productos y no pisa los textos que edita el administrador. Si la plantilla
   cambia el tipo de una fila existente, la carga se detiene antes de escribir.
+- **Plantilla actualizada** (decisión del Product Owner del 12/11/2026): la
+  plantilla cambia seguido y es temporal, porque más adelante el cuadre se
+  hará dentro de la aplicación. Por eso el texto vigente de cada fila lo
+  mantiene el administrador desde la aplicación (SPRINT-5-T03), y el seed no lo
+  sobrescribe en cada despliegue. Cuando el texto de una fila existente difiere
+  del de la plantilla del repositorio, el seed lo informa en
+  `textDifferences` y muestra un aviso con la fila, el texto de la base y el de
+  la plantilla, sin modificar nada.
 - «Lata Fanta Zero» se carga dos veces (filas 99 y 102), como viene en la
   hoja.
 - Los formatos de la caché de «BASE DE DATOS» quedan como referencia en
@@ -723,9 +731,30 @@ compara el seed contra ella.
   bolsas de 2,5 kg), Pepperoni (caja de 7,3 kg, paquetes de 0,93 kg), Pan
   Blanco (caja de 70 unidades) y Atún, Pollo Teriyaki y Meat Lover
   (Preparado), que solo admiten la cantidad suelta.
-- Una base donde ya corrió la versión anterior del seed (que creaba los 140
-  productos) los conserva: la carga nueva no borra productos ni desasigna
-  filas.
+- Una base donde ya corrió la versión anterior del seed (PR #89, que creaba
+  los 140 productos) los conserva: la carga nueva no borra productos ni
+  desasigna filas, y en esa base no quedan artículos pendientes de crear. Los
+  entornos desplegados no están afectados (no tenían el inventario). En una
+  base local se limpia de dos formas:
+  - recreando el volumen: `docker compose down -v && docker compose up --build`;
+  - o, para conservar el resto de los datos, con este SQL. Solo toca los
+    productos que creó ese seed: sin SKU, con el mismo nombre que el texto de
+    su fila y sin líneas de toma ni movimientos. El trigger de filas fijas
+    permite desasignar `product_id`.
+
+    ```sql
+    BEGIN;
+    CREATE TEMP TABLE seeded AS
+      SELECT p.id FROM products p
+      JOIN inventory_template_rows r ON r.product_id = p.id
+      WHERE p.sku IS NULL AND p.name = r.printed_text
+        AND NOT EXISTS (SELECT 1 FROM inventory_count_lines l WHERE l.product_id = p.id)
+        AND NOT EXISTS (SELECT 1 FROM inventory_movements m WHERE m.product_id = p.id);
+    UPDATE inventory_template_rows SET product_id = NULL, updated_at = now()
+      WHERE product_id IN (SELECT id FROM seeded);
+    DELETE FROM products WHERE id IN (SELECT id FROM seeded);
+    COMMIT;
+    ```
 
 ## Cómo ver el modelo de forma visual
 
