@@ -729,6 +729,13 @@ describe.skipIf(!databaseUrl)(
           include: { templateRow: true },
         });
         expect(product.templateRow).toBeNull();
+        const reactivate = () =>
+          http()
+            .patch(`/products/${f.printedProductId}/reactivate`)
+            .set(auth(f.admin));
+        const withoutRow = await reactivate();
+        expect(withoutRow.status).toBe(409);
+        expect(errorsOf(withoutRow.body).templateRowId).toMatch(/Muévelo/);
 
         const reused = await create(f.admin, {
           name: 'Reutiliza Fila T03',
@@ -738,6 +745,19 @@ describe.skipIf(!databaseUrl)(
         });
         expect(reused.status).toBe(201);
         await release().expect(409);
+
+        // Movido a una fila libre, ya se puede reactivar.
+        await http()
+          .patch(`/products/${f.printedProductId}/move`)
+          .set(auth(f.admin))
+          .send({ templateRowId: await f.rowId(3) })
+          .expect(200);
+        const reactivated = await reactivate();
+        expect(reactivated.status).toBe(200);
+        expect(reactivated.body).toMatchObject({
+          isActive: true,
+          templatePosition: BASE + 3,
+        });
       });
     }, 60_000);
 

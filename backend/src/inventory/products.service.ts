@@ -278,16 +278,26 @@ export class ProductsService {
   }
 
   // Desactivar no borra: el producto conserva su fila y sus tomas, y deja de
-  // aparecer en tomas nuevas. Repetir la acción no cambia nada.
+  // aparecer en tomas nuevas. Repetir la acción no cambia nada. Un producto
+  // cuya fila se liberó no se reactiva sin fila: primero se mueve a una fila
+  // libre, para que todo producto activo quede en la plantilla.
   async setActive(id: string, isActive: boolean): Promise<ProductChange> {
     return this.prisma.$transaction(async (tx) => {
-      const existing = toProductResponse(await readProduct(tx, id));
+      await lockCatalog(tx);
+      const record = await readProduct(tx, id);
+      const existing = toProductResponse(record);
       if (existing.isActive === isActive) {
         return {
           product: existing,
           before: productSnapshot(existing),
           changed: false,
         };
+      }
+      if (isActive && record.templateRow === null) {
+        throw fieldErrors(409, 'El producto no tiene fila en la plantilla', {
+          templateRowId:
+            'Su fila se liberó. Muévelo a una fila de artículo libre antes de reactivarlo.',
+        });
       }
       await tx.product.update({ where: { id }, data: { isActive } });
       return {
