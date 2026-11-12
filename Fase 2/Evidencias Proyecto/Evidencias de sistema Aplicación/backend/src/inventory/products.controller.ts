@@ -207,7 +207,7 @@ export class ProductsController {
   @ApiOperation({
     summary: 'Reactiva un producto desactivado',
     description:
-      'Rol: ADMINISTRADOR. Si su fila se liberó, queda sin fila hasta moverlo a una libre.',
+      'Rol: ADMINISTRADOR. Todo producto activo queda en la plantilla: si su fila se liberó, primero hay que moverlo a una fila libre (`PATCH /products/:id/move`).',
   })
   @ApiOkResponse({ type: ProductResponseDto })
   @ApiBadRequestResponse({ description: 'El ID no es un UUID válido.' })
@@ -215,6 +215,11 @@ export class ProductsController {
     description: 'Solo ADMINISTRADOR reactiva productos.',
   })
   @ApiNotFoundResponse({ description: 'Producto no encontrado.' })
+  @ApiConflictResponse({
+    type: ProductFieldErrorsDto,
+    description:
+      'El producto no tiene fila en la plantilla (`errors.templateRowId`): hay que moverlo a una fila libre antes de reactivarlo.',
+  })
   async reactivate(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Res({ passthrough: true }) res: Response,
