@@ -134,7 +134,7 @@ export function ProductDialog({
               ? `Sugerida: fila ${suggestion.row?.position ?? ''}, coincide con el nombre.`
               : suggestion.reason === 'EMPTY'
                 ? `Sugerida: fila ${suggestion.row?.position ?? ''}, la primera <Vacío> libre.`
-                : 'No quedan filas libres en la sección: reutiliza la fila de un artículo que ya no se usa.',
+                : 'No quedan filas libres en la sección: corrige el texto de un artículo pendiente que ya no se usa o libera la fila de un producto desactivado.',
           );
         },
         () => undefined,
