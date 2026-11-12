@@ -717,7 +717,10 @@ blanco queda en el repositorio como fixture y el test
   `printed_text` guarda siempre el texto de la última plantilla cargada: la
   API de productos (SPRINT-5-T03) edita el producto y su asignación a la fila,
   nunca `printed_text`. Así, un producto que el administrador ubica en una
-  fila `<Vacío>` o renombra se conserva en cada despliegue.
+  fila `<Vacío>` o renombra se conserva en cada despliegue. Si una plantilla
+  nueva pone un artículo en una fila `<Vacío>` que el administrador ocupaba,
+  se crea el artículo de la plantilla y el producto del administrador queda
+  en el catálogo sin fila; nunca se renombra.
 - Toda la sincronización corre en una transacción: un error de la base no
   deja la plantilla a medias.
 - Si la plantilla cambia el tipo de una fila existente, la carga se detiene
