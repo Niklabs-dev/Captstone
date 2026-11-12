@@ -93,6 +93,12 @@ export const AUDIT_ACTION = {
   // las propinas No pagadas del local y período. El detalle registra local,
   // período, total y cantidades; el responsable y la fecha van en el evento.
   DAILY_TIPS_PAID: 'DAILY_TIPS_PAID',
+  // Catálogo de productos de inventario (SPRINT-5-T03): el detalle guarda el
+  // valor anterior y el nuevo (nombre, SKU, sección, posición y formato).
+  PRODUCT_CREATED: 'PRODUCT_CREATED',
+  PRODUCT_UPDATED: 'PRODUCT_UPDATED',
+  PRODUCT_DEACTIVATED: 'PRODUCT_DEACTIVATED',
+  PRODUCT_REACTIVATED: 'PRODUCT_REACTIVATED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

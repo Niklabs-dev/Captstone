@@ -80,6 +80,10 @@ const API_TAGS: ReadonlyArray<readonly [name: string, description: string]> = [
     'Reportes de ventas importadas, propinas y diferencias por período y local (ADMINISTRADOR y CONTADOR, solo lectura), y consulta histórica de cierres por turno.',
   ],
   [
+    'products',
+    'Catálogo de productos de inventario: el ADMINISTRADOR crea, edita, desactiva y reactiva productos con su formato de caja y paquete; el SUPERVISOR consulta los activos.',
+  ],
+  [
     'cash-closings',
     'Histórico de solo lectura de los cierres de caja por turno (anteriores a la operación diaria).',
   ],
