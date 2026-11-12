@@ -12,6 +12,7 @@ export interface NavigationItem {
     | '/admin/documentos'
     | '/admin/alertas-dt'
     | '/admin/medios-pago'
+    | '/admin/productos'
     | '/admin/importacion-ventas'
     | '/admin/panel-ventas'
     | '/admin/reportes-ventas'
@@ -37,6 +38,7 @@ export function getNavigationView(pathname: string): {
     { href: '/admin/documentos', title: 'Gestor documental' },
     { href: '/admin/alertas-dt', title: 'Alertas de registro en la DT' },
     { href: '/admin/medios-pago', title: 'Medios de pago' },
+    { href: '/admin/productos', title: 'Productos de inventario' },
     { href: '/admin/importacion-ventas', title: 'Importar ventas' },
     { href: '/admin/panel-ventas', title: 'Panel de ventas' },
     { href: '/admin/reportes-ventas', title: 'Reportes de ventas' },
@@ -107,6 +109,7 @@ export function getNavigationItems(
         { href: '/admin/documentos', label: 'Documentos' },
         { href: '/admin/alertas-dt', label: 'Alertas DT' },
         { href: '/admin/medios-pago', label: 'Medios de pago' },
+        { href: '/admin/productos', label: 'Productos' },
         { href: '/admin/importacion-ventas', label: 'Importar ventas' },
         { href: '/admin/panel-ventas', label: 'Panel de ventas' },
         SALES_REPORTS,
