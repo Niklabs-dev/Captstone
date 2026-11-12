@@ -692,6 +692,30 @@ Reglas que garantiza la base:
 - Un producto con líneas de toma, movimientos o fila asignada no se borra (FK
   Restrict).
 
+### Catálogo inicial desde la plantilla (SPRINT-5-T02)
+
+El seed (`prisma/inventory-template.ts`, llamado desde `prisma/seed.ts`) carga
+las 182 filas de `docs/plantilla-inventario.xlsx` (filas 2 a 183): 140
+artículos, 34 `<Vacío>`, 3 filas sin texto y 5 secciones. La plantilla en
+blanco queda en el repositorio como fixture y el test
+`inventory-template-xlsx.spec.ts` compara el seed contra ella.
+
+- Cada artículo crea su producto con el nombre exacto, **sin SKU** (lo entrega
+  el proveedor y lo completa el administrador) y en **KG** (el inventario se
+  trabaja en kilos). Carne Fajita parte con caja de 5 kg y 2 bolsas de 2,5 kg;
+  Atún, Pollo Teriyaki y Meat Lover (Preparado) quedan «solo cantidad suelta».
+  El resto queda sin formato. «Lata Fanta Zero» se carga dos veces (filas 99
+  y 102), como viene en la hoja.
+- La carga es idempotente y se identifica por posición. La plantilla manda en
+  el texto impreso y la sección; el formato, el SKU y la unidad del producto
+  solo se asignan al crearlo, así que el seed no pisa lo que edita el
+  administrador. Si cambia el texto de un artículo en la plantilla, su
+  producto se renombra y conserva su id y su formato; un `<Vacío>` que pasa a
+  artículo crea su producto, y un artículo que pasa a `<Vacío>` se desvincula
+  sin borrar el producto.
+- Si la plantilla cambia el tipo de una fila existente, la carga se detiene
+  antes de escribir nada (las filas son fijas).
+
 ## Cómo ver el modelo de forma visual
 
 > Los diagramas Mermaid y DBML de abajo incluyen el módulo de operación
