@@ -224,8 +224,8 @@ describe.skipIf(!databaseUrl)(
 
       it('admite varios productos sin SKU mientras se recopila', async () => {
         await withinRollback(async (tx) => {
-          // Se cuentan por id: el catálogo inicial (SPRINT-5-T02) ya trae
-          // productos sin SKU con estos mismos nombres.
+          // Se cuentan por id: una base sembrada con la versión anterior del
+          // seed (SPRINT-5-T02) puede traer productos sin SKU con estos nombres.
           const lechuga = await createProduct(tx, {
             name: 'Lechuga',
             unit: UnitOfMeasure.KG,
