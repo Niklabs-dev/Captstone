@@ -3,21 +3,28 @@
 //
 // Cada fila de la hoja Excel (desde la 2; la 1 es el encabezado) se guarda
 // en `inventory_template_rows` con su posición fija. Las filas de artículo
-// crean su producto en `products` la primera vez, con el nombre exacto de la
+// crean su created en `products` la primera vez, con el nombre exacto de la
 // plantilla, sin SKU (lo completa el administrador con el del proveedor) y
 // «Sin formato» salvo los casos que la plantilla define.
 //
 // Reglas de la carga (idempotente, corre en cada despliegue):
 // - Las filas se identifican por su posición, nunca por el nombre.
-// - La plantilla manda en el texto impreso y en la sección. Si el texto de
-//   una fila de artículo cambia, también se renombra su producto; si no
-//   cambia, el producto no se toca (el administrador puede renombrarlo).
-// - El formato del producto (caja, paquete, solo cantidad suelta) solo se
+// - La plantilla manda en el texto impreso (printed_text) y en la sección.
+//   printed_text es siempre el texto de la última plantilla cargada: la API
+//   de productos (SPRINT-5-T03) no lo modifica; edita el created y su
+//   asignación a la fila.
+// - La plantilla solo pisa al administrador cuando cambia su texto. Si el
+//   texto de una fila de artículo cambia, se renombra su created; si no
+//   cambia, ni el created ni su nombre se tocan.
+// - El formato del created (caja, paquete, solo cantidad suelta) solo se
 //   asigna al crearlo: una segunda carga nunca pisa lo que editó el
 //   administrador.
-// - Una fila `<Vacío>` que pasa a ser artículo crea su producto; un artículo
-//   que pasa a `<Vacío>` se desvincula y su producto queda en el catálogo
-//   (sus tomas finalizadas guardan copia del producto).
+// - Una fila `<Vacío>` que pasa a ser artículo crea su created; un artículo
+//   que pasa a `<Vacío>` se desvincula y su created queda en el catálogo
+//   (sus tomas finalizadas guardan copia del created). Una fila `<Vacío>`
+//   que no cambió conserva el created que le asignó el administrador.
+// - Toda la sincronización corre en una transacción: un error de la base a
+//   mitad de camino no deja la plantilla a medias.
 // - El tipo de una fila no cambia (trigger de SPRINT-5-T01): si la
 //   plantilla lo cambia, la carga se detiene antes de escribir nada.
 // =============================================================
@@ -28,7 +35,7 @@ import {
   UnitOfMeasure,
 } from '../src/generated/prisma/client.js';
 
-/** Texto de las filas de artículo sin producto asignado en la plantilla. */
+/** Texto de las filas de artículo sin created asignado en la plantilla. */
 export const INVENTORY_EMPTY_ITEM_TEXT = '<Vacío>';
 
 /** Primera fila de datos de la hoja (la 1 es el encabezado). */
@@ -38,8 +45,8 @@ const MAX_TEXT_LENGTH = 120;
 const MAX_PACKAGE_NAME_LENGTH = 30;
 
 /**
- * Formato inicial de un producto. Los contenidos van como texto decimal
- * ('2.5') para no pasar por float. Todo es opcional: sin formato, el producto
+ * Formato inicial de un created. Los contenidos van como texto decimal
+ * ('2.5') para no pasar por float. Todo es opcional: sin formato, el created
  * queda «Sin formato» hasta que lo complete el administrador.
  */
 export interface InventoryProductFormatSeed {
@@ -50,7 +57,7 @@ export interface InventoryProductFormatSeed {
   looseOnly?: boolean;
 }
 
-/** Artículo con nombre: crea su producto. */
+/** Artículo con nombre: crea su created. */
 export interface InventoryArticleRowSeed {
   position: number;
   type: 'ARTICLE';
@@ -59,7 +66,7 @@ export interface InventoryArticleRowSeed {
   format?: InventoryProductFormatSeed;
 }
 
-/** Fila de artículo `<Vacío>`: sin producto. */
+/** Fila de artículo `<Vacío>`: sin created. */
 export interface InventoryEmptyRowSeed {
   position: number;
   type: 'EMPTY';
@@ -101,7 +108,7 @@ export interface InventoryTemplateSeedResult {
 
 // Unidad inicial de los artículos: el Product Owner definió que el inventario
 // se trabaja en kilos (0,300 kg; 1,300 kg). El administrador la ajusta por
-// producto si corresponde.
+// created si corresponde.
 const DEFAULT_UNIT = UnitOfMeasure.KG;
 
 // Carne Fajita: caja de 5 kg con 2 bolsas de 2,5 kg (definido por el PO).
@@ -358,27 +365,27 @@ function isInteger(value: string): boolean {
 }
 
 function textErrors(position: number, text: string, label: string): string[] {
-  const errores: string[] = [];
+  const errors: string[] = [];
   if (text.trim() === '') {
-    errores.push(`Fila ${position}: ${label} vacío.`);
+    errors.push(`Fila ${position}: ${label} vacío.`);
   } else if (text !== text.trim()) {
-    errores.push(
+    errors.push(
       `Fila ${position}: ${label} con espacios al inicio o al final.`,
     );
   }
   if (text.length > MAX_TEXT_LENGTH) {
-    errores.push(
+    errors.push(
       `Fila ${position}: ${label} de más de ${MAX_TEXT_LENGTH} caracteres.`,
     );
   }
-  return errores;
+  return errors;
 }
 
 function formatErrors(row: InventoryArticleRowSeed): string[] {
   const format = row.format;
   if (format === undefined) return [];
   const p = row.position;
-  const errores: string[] = [];
+  const errors: string[] = [];
   const contents: [string, string | undefined][] = [
     ['contenido por caja', format.boxContent],
     ['contenido por paquete', format.packageContent],
@@ -386,24 +393,24 @@ function formatErrors(row: InventoryArticleRowSeed): string[] {
   for (const [label, value] of contents) {
     if (value === undefined) continue;
     if (!isPositiveDecimal(value)) {
-      errores.push(
+      errors.push(
         `Fila ${p}: ${label} «${value}» debe ser mayor que 0 y con hasta 3 decimales.`,
       );
     } else if (row.unit === UnitOfMeasure.UNIT && !isInteger(value)) {
-      errores.push(`Fila ${p}: ${label} «${value}» debe ser entero en UNIT.`);
+      errors.push(`Fila ${p}: ${label} «${value}» debe ser entero en UNIT.`);
     }
   }
   if (
     format.packagesPerBox !== undefined &&
     (!Number.isInteger(format.packagesPerBox) || format.packagesPerBox < 1)
   ) {
-    errores.push(`Fila ${p}: paquetes por caja debe ser un entero >= 1.`);
+    errors.push(`Fila ${p}: paquetes por caja debe ser un entero >= 1.`);
   }
   if (format.packageName !== undefined) {
     if (format.packageName.trim() === '') {
-      errores.push(`Fila ${p}: nombre del paquete vacío.`);
+      errors.push(`Fila ${p}: nombre del paquete vacío.`);
     } else if (format.packageName.length > MAX_PACKAGE_NAME_LENGTH) {
-      errores.push(
+      errors.push(
         `Fila ${p}: nombre del paquete de más de ${MAX_PACKAGE_NAME_LENGTH} caracteres.`,
       );
     }
@@ -415,11 +422,11 @@ function formatErrors(row: InventoryArticleRowSeed): string[] {
       format.packagesPerBox !== undefined ||
       format.packageName !== undefined)
   ) {
-    errores.push(
-      `Fila ${p}: un producto «solo cantidad suelta» no lleva caja ni paquete.`,
+    errors.push(
+      `Fila ${p}: un created «solo cantidad suelta» no lleva caja ni paquete.`,
     );
   }
-  return errores;
+  return errors;
 }
 
 /**
@@ -431,34 +438,34 @@ function formatErrors(row: InventoryArticleRowSeed): string[] {
 export function resolveInventoryTemplate(
   rows: readonly InventoryTemplateRowSeed[],
 ): ResolvedInventoryTemplateRow[] {
-  const errores: string[] = [];
+  const errors: string[] = [];
 
   rows.forEach((row, index) => {
     if (!Number.isInteger(row.position)) {
-      errores.push(`Posición ${row.position} no es un entero.`);
+      errors.push(`Posición ${row.position} no es un entero.`);
     } else if (
       index === 0 &&
       row.position < INVENTORY_TEMPLATE_FIRST_POSITION
     ) {
-      errores.push(
+      errors.push(
         `Fila ${row.position}: la fila 1 es el encabezado; los datos parten en la ${INVENTORY_TEMPLATE_FIRST_POSITION}.`,
       );
     } else if (index > 0 && row.position !== rows[index - 1].position + 1) {
-      errores.push(
+      errors.push(
         `Fila ${row.position}: las posiciones deben ser consecutivas (la anterior es ${rows[index - 1].position}).`,
       );
     }
 
     if (row.type === 'ARTICLE') {
-      errores.push(...textErrors(row.position, row.text, 'nombre'));
+      errors.push(...textErrors(row.position, row.text, 'nombre'));
       if (row.text.trim() === INVENTORY_EMPTY_ITEM_TEXT) {
-        errores.push(
+        errors.push(
           `Fila ${row.position}: «${INVENTORY_EMPTY_ITEM_TEXT}» se declara como EMPTY, no como artículo.`,
         );
       }
-      errores.push(...formatErrors(row));
+      errors.push(...formatErrors(row));
     } else if (row.type === 'SECTION') {
-      errores.push(...textErrors(row.position, row.text, 'rótulo de sección'));
+      errors.push(...textErrors(row.position, row.text, 'rótulo de sección'));
     }
   });
 
@@ -470,16 +477,16 @@ export function resolveInventoryTemplate(
     if (row.type === 'SECTION') next = row.text;
     sections[i] = next;
   }
-  const sinSeccion = rows.filter((_, i) => sections[i] === null);
-  if (sinSeccion.length > 0) {
-    errores.push(
-      `Filas sin una sección que las cierre: ${sinSeccion.map((r) => r.position).join(', ')}.`,
+  const withoutSection = rows.filter((_, i) => sections[i] === null);
+  if (withoutSection.length > 0) {
+    errors.push(
+      `Filas sin una sección que las cierre: ${withoutSection.map((r) => r.position).join(', ')}.`,
     );
   }
 
-  if (errores.length > 0) {
+  if (errors.length > 0) {
     throw new Error(
-      `Plantilla de inventario inválida:\n- ${errores.join('\n- ')}`,
+      `Plantilla de inventario inválida:\n- ${errors.join('\n- ')}`,
     );
   }
 
@@ -524,6 +531,19 @@ export async function seedInventoryTemplate(
   rows: readonly InventoryTemplateRowSeed[],
 ): Promise<InventoryTemplateSeedResult> {
   const resolved = resolveInventoryTemplate(rows);
+  if (db instanceof PrismaClient) {
+    return db.$transaction((tx) => syncInventoryTemplate(tx, resolved), {
+      maxWait: 30_000,
+      timeout: 120_000,
+    });
+  }
+  return syncInventoryTemplate(db, resolved);
+}
+
+async function syncInventoryTemplate(
+  db: Prisma.TransactionClient,
+  resolved: readonly ResolvedInventoryTemplateRow[],
+): Promise<InventoryTemplateSeedResult> {
   const result: InventoryTemplateSeedResult = {
     rowsCreated: 0,
     rowsUpdated: 0,
@@ -545,31 +565,31 @@ export async function seedInventoryTemplate(
   });
   const byPosition = new Map(existing.map((e) => [e.position, e]));
 
-  const conflictos = resolved
+  const conflicts = resolved
     .map((r) => ({ r, actual: byPosition.get(r.seed.position) }))
     .filter(({ r, actual }) => actual !== undefined && actual.kind !== r.kind)
     .map(
       ({ r, actual }) =>
         `fila ${r.seed.position}: es ${actual?.kind} y la plantilla la declara ${r.kind}`,
     );
-  if (conflictos.length > 0) {
+  if (conflicts.length > 0) {
     throw new Error(
-      `La plantilla cambia el tipo de filas existentes (son fijas): ${conflictos.join('; ')}.`,
+      `La plantilla cambia el tipo de filas existentes (son fijas): ${conflicts.join('; ')}.`,
     );
   }
 
   for (const r of resolved) {
     const actual = byPosition.get(r.seed.position);
-    const articulo = r.seed.type === 'ARTICLE' ? r.seed : null;
+    const articleSeed = r.seed.type === 'ARTICLE' ? r.seed : null;
 
     if (actual === undefined) {
       let productId: string | null = null;
-      if (articulo !== null) {
-        const producto = await db.product.create({
-          data: productCreateData(articulo),
+      if (articleSeed !== null) {
+        const created = await db.product.create({
+          data: productCreateData(articleSeed),
           select: { id: true },
         });
-        productId = producto.id;
+        productId = created.id;
         result.productsCreated++;
       }
       await db.inventoryTemplateRow.create({
@@ -585,27 +605,28 @@ export async function seedInventoryTemplate(
       continue;
     }
 
-    const textoCambia = actual.printedText !== r.printedText;
+    const textChanged = actual.printedText !== r.printedText;
     let productId = actual.productId;
-    if (articulo !== null && productId === null) {
-      const producto = await db.product.create({
-        data: productCreateData(articulo),
+    if (articleSeed !== null && productId === null) {
+      const created = await db.product.create({
+        data: productCreateData(articleSeed),
         select: { id: true },
       });
-      productId = producto.id;
+      productId = created.id;
       result.productsCreated++;
-    } else if (articulo !== null && productId !== null && textoCambia) {
+    } else if (articleSeed !== null && productId !== null && textChanged) {
       await db.product.update({
         where: { id: productId },
-        data: { name: articulo.text },
+        data: { name: articleSeed.text },
       });
       result.productsRenamed++;
-    } else if (articulo === null) {
+    } else if (articleSeed === null && textChanged) {
+      // Artículo que pasó a `<Vacío>`: se desvincula su producto.
       productId = null;
     }
 
     if (
-      textoCambia ||
+      textChanged ||
       actual.section !== r.section ||
       actual.productId !== productId
     ) {
