@@ -224,10 +224,18 @@ describe.skipIf(!databaseUrl)(
 
       it('admite varios productos sin SKU mientras se recopila', async () => {
         await withinRollback(async (tx) => {
-          await createProduct(tx, { name: 'Lechuga', unit: UnitOfMeasure.KG });
-          await createProduct(tx, { name: 'Tomate', unit: UnitOfMeasure.KG });
+          // Se cuentan por id: el catálogo inicial (SPRINT-5-T02) ya trae
+          // productos sin SKU con estos mismos nombres.
+          const lechuga = await createProduct(tx, {
+            name: 'Lechuga',
+            unit: UnitOfMeasure.KG,
+          });
+          const tomate = await createProduct(tx, {
+            name: 'Tomate',
+            unit: UnitOfMeasure.KG,
+          });
           const count = await tx.product.count({
-            where: { sku: null, name: { in: ['Lechuga', 'Tomate'] } },
+            where: { sku: null, id: { in: [lechuga.id, tomate.id] } },
           });
           expect(count).toBe(2);
         });
