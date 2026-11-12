@@ -36,6 +36,7 @@ test('Más conserva auditoría, alertas, medios de pago, liquidaciones y reparto
       '/admin/auditoria',
       '/admin/alertas-dt',
       '/admin/medios-pago',
+      '/admin/productos',
       '/admin/importacion-ventas',
       '/admin/panel-ventas',
       '/admin/reportes-ventas',

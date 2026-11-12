@@ -48,6 +48,8 @@
     "test:sales-overview:real": "playwright test --config playwright.sales-overview.config.ts",
     "test:sales-section:e2e": "playwright test --config playwright.sales-section.config.ts",
     "test:sales-section:real": "node scripts/test-sales-section.mjs",
+    "test:products": "tsc -p tsconfig.test.json && node --test .test-build/products.test.js .test-build/navigation.test.js .test-build/mobile-navigation.test.js",
+    "test:products:real": "playwright test --config playwright.products.config.ts",
     "test:my-tip-receipts": "tsc -p tsconfig.test.json && node --test .test-build/my-tip-receipts.test.js .test-build/navigation.test.js",
     "test:my-tip-receipts:real": "playwright test --config playwright.my-tip-receipts.config.ts",
     "test:mobile-design": "playwright test --config playwright.mobile-design.config.ts",

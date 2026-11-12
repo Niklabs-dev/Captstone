@@ -41,6 +41,7 @@ test('La navegación permite recorrer inicio, usuarios y auditoría al administr
     { href: '/admin/documentos', label: 'Documentos' },
     { href: '/admin/alertas-dt', label: 'Alertas DT' },
     { href: '/admin/medios-pago', label: 'Medios de pago' },
+    { href: '/admin/productos', label: 'Productos' },
     { href: '/admin/importacion-ventas', label: 'Importar ventas' },
     { href: '/admin/panel-ventas', label: 'Panel de ventas' },
     { href: '/admin/reportes-ventas', label: 'Reportes de ventas' },
