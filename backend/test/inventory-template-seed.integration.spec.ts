@@ -120,6 +120,7 @@ describe.skipIf(!databaseUrl)(
           rowsUpdated: 0,
           productsCreated: 4,
           productsRenamed: 0,
+          productsReleased: 0,
         });
         const rows = await templateRows(tx);
         expect(
@@ -209,6 +210,7 @@ describe.skipIf(!databaseUrl)(
           rowsUpdated: 0,
           productsCreated: 0,
           productsRenamed: 0,
+          productsReleased: 0,
         });
         const rows = await templateRows(tx);
         expect(rows).toHaveLength(8);
@@ -364,6 +366,48 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
+    it('una fila <Vacío> ocupada que la plantilla convierte en artículo no renombra el producto del administrador', async () => {
+      await withinRollback(async (tx) => {
+        await seedInventoryTemplate(tx, TEMPLATE);
+        const empty = (await templateRows(tx)).find(
+          (row) => row.position === P + 2,
+        );
+        const assigned = await tx.product.create({
+          data: { name: 'Lata Pepsi', unit: 'UNIT' },
+          select: { id: true },
+        });
+        await tx.inventoryTemplateRow.update({
+          where: { id: empty?.id ?? '' },
+          data: { productId: assigned.id },
+        });
+
+        const result = await seedInventoryTemplate(
+          tx,
+          replaceRow(TEMPLATE, {
+            position: P + 2,
+            type: 'ARTICLE',
+            text: 'Lata Sprite',
+            unit: UnitOfMeasure.UNIT,
+          }),
+        );
+
+        const row = (await templateRows(tx)).find(
+          (item) => item.position === P + 2,
+        );
+        expect(row?.product?.name).toBe('Lata Sprite');
+        expect(row?.productId).not.toBe(assigned.id);
+        const kept = await tx.product.findUniqueOrThrow({
+          where: { id: assigned.id },
+        });
+        expect(kept.name).toBe('Lata Pepsi');
+        expect(result).toMatchObject({
+          productsCreated: 1,
+          productsRenamed: 0,
+          productsReleased: 1,
+        });
+      });
+    });
+
     it('se detiene sin escribir nada si la plantilla cambia el tipo de una fila existente', async () => {
       await withinRollback(async (tx) => {
         await seedInventoryTemplate(tx, TEMPLATE);
@@ -400,6 +444,7 @@ describe.skipIf(!databaseUrl)(
           rowsUpdated: 0,
           productsCreated: 0,
           productsRenamed: 0,
+          productsReleased: 0,
         });
         const rows = await tx.inventoryTemplateRow.findMany({
           where: { position: { gte: 2, lte: 183 } },

@@ -104,6 +104,8 @@ export interface InventoryTemplateSeedResult {
   rowsUpdated: number;
   productsCreated: number;
   productsRenamed: number;
+  /** Productos del administrador que quedaron sin fila al ocuparla la plantilla. */
+  productsReleased: number;
 }
 
 // Unidad inicial de los artículos: el Product Owner definió que el inventario
@@ -531,7 +533,9 @@ export async function seedInventoryTemplate(
   rows: readonly InventoryTemplateRowSeed[],
 ): Promise<InventoryTemplateSeedResult> {
   const resolved = resolveInventoryTemplate(rows);
-  if (db instanceof PrismaClient) {
+  // Un TransactionClient no expone $transaction: con un cliente completo
+  // (incluido uno extendido) se abre la transacción aquí.
+  if ('$transaction' in db && typeof db.$transaction === 'function') {
     return db.$transaction((tx) => syncInventoryTemplate(tx, resolved), {
       maxWait: 30_000,
       timeout: 120_000,
@@ -549,6 +553,7 @@ async function syncInventoryTemplate(
     rowsUpdated: 0,
     productsCreated: 0,
     productsRenamed: 0,
+    productsReleased: 0,
   };
   if (resolved.length === 0) return result;
 
@@ -606,14 +611,24 @@ async function syncInventoryTemplate(
     }
 
     const textChanged = actual.printedText !== r.printedText;
+    // Fila `<Vacío>` que la plantilla convierte en artículo mientras el
+    // administrador ya la ocupaba: su producto queda en el catálogo (sin
+    // fila) y el artículo de la plantilla nace como producto propio, sin
+    // renombrar el del administrador.
+    const claimsOccupiedEmpty =
+      articleSeed !== null &&
+      actual.productId !== null &&
+      textChanged &&
+      actual.printedText === INVENTORY_EMPTY_ITEM_TEXT;
     let productId = actual.productId;
-    if (articleSeed !== null && productId === null) {
+    if (articleSeed !== null && (productId === null || claimsOccupiedEmpty)) {
       const created = await db.product.create({
         data: productCreateData(articleSeed),
         select: { id: true },
       });
       productId = created.id;
       result.productsCreated++;
+      if (claimsOccupiedEmpty) result.productsReleased++;
     } else if (articleSeed !== null && productId !== null && textChanged) {
       await db.product.update({
         where: { id: productId },
