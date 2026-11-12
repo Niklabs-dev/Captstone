@@ -18,9 +18,10 @@ import {
   primaryButtonClass,
 } from '@/components/ui/styles';
 import {
-  computeBoxContent,
   formatExample,
-  formatQuantity,
+  freeRowOptions,
+  isUnit,
+  PACKAGE_NAMES,
   parseDecimalInput,
   PRODUCT_UNIT_LABELS,
   PRODUCT_UNITS,
@@ -32,17 +33,23 @@ import {
   type ProductFormValues,
   type ProductInput,
   type ProductSection,
+  type TemplateRow,
+  type TemplateRowSummary,
 } from '@/lib/products';
+import { loadSuggestion } from '@/lib/products-client';
 
 export type ProductAction =
-  { kind: 'create' } | { kind: 'edit' | 'state'; product: Product };
+  | { kind: 'create'; row: TemplateRowSummary | null }
+  | { kind: 'edit' | 'state'; product: Product };
 
 // Formulario de crear y editar, y confirmación de activar o desactivar
 // (SPRINT-5-T04). Los errores de la API se muestran junto al campo y lo
-// escrito se conserva.
+// escrito se conserva. La fila de la plantilla parte con la sugerencia de la
+// API mientras el administrador no elija otra.
 export function ProductDialog({
   action,
   sections,
+  rows,
   busy,
   error,
   serverErrors,
@@ -52,6 +59,7 @@ export function ProductDialog({
 }: {
   action: ProductAction;
   sections: ProductSection[];
+  rows: TemplateRow[];
   busy: boolean;
   error: string;
   serverErrors: ProductFieldErrors;
@@ -62,8 +70,14 @@ export function ProductDialog({
   const ref = useRef<HTMLDialogElement>(null);
   const product = action.kind === 'create' ? null : action.product;
   const [values, setValues] = useState<ProductFormValues>(() =>
-    productFormValues(product),
+    productFormValues(product, action.kind === 'create' ? action.row : null),
   );
+  // La fila la eligió el administrador (o vino de una fila pendiente): no se
+  // reemplaza con la sugerencia.
+  const [rowChosen, setRowChosen] = useState(
+    action.kind !== 'create' || action.row !== null,
+  );
+  const [suggestionNote, setSuggestionNote] = useState('');
   const [clientErrors, setClientErrors] = useState<ProductFieldErrors>({});
   const errors: ProductFieldErrors = { ...serverErrors, ...clientErrors };
   const title =
@@ -89,6 +103,48 @@ export function ProductDialog({
     if (Object.keys(serverErrors).length)
       ref.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
   }, [serverErrors]);
+
+  // Sugerencia de la API para la fila (solo al crear y sin fila elegida).
+  const name = values.name.trim();
+  const alternatives = values.alternativeNames;
+  useEffect(() => {
+    if (action.kind !== 'create' || rowChosen || !values.section || !name)
+      return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      loadSuggestion(
+        {
+          section: values.section,
+          name,
+          alternativeNames: alternatives
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .slice(0, 10),
+        },
+        controller.signal,
+      ).then(
+        (suggestion) => {
+          setValues((current) => ({
+            ...current,
+            templateRowId: suggestion.row?.id ?? '',
+          }));
+          setSuggestionNote(
+            suggestion.reason === 'MATCH'
+              ? `Sugerida: fila ${suggestion.row?.position ?? ''}, coincide con el nombre.`
+              : suggestion.reason === 'EMPTY'
+                ? `Sugerida: fila ${suggestion.row?.position ?? ''}, la primera <Vacío> libre.`
+                : 'No quedan filas libres en la sección: reutiliza la fila de un artículo que ya no se usa.',
+          );
+        },
+        () => undefined,
+      );
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [action.kind, rowChosen, values.section, name, alternatives]);
 
   function set<K extends keyof ProductFormValues>(
     field: K,
@@ -117,53 +173,56 @@ export function ProductDialog({
     await onSave(result.input);
   }
 
-  const packagesPerBox = /^\d+$/.test(values.packagesPerBox.trim())
-    ? Number(values.packagesPerBox.trim())
-    : null;
-  const packageContent = parseDecimalInput(values.packageContent) ?? null;
-  const computed = values.looseOnly
-    ? null
-    : computeBoxContent(packagesPerBox, packageContent);
-  const boxContent = computed ?? parseDecimalInput(values.boxContent) ?? null;
   const example = formatExample({
-    unit: PRODUCT_UNITS.includes(values.unit as never)
-      ? (values.unit as ProductInput['unit'])
-      : 'KG',
-    packageName: values.packageName.trim() || null,
-    packageContent: values.looseOnly ? null : packageContent,
-    boxContent: values.looseOnly ? null : boxContent,
+    unit: isUnit(values.unit) ? values.unit : 'KG',
+    packageName: values.packageName || null,
+    packageContent: values.looseOnly
+      ? null
+      : (parseDecimalInput(values.packageContent) ?? null),
+    boxContent: values.looseOnly
+      ? null
+      : (parseDecimalInput(values.boxContent) ?? null),
     looseOnly: values.looseOnly,
   });
+  const rowOptions = values.section
+    ? freeRowOptions(rows, values.section, product?.templateRowId ?? null)
+    : [];
 
   function field(
-    name: ProductField,
+    fieldName: ProductField,
     label: string,
     input: ReactElement,
     help?: string,
   ): ReactElement {
     return (
       <div className="min-w-0">
-        <label htmlFor={`product-${name}`} className={labelClass}>
+        <label htmlFor={`product-${fieldName}`} className={labelClass}>
           {label}
         </label>
-        <div className="mt-1">{input}</div>
+        <div className="mt-2">{input}</div>
         {help && (
-          <p id={`product-${name}-help`} className="mt-1 text-xs text-ink2">
+          <p
+            id={`product-${fieldName}-help`}
+            className="mt-1 text-xs text-ink2"
+          >
             {help}
           </p>
         )}
-        {errors[name] && (
-          <p id={`product-${name}-error`} className="mt-1 text-xs text-crit">
-            {errors[name]}
+        {errors[fieldName] && (
+          <p
+            id={`product-${fieldName}-error`}
+            className="mt-1 text-xs text-crit"
+          >
+            {errors[fieldName]}
           </p>
         )}
       </div>
     );
   }
-  const describedBy = (name: ProductField, help = false) =>
+  const describedBy = (fieldName: ProductField, help = false) =>
     [
-      help ? `product-${name}-help` : '',
-      errors[name] ? `product-${name}-error` : '',
+      help ? `product-${fieldName}-help` : '',
+      errors[fieldName] ? `product-${fieldName}-error` : '',
     ]
       .filter(Boolean)
       .join(' ') || undefined;
@@ -227,17 +286,45 @@ export function ProductDialog({
         </div>
       ) : (
         <form onSubmit={submit} noValidate className="mt-4 space-y-4">
+          <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+            {field(
+              'name',
+              'Nombre',
+              <input
+                id="product-name"
+                className={inputClass}
+                value={values.name}
+                maxLength={120}
+                onChange={(event) => set('name', event.target.value)}
+                aria-invalid={Boolean(errors.name)}
+                aria-describedby={describedBy('name')}
+              />,
+            )}
+            {field(
+              'sku',
+              'SKU del proveedor (opcional)',
+              <input
+                id="product-sku"
+                className={inputClass}
+                value={values.sku}
+                maxLength={40}
+                onChange={(event) => set('sku', event.target.value)}
+                aria-invalid={Boolean(errors.sku)}
+                aria-describedby={describedBy('sku')}
+              />,
+            )}
+          </div>
           {field(
-            'name',
-            'Nombre',
+            'alternativeNames',
+            'Nombres alternativos (separados por coma)',
             <input
-              id="product-name"
+              id="product-alternativeNames"
               className={inputClass}
-              value={values.name}
-              maxLength={120}
-              onChange={(event) => set('name', event.target.value)}
-              aria-invalid={Boolean(errors.name)}
-              aria-describedby={describedBy('name')}
+              value={values.alternativeNames}
+              placeholder="Beef Steak, Carne Queso"
+              onChange={(event) => set('alternativeNames', event.target.value)}
+              aria-invalid={Boolean(errors.alternativeNames)}
+              aria-describedby={describedBy('alternativeNames')}
             />,
           )}
           <div className="grid min-w-0 gap-4 sm:grid-cols-2">
@@ -248,7 +335,12 @@ export function ProductDialog({
                 id="product-section"
                 className={inputClass}
                 value={values.section}
-                onChange={(event) => set('section', event.target.value)}
+                onChange={(event) => {
+                  set('section', event.target.value);
+                  set('templateRowId', '');
+                  setRowChosen(false);
+                  setSuggestionNote('');
+                }}
                 aria-invalid={Boolean(errors.section)}
                 aria-describedby={describedBy('section')}
               >
@@ -260,6 +352,38 @@ export function ProductDialog({
                 ))}
               </select>,
             )}
+            {field(
+              'templateRowId',
+              'Fila de la plantilla',
+              <select
+                id="product-templateRowId"
+                className={inputClass}
+                value={values.templateRowId}
+                disabled={!values.section}
+                onChange={(event) => {
+                  set('templateRowId', event.target.value);
+                  setRowChosen(true);
+                  setSuggestionNote('');
+                }}
+                aria-invalid={Boolean(errors.templateRowId)}
+                aria-describedby={describedBy('templateRowId', true)}
+              >
+                <option value="">
+                  {action.kind === 'create'
+                    ? 'La que sugiera la API'
+                    : 'Sin fila'}
+                </option>
+                {rowOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>,
+              suggestionNote ||
+                'Solo filas de artículo sin producto. La posición de la fila no cambia.',
+            )}
+          </div>
+          <div className="grid min-w-0 gap-4 sm:grid-cols-2">
             {field(
               'unit',
               'Unidad de medida',
@@ -278,17 +402,16 @@ export function ProductDialog({
                 ))}
               </select>,
             )}
+            <label className="flex min-h-11 cursor-pointer items-center gap-3 self-end text-sm">
+              <input
+                type="checkbox"
+                checked={values.looseOnly}
+                onChange={(event) => set('looseOnly', event.target.checked)}
+                className="h-5 w-5 shrink-0 accent-salmon-ink"
+              />
+              Solo cantidad suelta (sin cajas ni paquetes)
+            </label>
           </div>
-
-          <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
-            <input
-              type="checkbox"
-              checked={values.looseOnly}
-              onChange={(event) => set('looseOnly', event.target.checked)}
-              className="h-5 w-5 shrink-0 accent-salmon-ink"
-            />
-            Solo cantidad en línea (sin cajas ni paquetes)
-          </label>
           {errors.looseOnly && (
             <p className="text-xs text-crit">{errors.looseOnly}</p>
           )}
@@ -301,32 +424,38 @@ export function ProductDialog({
               Formato de caja y paquete
             </legend>
             {field(
+              'boxContent',
+              'Contenido por caja',
+              <input
+                id="product-boxContent"
+                className={inputClass}
+                inputMode="decimal"
+                value={values.boxContent}
+                placeholder="7,3"
+                onChange={(event) => set('boxContent', event.target.value)}
+                aria-invalid={Boolean(errors.boxContent)}
+                aria-describedby={describedBy('boxContent', true)}
+              />,
+              'Acepta decimales con coma (7,3).',
+            )}
+            {field(
               'packageName',
               'Nombre del paquete',
-              <input
+              <select
                 id="product-packageName"
                 className={inputClass}
                 value={values.packageName}
-                maxLength={30}
-                placeholder="bolsa"
                 onChange={(event) => set('packageName', event.target.value)}
                 aria-invalid={Boolean(errors.packageName)}
                 aria-describedby={describedBy('packageName')}
-              />,
-            )}
-            {field(
-              'packagesPerBox',
-              'Paquetes por caja',
-              <input
-                id="product-packagesPerBox"
-                className={inputClass}
-                inputMode="numeric"
-                value={values.packagesPerBox}
-                placeholder="2"
-                onChange={(event) => set('packagesPerBox', event.target.value)}
-                aria-invalid={Boolean(errors.packagesPerBox)}
-                aria-describedby={describedBy('packagesPerBox')}
-              />,
+              >
+                <option value="">Sin paquete</option>
+                {PACKAGE_NAMES.map((packageName) => (
+                  <option key={packageName} value={packageName}>
+                    {packageName}
+                  </option>
+                ))}
+              </select>,
             )}
             {field(
               'packageContent',
@@ -336,34 +465,27 @@ export function ProductDialog({
                 className={inputClass}
                 inputMode="decimal"
                 value={values.packageContent}
-                placeholder="2,5"
+                placeholder="0,93"
                 onChange={(event) => set('packageContent', event.target.value)}
                 aria-invalid={Boolean(errors.packageContent)}
                 aria-describedby={describedBy('packageContent', true)}
               />,
-              'Acepta decimales con coma (2,5).',
+              'Se guarda por separado de la caja.',
             )}
             {field(
-              'boxContent',
-              'Contenido por caja',
+              'packagesPerBox',
+              'Paquetes por caja',
               <input
-                id="product-boxContent"
+                id="product-packagesPerBox"
                 className={inputClass}
-                inputMode="decimal"
-                value={
-                  computed !== null
-                    ? formatQuantity(computed).replace(/\./g, '')
-                    : values.boxContent
-                }
-                readOnly={computed !== null}
-                placeholder="5"
-                onChange={(event) => set('boxContent', event.target.value)}
-                aria-invalid={Boolean(errors.boxContent)}
-                aria-describedby={describedBy('boxContent', true)}
+                inputMode="numeric"
+                value={values.packagesPerBox}
+                placeholder="8"
+                onChange={(event) => set('packagesPerBox', event.target.value)}
+                aria-invalid={Boolean(errors.packagesPerBox)}
+                aria-describedby={describedBy('packagesPerBox', true)}
               />,
-              computed !== null
-                ? 'Calculado: paquetes por caja × contenido por paquete.'
-                : 'Si no informas paquetes, ingrésalo directamente.',
+              'Solo informativo: no se usa para calcular la caja.',
             )}
           </fieldset>
           <p role="status" className="text-sm text-ink2">
@@ -371,36 +493,6 @@ export function ProductDialog({
               ? `Ejemplo: ${example}`
               : 'Sin formato: completa los contenidos para ver un ejemplo.'}
           </p>
-
-          <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-            {field(
-              'sku',
-              'SKU del proveedor (opcional)',
-              <input
-                id="product-sku"
-                className={inputClass}
-                value={values.sku}
-                maxLength={40}
-                onChange={(event) => set('sku', event.target.value)}
-                aria-invalid={Boolean(errors.sku)}
-                aria-describedby={describedBy('sku')}
-              />,
-            )}
-            {field(
-              'alternativeNames',
-              'Otros nombres (separados por coma)',
-              <input
-                id="product-alternativeNames"
-                className={inputClass}
-                value={values.alternativeNames}
-                onChange={(event) =>
-                  set('alternativeNames', event.target.value)
-                }
-                aria-invalid={Boolean(errors.alternativeNames)}
-                aria-describedby={describedBy('alternativeNames')}
-              />,
-            )}
-          </div>
 
           {error && (
             <p role="alert" className={alertClass}>
