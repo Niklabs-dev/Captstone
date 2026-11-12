@@ -335,6 +335,35 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
+    it('conserva el producto que el administrador asignó a una fila <Vacío> sin cambios', async () => {
+      await withinRollback(async (tx) => {
+        await seedInventoryTemplate(tx, TEMPLATE);
+        const empty = (await templateRows(tx)).find(
+          (row) => row.position === P + 2,
+        );
+        expect(empty?.printedText).toBe(INVENTORY_EMPTY_ITEM_TEXT);
+        // Lo que hará SPRINT-5-T03: crear el producto y ocupar la fila libre,
+        // sin tocar printed_text.
+        const assigned = await tx.product.create({
+          data: { name: 'Lata Pepsi', unit: 'UNIT' },
+          select: { id: true },
+        });
+        await tx.inventoryTemplateRow.update({
+          where: { id: empty?.id ?? '' },
+          data: { productId: assigned.id },
+        });
+
+        const result = await seedInventoryTemplate(tx, TEMPLATE);
+
+        const after = (await templateRows(tx)).find(
+          (row) => row.position === P + 2,
+        );
+        expect(after?.productId).toBe(assigned.id);
+        expect(after?.printedText).toBe(INVENTORY_EMPTY_ITEM_TEXT);
+        expect(result.rowsUpdated).toBe(0);
+      });
+    });
+
     it('se detiene sin escribir nada si la plantilla cambia el tipo de una fila existente', async () => {
       await withinRollback(async (tx) => {
         await seedInventoryTemplate(tx, TEMPLATE);
