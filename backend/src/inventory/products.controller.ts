@@ -32,20 +32,21 @@ import type { AuthUser } from '../auth/types/auth.types.js';
 import {
   CreateProductDto,
   ListProductsQueryDto,
+  MoveProductDto,
   UpdateProductDto,
 } from './dto/product-request.dto.js';
 import {
   ProductFieldErrorsDto,
   ProductResponseDto,
-  ProductSectionDto,
 } from './dto/product-response.dto.js';
-import { productSnapshot, ProductsService } from './products.service.js';
+import { productSnapshot } from './inventory-catalog.js';
+import { ProductsService } from './products.service.js';
 import type { ProductChange, ProductResponse } from './types/products.types.js';
 
-// Productos de inventario (SPRINT-5-T03). Crear, editar, desactivar y
+// Productos de inventario (SPRINT-5-T03). Crear, editar, mover, desactivar y
 // reactivar son del ADMINISTRADOR; el SUPERVISOR consulta el catálogo activo
-// para sus tomas. Cada cambio queda en auditoría con el valor anterior y el
-// nuevo.
+// para sus tomas; CONTADOR y TRABAJADOR reciben 403. Cada cambio queda en
+// auditoría con el valor anterior y el nuevo.
 @ApiTags('products')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
@@ -58,7 +59,7 @@ export class ProductsController {
   @ApiOperation({
     summary: 'Lista los productos de inventario en el orden de la plantilla',
     description:
-      'Filtra por sección, estado, formato faltante y nombre (también los alternativos, sin distinguir mayúsculas ni tildes). El SUPERVISOR solo recibe productos activos.',
+      'Roles: ADMINISTRADOR y SUPERVISOR. Filtra por sección, estado, formato o SKU faltante y busca por nombre, nombre alternativo o SKU, sin distinguir mayúsculas ni tildes. El SUPERVISOR solo recibe productos activos.',
   })
   @ApiOkResponse({ type: ProductResponseDto, isArray: true })
   @ApiBadRequestResponse({ description: 'Filtros con formato inválido.' })
@@ -72,19 +73,6 @@ export class ProductsController {
     return this.products.findAll(query, user);
   }
 
-  @Get('sections')
-  @Roles(ROLE.ADMINISTRADOR, ROLE.SUPERVISOR)
-  @ApiOperation({
-    summary: 'Lista las secciones de la plantilla y sus filas libres',
-  })
-  @ApiOkResponse({ type: ProductSectionDto, isArray: true })
-  @ApiForbiddenResponse({
-    description: 'Solo ADMINISTRADOR y SUPERVISOR consultan el catálogo.',
-  })
-  sections(): Promise<ProductSectionDto[]> {
-    return this.products.sections();
-  }
-
   @Post()
   @Roles(ROLE.ADMINISTRADOR)
   @Audited({
@@ -93,19 +81,20 @@ export class ProductsController {
     entityIdFrom: 'response.id',
   })
   @ApiOperation({
-    summary: 'Crea un producto y lo ubica en su sección de la plantilla',
+    summary: 'Crea un producto y lo ubica en una fila de la plantilla',
     description:
-      'Ocupa la primera fila «<Vacío>» libre de la sección o, si no queda ninguna, una fila nueva al final de la sección (posición desde 1000). El SKU es opcional: lo entrega el proveedor.',
+      'Rol: ADMINISTRADOR. Ocupa la fila elegida (templateRowId) o la sugerida: la fila de artículo sin producto que coincide con su nombre o un nombre alternativo; si no, una fila «<Vacío>» libre de la sección. Si no queda ninguna responde 409: nunca se insertan, borran ni reordenan filas. El SKU es opcional: lo entrega el proveedor.',
   })
   @ApiCreatedResponse({ type: ProductResponseDto })
   @ApiBadRequestResponse({
     description:
-      'Datos inválidos, sección inexistente o formato inconsistente (errores por campo).',
+      'Datos inválidos, sección inexistente, fila de otra sección o formato inválido (errores por campo).',
     type: ProductFieldErrorsDto,
   })
   @ApiForbiddenResponse({ description: 'Solo ADMINISTRADOR crea productos.' })
   @ApiConflictResponse({
-    description: 'El nombre o el SKU ya existen (errores por campo).',
+    description:
+      'Nombre, nombre alternativo o SKU repetidos, fila ocupada o sin filas libres en la sección (errores por campo).',
     type: ProductFieldErrorsDto,
   })
   async create(
@@ -127,21 +116,21 @@ export class ProductsController {
     entityIdFrom: 'params.id',
   })
   @ApiOperation({
-    summary: 'Edita el nombre, la sección, la unidad, el SKU o el formato',
+    summary:
+      'Edita el nombre, los nombres alternativos, la unidad, el SKU o el formato',
     description:
-      'Renombrar conserva la fila (posición) del producto en la plantilla. Las líneas de tomas guardan su propia copia y no cambian. Un artículo impreso en la plantilla no se puede mover de sección.',
+      'Rol: ADMINISTRADOR. Renombrar conserva la fila del producto en la plantilla (Lata Coca Cola pasa a Lata Pepsi). Las líneas de tomas guardan su propia copia y no cambian. Una edición sin cambios no se audita. Para cambiar de fila se usa PATCH /products/{id}/move.',
   })
   @ApiOkResponse({ type: ProductResponseDto })
   @ApiBadRequestResponse({
     description:
-      'ID inválido, datos inválidos, sección inexistente o formato inconsistente.',
+      'ID inválido, datos inválidos o un campo obligatorio en null (errores por campo).',
     type: ProductFieldErrorsDto,
   })
   @ApiForbiddenResponse({ description: 'Solo ADMINISTRADOR edita productos.' })
   @ApiNotFoundResponse({ description: 'Producto no encontrado.' })
   @ApiConflictResponse({
-    description:
-      'Nombre o SKU repetidos, o un artículo de la plantilla que se intenta mover de sección.',
+    description: 'Nombre, nombre alternativo o SKU repetidos.',
     type: ProductFieldErrorsDto,
   })
   async update(
@@ -150,6 +139,37 @@ export class ProductsController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<ProductResponse> {
     return this.audited(res, await this.products.update(id, dto));
+  }
+
+  @Patch(':id/move')
+  @Roles(ROLE.ADMINISTRADOR)
+  @Audited({
+    action: AUDIT_ACTION.PRODUCT_MOVED,
+    entityType: 'products',
+    entityIdFrom: 'params.id',
+  })
+  @ApiOperation({
+    summary: 'Mueve un producto a otra fila libre de la plantilla',
+    description:
+      'Rol: ADMINISTRADOR. La fila destino es una fila de artículo sin producto, de cualquier sección; la anterior queda libre. No cambia la posición de ninguna fila. Moverlo a su misma fila no cambia nada.',
+  })
+  @ApiOkResponse({ type: ProductResponseDto })
+  @ApiBadRequestResponse({
+    description: 'ID inválido o la fila destino no es de artículo.',
+    type: ProductFieldErrorsDto,
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMINISTRADOR mueve productos.' })
+  @ApiNotFoundResponse({ description: 'Producto no encontrado.' })
+  @ApiConflictResponse({
+    description: 'La fila destino ya tiene un producto.',
+    type: ProductFieldErrorsDto,
+  })
+  async move(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: MoveProductDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<ProductResponse> {
+    return this.audited(res, await this.products.move(id, dto));
   }
 
   @Patch(':id/deactivate')
@@ -162,7 +182,7 @@ export class ProductsController {
   @ApiOperation({
     summary: 'Desactiva un producto sin borrarlo',
     description:
-      'Deja de aparecer en tomas nuevas y conserva su fila y las tomas finalizadas. Repetir la acción no cambia nada.',
+      'Rol: ADMINISTRADOR. Deja de aparecer en tomas nuevas y conserva su fila y las tomas finalizadas. Repetir la acción no cambia nada.',
   })
   @ApiOkResponse({ type: ProductResponseDto })
   @ApiBadRequestResponse({ description: 'El ID no es un UUID válido.' })
@@ -184,7 +204,11 @@ export class ProductsController {
     entityType: 'products',
     entityIdFrom: 'params.id',
   })
-  @ApiOperation({ summary: 'Reactiva un producto desactivado' })
+  @ApiOperation({
+    summary: 'Reactiva un producto desactivado',
+    description:
+      'Rol: ADMINISTRADOR. Si su fila se liberó, queda sin fila hasta moverlo a una libre.',
+  })
   @ApiOkResponse({ type: ProductResponseDto })
   @ApiBadRequestResponse({ description: 'El ID no es un UUID válido.' })
   @ApiForbiddenResponse({
@@ -198,8 +222,8 @@ export class ProductsController {
     return this.audited(res, await this.products.setActive(id, true));
   }
 
-  // Auditoría con el valor anterior y el nuevo; un cambio de estado que no
-  // hizo nada no se registra.
+  // Auditoría con el valor anterior y el nuevo; una solicitud que no cambió
+  // nada no se registra.
   private audited(res: Response, change: ProductChange): ProductResponse {
     setAuditContext(res, {
       skipAudit: !change.changed,

@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ROLE } from '../auth/constants/roles.constants.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import {
@@ -15,124 +10,47 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import type {
   CreateProductDto,
   ListProductsQueryDto,
+  MoveProductDto,
   UpdateProductDto,
 } from './dto/product-request.dto.js';
 import {
-  EXTRA_TEMPLATE_ROW_START,
-  type ProductAuditSnapshot,
-  type ProductChange,
-  type ProductResponse,
-} from './types/products.types.js';
+  assertSection,
+  fieldErrors,
+  freeItemRows,
+  lockCatalog,
+  PRODUCT_SELECT,
+  productSnapshot,
+  readProduct,
+  readTemplateRow,
+  toProductResponse,
+  type Tx,
+} from './inventory-catalog.js';
+import type { ProductChange, ProductResponse } from './types/products.types.js';
 import {
-  hasProductFormat,
+  alternativeNamesError,
+  comparableName,
   normalizeProductName,
   resolveProductFormat,
+  suggestTemplateRow,
+  type ProductFormat,
+  type ProductFormatInput,
 } from './utils/product-format.util.js';
 
 // Catálogo de productos de inventario (SPRINT-5-T03). El ADMINISTRADOR crea,
-// edita, desactiva y reactiva productos; el SUPERVISOR consulta los activos.
+// edita, mueve, desactiva y reactiva productos; el SUPERVISOR consulta los
+// activos.
 //
-// Contrato con la carga de la plantilla (SPRINT-5-T02): printed_text de cada
-// fila es el texto de la última plantilla cargada y esta API nunca lo
-// modifica. Un producto se ubica asignándolo a una fila (product_id):
-// - al crearlo, ocupa la primera fila «<Vacío>» libre de su sección;
-// - si no queda ninguna, se agrega una fila nueva desde la posición 1000, con
-//   el mismo texto «<Vacío>» y su sección; la carga de la plantilla no toca
-//   esas posiciones y el Excel la ubica antes del cierre de su sección.
-// Editar el nombre o el formato cambia solo el producto: su fila (posición)
-// se conserva y las líneas de tomas guardan su propia copia.
-
-const EMPTY_ITEM_TEXT = '<Vacío>';
-// Serializa las altas y movimientos: dos solicitudes simultáneas no toman la
-// misma fila, no calculan la misma posición nueva ni repiten un nombre.
-const CATALOG_LOCK_KEY = 5_030_301;
-
-const PRODUCT_SELECT = {
-  id: true,
-  sku: true,
-  name: true,
-  alternativeNames: true,
-  unit: true,
-  packageName: true,
-  packagesPerBox: true,
-  packageContent: true,
-  boxContent: true,
-  looseOnly: true,
-  isActive: true,
-  createdAt: true,
-  updatedAt: true,
-  templateRow: {
-    select: { id: true, position: true, section: true, printedText: true },
-  },
-} satisfies Prisma.ProductSelect;
-
-type ProductRecord = Prisma.ProductGetPayload<{
-  select: typeof PRODUCT_SELECT;
-}>;
-
-type Tx = Prisma.TransactionClient;
-
-function decimalText(value: Prisma.Decimal | null): string | null {
-  return value === null ? null : value.toFixed(3);
-}
-
-function toResponse(product: ProductRecord): ProductResponse {
-  return {
-    id: product.id,
-    sku: product.sku,
-    name: product.name,
-    alternativeNames: product.alternativeNames,
-    unit: product.unit,
-    packageName: product.packageName,
-    packagesPerBox: product.packagesPerBox,
-    packageContent: decimalText(product.packageContent),
-    boxContent: decimalText(product.boxContent),
-    looseOnly: product.looseOnly,
-    hasFormat: hasProductFormat(product),
-    isActive: product.isActive,
-    section: product.templateRow?.section ?? null,
-    templatePosition: product.templateRow?.position ?? null,
-    createdAt: product.createdAt,
-    updatedAt: product.updatedAt,
-  };
-}
-
-export function productSnapshot(
-  product: ProductResponse,
-): ProductAuditSnapshot {
-  return {
-    sku: product.sku,
-    name: product.name,
-    unit: product.unit,
-    packageName: product.packageName,
-    packagesPerBox: product.packagesPerBox,
-    packageContent: product.packageContent,
-    boxContent: product.boxContent,
-    looseOnly: product.looseOnly,
-    isActive: product.isActive,
-    section: product.section,
-    templatePosition: product.templatePosition,
-  };
-}
-
-// Comparación sin tildes ni mayúsculas, para buscar y para nombres repetidos.
-function comparable(text: string): string {
-  return normalizeProductName(text)
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .toLocaleLowerCase('es');
-}
-
-function fieldErrors(
-  status: 400 | 409,
-  message: string,
-  errors: Record<string, string>,
-): BadRequestException | ConflictException {
-  const body = { statusCode: status, message, errors };
-  return status === 400
-    ? new BadRequestException(body)
-    : new ConflictException(body);
-}
+// Un producto se ubica asignándolo a una fila de artículo de la plantilla
+// (product_id). La plantilla tiene filas fijas: la API nunca inserta, borra
+// ni reordena filas, porque el Excel descargado se copia y se pega en otro
+// cuadre. Al crear un producto se usa la fila elegida o la sugerida:
+// - la fila de artículo sin producto cuyo texto coincide con su nombre o con
+//   un nombre alternativo;
+// - si no, la primera fila «<Vacío>» libre de la sección;
+// - si no queda ninguna, 409: hay que reutilizar la fila de un artículo que
+//   ya no se usa (liberarla o elegirla).
+// Editar el nombre o el formato cambia solo el producto: su fila se conserva
+// y las líneas de tomas guardan su propia copia.
 
 function isUniqueViolation(error: unknown): boolean {
   return (
@@ -141,12 +59,21 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
-// Una fila con el nombre impreso de un artículo pertenece a su sección: si
-// su producto se moviera, la próxima carga de la plantilla volvería a crear el
-// artículo en esa fila. Las filas «<Vacío>» y las que agrega la API (siempre
-// con texto «<Vacío>») sí se pueden liberar.
-function isPrintedArticleRow(row: ProductRecord['templateRow']): boolean {
-  return row !== null && row.printedText !== EMPTY_ITEM_TEXT;
+function skuConflict(): ReturnType<typeof fieldErrors> {
+  return fieldErrors(409, 'El SKU ya existe', {
+    sku: 'Otro producto ya usa ese SKU',
+  });
+}
+
+const REQUIRED_ON_UPDATE: Record<string, string> = {
+  name: 'El nombre es obligatorio',
+  unit: 'La unidad es obligatoria',
+  alternativeNames: 'Los nombres alternativos deben ser una lista',
+  looseOnly: '«Solo cantidad suelta» debe ser verdadero o falso',
+};
+
+function sameSnapshot(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 @Injectable()
@@ -162,9 +89,9 @@ export class ProductsService {
       where: onlyActive === undefined ? {} : { isActive: onlyActive },
       select: PRODUCT_SELECT,
     });
-    const search = query.search ? comparable(query.search) : null;
+    const search = query.search ? comparableName(query.search) : null;
     return products
-      .map(toResponse)
+      .map(toProductResponse)
       .filter((product) => !query.section || product.section === query.section)
       .filter(
         (product) =>
@@ -173,9 +100,14 @@ export class ProductsService {
       )
       .filter(
         (product) =>
+          query.missingSku === undefined ||
+          (product.sku === null) === query.missingSku,
+      )
+      .filter(
+        (product) =>
           search === null ||
-          [product.name, ...product.alternativeNames].some((name) =>
-            comparable(name).includes(search),
+          [product.name, ...product.alternativeNames, product.sku ?? ''].some(
+            (text) => comparableName(text).includes(search),
           ),
       )
       .sort(
@@ -184,45 +116,6 @@ export class ProductsService {
             (right.templatePosition ?? Number.MAX_SAFE_INTEGER) ||
           left.name.localeCompare(right.name, 'es'),
       );
-  }
-
-  async findOne(id: string): Promise<ProductResponse> {
-    const product = await this.prisma.product.findUnique({
-      where: { id },
-      select: PRODUCT_SELECT,
-    });
-    if (!product) throw new NotFoundException('Producto no encontrado');
-    return toResponse(product);
-  }
-
-  // Secciones de la plantilla en su orden, con las filas «<Vacío>» libres.
-  async sections(): Promise<
-    { name: string; position: number; freeRows: number }[]
-  > {
-    const [sections, free] = await Promise.all([
-      this.prisma.inventoryTemplateRow.findMany({
-        where: { kind: InventoryTemplateRowKind.SECTION },
-        select: { section: true, position: true },
-        orderBy: { position: 'asc' },
-      }),
-      this.prisma.inventoryTemplateRow.groupBy({
-        by: ['section'],
-        where: {
-          kind: InventoryTemplateRowKind.ITEM,
-          printedText: EMPTY_ITEM_TEXT,
-          productId: null,
-        },
-        _count: { _all: true },
-      }),
-    ]);
-    const freeBySection = new Map(
-      free.map((item) => [item.section, item._count._all]),
-    );
-    return sections.map((section) => ({
-      name: section.section,
-      position: section.position,
-      freeRows: freeBySection.get(section.section) ?? 0,
-    }));
   }
 
   async create(dto: CreateProductDto): Promise<ProductResponse> {
@@ -234,47 +127,58 @@ export class ProductsService {
       looseOnly: dto.looseOnly ?? false,
     });
     const name = normalizeProductName(dto.name);
+    const alternativeNames = this.alternativeNames(
+      name,
+      dto.alternativeNames ?? [],
+    );
     const sku = dto.sku ?? null;
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        await this.lockCatalog(tx);
-        await this.assertSection(tx, dto.section);
-        await this.assertNameAvailable(tx, name, null);
+        await lockCatalog(tx);
+        await assertSection(tx, dto.section);
+        await this.assertNamesAvailable(tx, null, {
+          name,
+          alternativeNames,
+          checkName: true,
+        });
         await this.assertSkuAvailable(tx, sku, null);
+        const rowId = await this.chooseRow(
+          tx,
+          dto.section,
+          [name, ...alternativeNames],
+          dto.templateRowId,
+        );
         const created = await tx.product.create({
-          data: {
-            name,
-            sku,
-            alternativeNames: dto.alternativeNames ?? [],
-            unit: dto.unit,
-            ...format,
-          },
+          data: { name, sku, alternativeNames, unit: dto.unit, ...format },
           select: { id: true },
         });
-        await this.place(tx, created.id, dto.section);
-        return toResponse(await this.read(tx, created.id));
+        await this.claimRow(tx, rowId, created.id);
+        return toProductResponse(await readProduct(tx, created.id));
       });
     } catch (error) {
-      if (isUniqueViolation(error)) {
-        throw fieldErrors(409, 'El SKU ya existe', {
-          sku: 'Otro producto ya usa ese SKU',
-        });
-      }
+      if (isUniqueViolation(error)) throw skuConflict();
       throw error;
     }
   }
 
   async update(id: string, dto: UpdateProductDto): Promise<ProductChange> {
+    // PATCH con null en un campo obligatorio: 400, nunca un 500.
+    const nullErrors = Object.fromEntries(
+      Object.entries(REQUIRED_ON_UPDATE).filter(
+        ([field]) => (dto as Record<string, unknown>)[field] === null,
+      ),
+    );
+    if (Object.keys(nullErrors).length > 0) {
+      throw fieldErrors(400, 'Faltan datos obligatorios', nullErrors);
+    }
+
     try {
       return await this.prisma.$transaction(async (tx) => {
-        await this.lockCatalog(tx);
-        const existing = await this.read(tx, id);
-        const before = toResponse(existing);
+        await lockCatalog(tx);
+        const existing = await readProduct(tx, id);
+        const before = toProductResponse(existing);
         const unit = dto.unit ?? existing.unit;
-        // Si cambian los paquetes, el contenido por caja se vuelve a calcular.
-        const recompute =
-          dto.packagesPerBox !== undefined || dto.packageContent !== undefined;
         const format = this.format(unit, {
           packageName:
             dto.packageName !== undefined
@@ -289,79 +193,95 @@ export class ProductsService {
               ? dto.packageContent
               : before.packageContent,
           boxContent:
-            dto.boxContent !== undefined
-              ? dto.boxContent
-              : recompute
-                ? null
-                : before.boxContent,
+            dto.boxContent !== undefined ? dto.boxContent : before.boxContent,
           looseOnly: dto.looseOnly ?? existing.looseOnly,
         });
-
         const name =
           dto.name === undefined
             ? existing.name
             : normalizeProductName(dto.name);
-        if (comparable(name) !== comparable(existing.name)) {
-          await this.assertNameAvailable(tx, name, id);
+        const renamed = comparableName(name) !== comparableName(existing.name);
+        const alternativeNames =
+          dto.alternativeNames === undefined
+            ? existing.alternativeNames
+            : this.alternativeNames(name, dto.alternativeNames);
+        if (renamed || dto.alternativeNames !== undefined) {
+          await this.assertNamesAvailable(tx, id, {
+            name,
+            alternativeNames:
+              dto.alternativeNames === undefined ? [] : alternativeNames,
+            checkName: renamed,
+          });
         }
-        if (dto.sku !== undefined && dto.sku !== existing.sku) {
-          await this.assertSkuAvailable(tx, dto.sku, id);
-        }
+        const sku = dto.sku !== undefined ? dto.sku : existing.sku;
+        if (sku !== existing.sku) await this.assertSkuAvailable(tx, sku, id);
 
-        const currentSection = existing.templateRow?.section ?? null;
-        if (dto.section !== undefined && dto.section !== currentSection) {
-          await this.assertSection(tx, dto.section);
-          if (isPrintedArticleRow(existing.templateRow)) {
-            throw fieldErrors(
-              409,
-              'El producto pertenece a su sección de la plantilla',
-              {
-                section: `«${existing.templateRow?.printedText ?? existing.name}» es un artículo de la plantilla en la sección ${currentSection ?? ''}; no se puede mover`,
-              },
-            );
-          }
-          if (existing.templateRow) {
-            await tx.inventoryTemplateRow.update({
-              where: { id: existing.templateRow.id },
-              data: { productId: null },
-            });
-          }
-          await this.place(tx, id, dto.section);
+        const after = productSnapshot({
+          ...before,
+          name,
+          sku,
+          unit,
+          alternativeNames,
+          ...this.formatResponse(format),
+        });
+        if (sameSnapshot(after, productSnapshot(before))) {
+          return {
+            product: before,
+            before: productSnapshot(before),
+            changed: false,
+          };
         }
-
         await tx.product.update({
           where: { id },
-          data: {
-            name,
-            unit,
-            ...(dto.sku !== undefined ? { sku: dto.sku } : {}),
-            ...(dto.alternativeNames !== undefined
-              ? { alternativeNames: dto.alternativeNames }
-              : {}),
-            ...format,
-          },
+          data: { name, sku, unit, alternativeNames, ...format },
         });
         return {
-          product: toResponse(await this.read(tx, id)),
+          product: toProductResponse(await readProduct(tx, id)),
           before: productSnapshot(before),
           changed: true,
         };
       });
     } catch (error) {
-      if (isUniqueViolation(error)) {
-        throw fieldErrors(409, 'El SKU ya existe', {
-          sku: 'Otro producto ya usa ese SKU',
-        });
-      }
+      if (isUniqueViolation(error)) throw skuConflict();
       throw error;
     }
+  }
+
+  // Mueve el producto a otra fila de artículo sin producto (de cualquier
+  // sección) y libera la anterior. No cambia la posición de ninguna fila.
+  async move(id: string, dto: MoveProductDto): Promise<ProductChange> {
+    return this.prisma.$transaction(async (tx) => {
+      await lockCatalog(tx);
+      const existing = await readProduct(tx, id);
+      const before = toProductResponse(existing);
+      if (existing.templateRow?.id === dto.templateRowId) {
+        return {
+          product: before,
+          before: productSnapshot(before),
+          changed: false,
+        };
+      }
+      await this.assertFreeItemRow(tx, dto.templateRowId, null);
+      if (existing.templateRow) {
+        await tx.inventoryTemplateRow.update({
+          where: { id: existing.templateRow.id },
+          data: { productId: null },
+        });
+      }
+      await this.claimRow(tx, dto.templateRowId, id);
+      return {
+        product: toProductResponse(await readProduct(tx, id)),
+        before: productSnapshot(before),
+        changed: true,
+      };
+    });
   }
 
   // Desactivar no borra: el producto conserva su fila y sus tomas, y deja de
   // aparecer en tomas nuevas. Repetir la acción no cambia nada.
   async setActive(id: string, isActive: boolean): Promise<ProductChange> {
     return this.prisma.$transaction(async (tx) => {
-      const existing = toResponse(await this.read(tx, id));
+      const existing = toProductResponse(await readProduct(tx, id));
       if (existing.isActive === isActive) {
         return {
           product: existing,
@@ -371,36 +291,17 @@ export class ProductsService {
       }
       await tx.product.update({ where: { id }, data: { isActive } });
       return {
-        product: toResponse(await this.read(tx, id)),
+        product: toProductResponse(await readProduct(tx, id)),
         before: productSnapshot(existing),
         changed: true,
       };
     });
   }
 
-  private async lockCatalog(tx: Tx): Promise<void> {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${CATALOG_LOCK_KEY})`;
-  }
-
-  private async read(tx: Tx, id: string): Promise<ProductRecord> {
-    const product = await tx.product.findUnique({
-      where: { id },
-      select: PRODUCT_SELECT,
-    });
-    if (!product) throw new NotFoundException('Producto no encontrado');
-    return product;
-  }
-
   private format(
     unit: UnitOfMeasure,
-    input: {
-      packageName: string | null;
-      packagesPerBox: number | null;
-      packageContent: string | null;
-      boxContent: string | null;
-      looseOnly: boolean;
-    },
-  ) {
+    input: Omit<ProductFormatInput, 'unit'>,
+  ): ProductFormat {
     const result = resolveProductFormat({ unit, ...input });
     if (!result.ok) {
       throw fieldErrors(
@@ -412,36 +313,71 @@ export class ProductsService {
     return result.format;
   }
 
-  private async assertSection(tx: Tx, section: string): Promise<void> {
-    const exists = await tx.inventoryTemplateRow.findFirst({
-      where: { kind: InventoryTemplateRowKind.SECTION, section },
-      select: { id: true },
-    });
-    if (!exists) {
-      throw fieldErrors(400, 'La sección no existe en la plantilla', {
-        section: `«${section}» no es una sección de la plantilla`,
-      });
-    }
+  private formatResponse(
+    format: ProductFormat,
+  ): Pick<
+    ProductResponse,
+    | 'packageName'
+    | 'packagesPerBox'
+    | 'packageContent'
+    | 'boxContent'
+    | 'looseOnly'
+  > {
+    return {
+      packageName: format.packageName,
+      packagesPerBox: format.packagesPerBox,
+      packageContent: format.packageContent?.toFixed(3) ?? null,
+      boxContent: format.boxContent?.toFixed(3) ?? null,
+      looseOnly: format.looseOnly,
+    };
   }
 
-  // Nombre no repetido sin distinguir mayúsculas ni tildes. Solo se valida
-  // al crear o al cambiar el nombre: los repetidos que trae la plantilla
-  // («Lata Fanta Zero» en las filas 99 y 102) se pueden editar sin renombrar.
-  private async assertNameAvailable(
+  private alternativeNames(name: string, values: readonly string[]): string[] {
+    const error = alternativeNamesError(name, values);
+    if (error !== null) {
+      throw fieldErrors(400, 'Los nombres alternativos no son válidos', {
+        alternativeNames: error,
+      });
+    }
+    return values.map(normalizeProductName);
+  }
+
+  // Nombres únicos en todo el catálogo, sin distinguir mayúsculas ni tildes:
+  // el nombre y cada nombre alternativo no pueden ser el nombre ni un
+  // alternativo de otro producto. El nombre solo se valida al crear o al
+  // renombrar: los repetidos que ya existían se pueden editar sin renombrar.
+  private async assertNamesAvailable(
     tx: Tx,
-    name: string,
     excludeId: string | null,
+    input: { name: string; alternativeNames: string[]; checkName: boolean },
   ): Promise<void> {
-    // El catálogo es acotado (unos cientos): se compara sin tildes en memoria.
+    // El catálogo es acotado (unos cientos): se compara en memoria.
     const others = await tx.product.findMany({
       where: excludeId ? { id: { not: excludeId } } : {},
-      select: { name: true },
+      select: { name: true, alternativeNames: true },
     });
-    const target = comparable(name);
-    if (others.some((other) => comparable(other.name) === target)) {
-      throw fieldErrors(409, 'Ya existe un producto con ese nombre', {
-        name: `Ya existe un producto llamado «${name}»`,
-      });
+    const owner = new Map<string, string>();
+    for (const other of others) {
+      for (const text of [other.name, ...other.alternativeNames]) {
+        owner.set(comparableName(text), other.name);
+      }
+    }
+    const errors: Record<string, string> = {};
+    const nameOwner = owner.get(comparableName(input.name));
+    if (input.checkName && nameOwner !== undefined) {
+      errors.name =
+        comparableName(nameOwner) === comparableName(input.name)
+          ? `Ya existe un producto llamado «${input.name}»`
+          : `«${input.name}» ya es un nombre alternativo de «${nameOwner}»`;
+    }
+    const taken = input.alternativeNames.find((text) =>
+      owner.has(comparableName(text)),
+    );
+    if (taken !== undefined) {
+      errors.alternativeNames = `«${taken}» ya es un nombre de «${owner.get(comparableName(taken)) ?? ''}»`;
+    }
+    if (Object.keys(errors).length > 0) {
+      throw fieldErrors(409, 'El nombre ya existe en el catálogo', errors);
     }
   }
 
@@ -465,45 +401,73 @@ export class ProductsService {
     }
   }
 
-  // Ubica el producto: primera fila «<Vacío>» libre de la sección o, si no
-  // queda ninguna, una fila nueva desde la posición 1000.
-  private async place(
+  // Fila elegida (validada) o la sugerida; 409 si no queda ninguna.
+  private async chooseRow(
     tx: Tx,
-    productId: string,
     section: string,
-  ): Promise<void> {
-    const free = await tx.inventoryTemplateRow.findMany({
-      where: {
-        kind: InventoryTemplateRowKind.ITEM,
-        printedText: EMPTY_ITEM_TEXT,
-        productId: null,
-        section,
-      },
-      select: { id: true },
-      orderBy: { position: 'asc' },
-    });
-    for (const row of free) {
-      // Solo la ocupa si sigue libre (otra solicitud pudo tomarla).
-      const claimed = await tx.inventoryTemplateRow.updateMany({
-        where: { id: row.id, productId: null },
-        data: { productId },
-      });
-      if (claimed.count === 1) return;
+    names: string[],
+    templateRowId: string | undefined,
+  ): Promise<string> {
+    if (templateRowId !== undefined) {
+      await this.assertFreeItemRow(tx, templateRowId, section);
+      return templateRowId;
     }
-    const last = await tx.inventoryTemplateRow.aggregate({
-      _max: { position: true },
+    const suggestion = suggestTemplateRow(
+      await freeItemRows(tx, section),
+      names,
+    );
+    if (suggestion === null) {
+      throw fieldErrors(409, 'No quedan filas libres en la sección', {
+        templateRowId: `No quedan filas libres en «${section}». Reutiliza la fila de un artículo que ya no se usa: libera la de un producto desactivado o elige una fila de artículo pendiente.`,
+      });
+    }
+    return suggestion.row.id;
+  }
+
+  private async assertFreeItemRow(
+    tx: Tx,
+    rowId: string,
+    section: string | null,
+  ): Promise<void> {
+    const row = await tx.inventoryTemplateRow.findUnique({
+      where: { id: rowId },
+      select: { kind: true, productId: true, section: true },
     });
-    await tx.inventoryTemplateRow.create({
-      data: {
-        position: Math.max(
-          EXTRA_TEMPLATE_ROW_START,
-          (last._max.position ?? 0) + 1,
-        ),
-        kind: InventoryTemplateRowKind.ITEM,
-        printedText: EMPTY_ITEM_TEXT,
-        section,
-        productId,
-      },
+    const invalid =
+      row === null
+        ? 'La fila elegida no existe en la plantilla'
+        : row.kind !== InventoryTemplateRowKind.ITEM
+          ? 'Solo se puede usar una fila de artículo'
+          : section !== null && row.section !== section
+            ? `La fila elegida no es de la sección «${section}»`
+            : null;
+    if (invalid !== null) {
+      throw fieldErrors(400, 'La fila de la plantilla no es válida', {
+        templateRowId: invalid,
+      });
+    }
+    if (row !== null && row.productId !== null) {
+      throw fieldErrors(409, 'La fila ya tiene un producto', {
+        templateRowId: 'La fila elegida ya tiene un producto',
+      });
+    }
+  }
+
+  private async claimRow(
+    tx: Tx,
+    rowId: string,
+    productId: string,
+  ): Promise<void> {
+    // Solo la ocupa si sigue libre (el bloqueo del catálogo ya lo asegura).
+    const claimed = await tx.inventoryTemplateRow.updateMany({
+      where: { id: rowId, productId: null },
+      data: { productId },
     });
+    if (claimed.count !== 1) {
+      const row = await readTemplateRow(tx, rowId);
+      throw fieldErrors(409, 'La fila ya tiene un producto', {
+        templateRowId: `La fila ${row.position} ya tiene un producto`,
+      });
+    }
   }
 }
