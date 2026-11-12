@@ -2,14 +2,17 @@ import { readFile } from 'node:fs/promises';
 import readXlsxFile from 'read-excel-file/node';
 import {
   INVENTORY_EMPTY_ITEM_TEXT,
+  INVENTORY_REFERENCE_FORMATS,
   INVENTORY_TEMPLATE_FIRST_POSITION,
   INVENTORY_TEMPLATE_ROWS,
+  INVENTORY_TEMPLATE_STRUCTURE,
+  inventoryTemplateStructureErrors,
   resolveInventoryTemplate,
 } from '../prisma/inventory-template.js';
 
-// Compara el catálogo inicial del seed (SPRINT-5-T02) contra la plantilla en
-// blanco del repositorio (docs/plantilla-inventario.xlsx): cantidad de
-// artículos, orden, texto de cada fila y secciones. Si alguien edita la
+// Compara la estructura que carga el seed (SPRINT-5-T02) contra la plantilla
+// en blanco del repositorio (docs/plantilla-inventario.xlsx): cantidad de
+// filas por tipo, orden, texto de cada fila y secciones. Si alguien edita la
 // plantilla o el seed sin actualizar el otro, este test falla.
 const TEMPLATE_PATH = new URL(
   '../docs/plantilla-inventario.xlsx',
@@ -31,7 +34,7 @@ async function readTemplateSheet(): Promise<Cell[][]> {
   return sheets[0].data as Cell[][];
 }
 
-describe('Catálogo inicial contra plantilla-inventario.xlsx (SPRINT-5-T02)', () => {
+describe('Estructura de la plantilla contra plantilla-inventario.xlsx (SPRINT-5-T02)', () => {
   let sheet: Cell[][];
 
   beforeAll(async () => {
@@ -95,7 +98,24 @@ describe('Catálogo inicial contra plantilla-inventario.xlsx (SPRINT-5-T02)', ()
     );
   });
 
-  it('«solo cantidad suelta» coincide con los artículos que en la hoja no admiten bultos ni unidades', () => {
+  it('cumple la estructura que valida el seed antes de escribir', () => {
+    expect(
+      inventoryTemplateStructureErrors(
+        INVENTORY_TEMPLATE_ROWS,
+        INVENTORY_TEMPLATE_STRUCTURE,
+      ),
+    ).toEqual([]);
+  });
+
+  it('los formatos de referencia apuntan a artículos de la hoja en su misma fila', () => {
+    for (const reference of INVENTORY_REFERENCE_FORMATS) {
+      expect(sheet[reference.position - 1][COLUMN_ARTICLE]).toBe(
+        reference.text,
+      );
+    }
+  });
+
+  it('«solo cantidad suelta» de referencia coincide con los artículos que en la hoja no admiten bultos ni unidades', () => {
     const sueltosEnHoja = INVENTORY_TEMPLATE_ROWS.filter(
       (row) => row.type === 'ARTICLE',
     )
@@ -107,46 +127,18 @@ describe('Catálogo inicial contra plantilla-inventario.xlsx (SPRINT-5-T02)', ()
         );
       })
       .map((row) => row.position);
-    const sueltosEnSeed = INVENTORY_TEMPLATE_ROWS.filter(
-      (row) => row.type === 'ARTICLE' && row.format?.looseOnly === true,
-    ).map((row) => row.position);
+    const sueltosDeReferencia = INVENTORY_REFERENCE_FORMATS.filter(
+      (reference) => reference.looseOnly === true,
+    ).map((reference) => reference.position);
 
-    expect(sueltosEnSeed).toEqual([17, 18, 19]);
-    expect(sueltosEnSeed).toEqual(sueltosEnHoja);
+    expect(sueltosDeReferencia).toEqual([17, 18, 19]);
+    expect(sueltosDeReferencia).toEqual(sueltosEnHoja);
   });
 
-  it('Carne Fajita (fila 4) trae caja de 5 kg con 2 bolsas de 2,5 kg y el resto queda sin formato', () => {
-    const conFormato = INVENTORY_TEMPLATE_ROWS.filter(
-      (row) =>
-        row.type === 'ARTICLE' &&
-        row.format !== undefined &&
-        row.format.looseOnly !== true,
-    );
-
-    expect(conFormato).toEqual([
-      {
-        position: 4,
-        type: 'ARTICLE',
-        text: 'Carne Fajita (Beef Steak Saborizado)',
-        unit: 'KG',
-        format: {
-          packageName: 'bolsa',
-          boxContent: '5',
-          packagesPerBox: 2,
-          packageContent: '2.5',
-        },
-      },
-    ]);
-  });
-
-  it('todos los artículos parten en kilos', () => {
-    const unidades = new Set(
-      INVENTORY_TEMPLATE_ROWS.flatMap((row) =>
-        row.type === 'ARTICLE' ? [row.unit] : [],
-      ),
-    );
-
-    expect([...unidades]).toEqual(['KG']);
+  it('Pepperoni de referencia tiene una caja que no es paquetes × contenido del paquete', () => {
+    expect(
+      INVENTORY_REFERENCE_FORMATS.find((r) => r.text === 'Pepperoni'),
+    ).toMatchObject({ boxContent: '7.3', packageContent: '0.93' });
   });
 
   it('carga las dos «Lata Fanta Zero» (filas 99 y 102) tal como vienen', () => {
