@@ -1,18 +1,15 @@
 import { PrismaPg } from '@prisma/adapter-pg';
-import {
-  Prisma,
-  PrismaClient,
-  UnitOfMeasure,
-} from '../src/generated/prisma/client.js';
+import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import {
   INVENTORY_EMPTY_ITEM_TEXT,
   INVENTORY_TEMPLATE_ROWS,
   type InventoryTemplateRowSeed,
+  type InventoryTemplateStructure,
   seedInventoryTemplate,
 } from '../prisma/inventory-template.js';
 
-// Tests de integración de la carga de la plantilla de inventario
-// (SPRINT-5-T02) contra PostgreSQL real. Usan una plantilla sintética en
+// Tests de integración de la carga de la estructura de la plantilla de
+// inventario (SPRINT-5-T02) contra PostgreSQL real. Usan una plantilla sintética en
 // posiciones altas (desde la 20000) para no chocar con las filas reales que
 // carga el seed, y cada caso corre en withinRollback (la base se revierte).
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -33,48 +30,26 @@ const TEMPLATE: InventoryTemplateRowSeed[] = [
     position: P,
     type: 'ARTICLE',
     text: 'Carne Fajita (Beef Steak Saborizado)',
-    unit: UnitOfMeasure.KG,
-    format: {
-      packageName: 'bolsa',
-      boxContent: '5',
-      packagesPerBox: 2,
-      packageContent: '2.5',
-    },
   },
-  {
-    position: P + 1,
-    type: 'ARTICLE',
-    text: 'Atún (Preparado)',
-    unit: UnitOfMeasure.KG,
-    format: { looseOnly: true },
-  },
+  { position: P + 1, type: 'ARTICLE', text: 'Atún (Preparado)' },
   { position: P + 2, type: 'EMPTY' },
   { position: P + 3, type: 'BLANK' },
   { position: P + 4, type: 'SECTION', text: 'COSTO PROTEÍNAS' },
-  {
-    position: P + 5,
-    type: 'ARTICLE',
-    text: 'Lata Fanta Zero',
-    unit: UnitOfMeasure.UNIT,
-  },
-  {
-    position: P + 6,
-    type: 'ARTICLE',
-    text: 'Lata Fanta Zero',
-    unit: UnitOfMeasure.UNIT,
-  },
+  { position: P + 5, type: 'ARTICLE', text: 'Lata Fanta Zero' },
+  { position: P + 6, type: 'ARTICLE', text: 'Lata Fanta Zero' },
   { position: P + 7, type: 'SECTION', text: 'COSTO DE BEBIDAS' },
 ];
 
-function replaceRow(
-  template: InventoryTemplateRowSeed[],
-  row: InventoryTemplateRowSeed,
-): InventoryTemplateRowSeed[] {
-  return template.map((r) => (r.position === row.position ? row : r));
-}
+const STRUCTURE: InventoryTemplateStructure = {
+  rows: 8,
+  articles: 4,
+  empty: 1,
+  blank: 1,
+  sectionPositions: [P + 4, P + 7],
+};
 
 describe.skipIf(!databaseUrl)(
-  'Carga de la plantilla de inventario (SPRINT-5-T02)',
+  'Carga de la estructura de la plantilla de inventario (SPRINT-5-T02)',
   { timeout: 60_000 },
   () => {
     let prisma: PrismaClient;
@@ -107,20 +82,19 @@ describe.skipIf(!databaseUrl)(
       return tx.inventoryTemplateRow.findMany({
         where: { position: { gte: P } },
         orderBy: { position: 'asc' },
-        include: { product: true },
       });
     }
 
-    it('crea las filas en orden, con su sección, y un producto por artículo', async () => {
+    it('crea las filas en orden, con su tipo y su sección, sin crear productos', async () => {
       await withinRollback(async (tx) => {
-        const result = await seedInventoryTemplate(tx, TEMPLATE);
+        const products = await tx.product.count();
+
+        const result = await seedInventoryTemplate(tx, TEMPLATE, STRUCTURE);
 
         expect(result).toEqual({
           rowsCreated: 8,
-          rowsUpdated: 0,
-          productsCreated: 4,
-          productsRenamed: 0,
-          productsReleased: 0,
+          rowsKept: 0,
+          textDifferences: [],
         });
         const rows = await templateRows(tx);
         expect(
@@ -129,7 +103,7 @@ describe.skipIf(!databaseUrl)(
             r.kind,
             r.printedText,
             r.section,
-            r.product?.name ?? null,
+            r.productId,
           ]),
         ).toEqual([
           [
@@ -137,332 +111,200 @@ describe.skipIf(!databaseUrl)(
             'ITEM',
             'Carne Fajita (Beef Steak Saborizado)',
             'COSTO PROTEÍNAS',
-            'Carne Fajita (Beef Steak Saborizado)',
+            null,
           ],
-          [
-            1,
-            'ITEM',
-            'Atún (Preparado)',
-            'COSTO PROTEÍNAS',
-            'Atún (Preparado)',
-          ],
+          [1, 'ITEM', 'Atún (Preparado)', 'COSTO PROTEÍNAS', null],
           [2, 'ITEM', INVENTORY_EMPTY_ITEM_TEXT, 'COSTO PROTEÍNAS', null],
           [3, 'BLANK', null, 'COSTO PROTEÍNAS', null],
           [4, 'SECTION', 'COSTO PROTEÍNAS', 'COSTO PROTEÍNAS', null],
-          [5, 'ITEM', 'Lata Fanta Zero', 'COSTO DE BEBIDAS', 'Lata Fanta Zero'],
-          [6, 'ITEM', 'Lata Fanta Zero', 'COSTO DE BEBIDAS', 'Lata Fanta Zero'],
+          [5, 'ITEM', 'Lata Fanta Zero', 'COSTO DE BEBIDAS', null],
+          [6, 'ITEM', 'Lata Fanta Zero', 'COSTO DE BEBIDAS', null],
           [7, 'SECTION', 'COSTO DE BEBIDAS', 'COSTO DE BEBIDAS', null],
         ]);
-        // Las dos «Lata Fanta Zero» son productos distintos.
-        expect(rows[5].productId).not.toBe(rows[6].productId);
+        expect(await tx.product.count()).toBe(products);
       });
     });
 
-    it('crea los productos sin SKU, con el formato definido o «Sin formato»', async () => {
+    it('una segunda carga no crea ni cambia filas', async () => {
       await withinRollback(async (tx) => {
-        await seedInventoryTemplate(tx, TEMPLATE);
+        await seedInventoryTemplate(tx, TEMPLATE, STRUCTURE);
+        const before = await templateRows(tx);
 
-        const [fajita, atun, , , , fanta] = await templateRows(tx);
-        expect(fajita.product).toMatchObject({
-          sku: null,
-          unit: 'KG',
-          packageName: 'bolsa',
-          packagesPerBox: 2,
-          looseOnly: false,
-          isActive: true,
-        });
-        expect(fajita.product?.boxContent?.toFixed(3)).toBe('5.000');
-        expect(fajita.product?.packageContent?.toFixed(3)).toBe('2.500');
-        expect(atun.product).toMatchObject({
-          looseOnly: true,
-          boxContent: null,
-          packageContent: null,
-        });
-        expect(fanta.product).toMatchObject({
-          sku: null,
-          unit: 'UNIT',
-          packageName: null,
-          boxContent: null,
-          packagesPerBox: null,
-          packageContent: null,
-          looseOnly: false,
-        });
-      });
-    });
-
-    it('es idempotente y no pisa el formato que editó el administrador', async () => {
-      await withinRollback(async (tx) => {
-        await seedInventoryTemplate(tx, TEMPLATE);
-        const [, , , , , fanta] = await templateRows(tx);
-        await tx.product.update({
-          where: { id: fanta.productId ?? '' },
-          data: {
-            sku: 'SKU-FANTA-ZERO',
-            packageName: 'pack',
-            packageContent: new Prisma.Decimal(6),
-          },
-        });
-
-        const second = await seedInventoryTemplate(tx, TEMPLATE);
+        const second = await seedInventoryTemplate(tx, TEMPLATE, STRUCTURE);
 
         expect(second).toEqual({
           rowsCreated: 0,
-          rowsUpdated: 0,
-          productsCreated: 0,
-          productsRenamed: 0,
-          productsReleased: 0,
+          rowsKept: 8,
+          textDifferences: [],
         });
-        const rows = await templateRows(tx);
-        expect(rows).toHaveLength(8);
-        expect(rows[5].product).toMatchObject({
-          id: fanta.productId,
-          sku: 'SKU-FANTA-ZERO',
-          packageName: 'pack',
-        });
-        expect(rows[5].product?.packageContent?.toFixed(0)).toBe('6');
+        expect(await templateRows(tx)).toEqual(before);
       });
     });
 
-    it('no revierte un nombre editado si la plantilla no cambió', async () => {
+    it('no pisa el texto que editó el administrador ni desasigna su producto', async () => {
       await withinRollback(async (tx) => {
-        await seedInventoryTemplate(tx, TEMPLATE);
-        const [, , , , , fanta] = await templateRows(tx);
-        await tx.product.update({
-          where: { id: fanta.productId ?? '' },
-          data: { name: 'Lata Fanta Zero 350 ml' },
+        await seedInventoryTemplate(tx, TEMPLATE, STRUCTURE);
+        const product = await tx.product.create({
+          data: { name: 'Carne Fajita Proveedor', unit: 'KG' },
         });
-
-        await seedInventoryTemplate(tx, TEMPLATE);
-
-        const producto = await tx.product.findUniqueOrThrow({
-          where: { id: fanta.productId ?? '' },
+        await tx.inventoryTemplateRow.update({
+          where: { position: P },
+          data: { productId: product.id },
         });
-        expect(producto.name).toBe('Lata Fanta Zero 350 ml');
-      });
-    });
-
-    it('renombra el producto en la misma posición si cambia el texto de la plantilla, conservando su formato', async () => {
-      await withinRollback(async (tx) => {
-        await seedInventoryTemplate(tx, TEMPLATE);
-        const [fajita] = await templateRows(tx);
-
-        const result = await seedInventoryTemplate(
-          tx,
-          replaceRow(TEMPLATE, {
-            position: P,
-            type: 'ARTICLE',
-            text: 'Carne Fajita',
-            unit: UnitOfMeasure.KG,
-          }),
+        await tx.inventoryTemplateRow.update({
+          where: { position: P + 1 },
+          data: { printedText: 'Atún Preparado (nuevo)' },
+        });
+        // La plantilla trae otro texto en la fila ocupada: tampoco se aplica.
+        const changed = TEMPLATE.map((row) =>
+          row.position === P
+            ? { position: P, type: 'ARTICLE' as const, text: 'Otro texto' }
+            : row,
         );
 
-        expect(result).toMatchObject({
-          rowsUpdated: 1,
-          productsCreated: 0,
-          productsRenamed: 1,
+        const result = await seedInventoryTemplate(tx, changed, STRUCTURE);
+
+        // Las diferencias se informan, pero no se aplican.
+        expect(result).toEqual({
+          rowsCreated: 0,
+          rowsKept: 8,
+          textDifferences: [
+            {
+              position: P,
+              current: 'Carne Fajita (Beef Steak Saborizado)',
+              template: 'Otro texto',
+            },
+            {
+              position: P + 1,
+              current: 'Atún Preparado (nuevo)',
+              template: 'Atún (Preparado)',
+            },
+          ],
         });
-        const [actualizada] = await templateRows(tx);
-        expect(actualizada.id).toBe(fajita.id);
-        expect(actualizada.printedText).toBe('Carne Fajita');
-        expect(actualizada.product).toMatchObject({
-          id: fajita.productId,
-          name: 'Carne Fajita',
-          packageName: 'bolsa',
-          packagesPerBox: 2,
+        const rows = await templateRows(tx);
+        expect(rows[0]).toMatchObject({
+          printedText: 'Carne Fajita (Beef Steak Saborizado)',
+          productId: product.id,
         });
+        expect(rows[1].printedText).toBe('Atún Preparado (nuevo)');
+        expect(
+          await tx.product.findUnique({ where: { id: product.id } }),
+        ).toMatchObject({ name: 'Carne Fajita Proveedor' });
       });
     });
 
-    it('actualiza la sección si la plantilla la cambia', async () => {
+    it('informa sin aplicar el texto que cambió en una plantilla actualizada', async () => {
       await withinRollback(async (tx) => {
-        await seedInventoryTemplate(tx, TEMPLATE);
+        await seedInventoryTemplate(tx, TEMPLATE, STRUCTURE);
+        // La plantilla nueva cambia el texto de una fila libre y de una sección.
+        const updated = TEMPLATE.map((row) => {
+          if (row.position === P + 5) {
+            return { ...row, text: 'Lata Fanta Zero 350 ml' };
+          }
+          if (row.position === P + 7) {
+            return { ...row, text: 'COSTO BEBIDAS' };
+          }
+          return row;
+        });
 
-        const result = await seedInventoryTemplate(
-          tx,
-          replaceRow(TEMPLATE, {
+        const result = await seedInventoryTemplate(tx, updated, STRUCTURE);
+
+        expect(result.textDifferences).toEqual([
+          {
+            position: P + 5,
+            current: 'Lata Fanta Zero',
+            template: 'Lata Fanta Zero 350 ml',
+          },
+          {
             position: P + 7,
-            type: 'SECTION',
-            text: 'COSTO DE BEBIDAS (SUBTOTAL)',
-          }),
-        );
-
-        expect(result).toMatchObject({ rowsUpdated: 3, productsRenamed: 0 });
-        const rows = await templateRows(tx);
-        expect(rows.slice(5).map((r) => r.section)).toEqual([
-          'COSTO DE BEBIDAS (SUBTOTAL)',
-          'COSTO DE BEBIDAS (SUBTOTAL)',
-          'COSTO DE BEBIDAS (SUBTOTAL)',
+            current: 'COSTO DE BEBIDAS',
+            template: 'COSTO BEBIDAS',
+          },
         ]);
-      });
-    });
-
-    it('una fila <Vacío> que pasa a ser artículo crea su producto', async () => {
-      await withinRollback(async (tx) => {
-        await seedInventoryTemplate(tx, TEMPLATE);
-
-        const result = await seedInventoryTemplate(
-          tx,
-          replaceRow(TEMPLATE, {
-            position: P + 2,
-            type: 'ARTICLE',
-            text: 'Pepperoni',
-            unit: UnitOfMeasure.KG,
-          }),
-        );
-
-        expect(result).toMatchObject({ rowsUpdated: 1, productsCreated: 1 });
         const rows = await templateRows(tx);
-        expect(rows[2].printedText).toBe('Pepperoni');
-        expect(rows[2].product).toMatchObject({ name: 'Pepperoni', sku: null });
+        expect(rows[5].printedText).toBe('Lata Fanta Zero');
+        expect(rows[7].printedText).toBe('COSTO DE BEBIDAS');
       });
     });
 
-    it('un artículo que pasa a <Vacío> se desvincula y su producto queda en el catálogo', async () => {
+    it('inserta solo las filas que faltan', async () => {
       await withinRollback(async (tx) => {
-        await seedInventoryTemplate(tx, TEMPLATE);
-        const [, atun] = await templateRows(tx);
-
-        await seedInventoryTemplate(
-          tx,
-          replaceRow(TEMPLATE, { position: P + 1, type: 'EMPTY' }),
-        );
-
-        const rows = await templateRows(tx);
-        expect(rows[1].printedText).toBe(INVENTORY_EMPTY_ITEM_TEXT);
-        expect(rows[1].productId).toBeNull();
-        const producto = await tx.product.findUnique({
-          where: { id: atun.productId ?? '' },
-        });
-        expect(producto?.name).toBe('Atún (Preparado)');
-      });
-    });
-
-    it('conserva el producto que el administrador asignó a una fila <Vacío> sin cambios', async () => {
-      await withinRollback(async (tx) => {
-        await seedInventoryTemplate(tx, TEMPLATE);
-        const empty = (await templateRows(tx)).find(
-          (row) => row.position === P + 2,
-        );
-        expect(empty?.printedText).toBe(INVENTORY_EMPTY_ITEM_TEXT);
-        // Lo que hará SPRINT-5-T03: crear el producto y ocupar la fila libre,
-        // sin tocar printed_text.
-        const assigned = await tx.product.create({
-          data: { name: 'Lata Pepsi', unit: 'UNIT' },
-          select: { id: true },
-        });
-        await tx.inventoryTemplateRow.update({
-          where: { id: empty?.id ?? '' },
-          data: { productId: assigned.id },
+        await seedInventoryTemplate(tx, TEMPLATE.slice(0, 5), {
+          ...STRUCTURE,
+          rows: 5,
+          articles: 2,
+          sectionPositions: [P + 4],
         });
 
-        const result = await seedInventoryTemplate(tx, TEMPLATE);
+        const result = await seedInventoryTemplate(tx, TEMPLATE, STRUCTURE);
 
-        const after = (await templateRows(tx)).find(
-          (row) => row.position === P + 2,
-        );
-        expect(after?.productId).toBe(assigned.id);
-        expect(after?.printedText).toBe(INVENTORY_EMPTY_ITEM_TEXT);
-        expect(result.rowsUpdated).toBe(0);
-      });
-    });
-
-    it('una fila <Vacío> ocupada que la plantilla convierte en artículo no renombra el producto del administrador', async () => {
-      await withinRollback(async (tx) => {
-        await seedInventoryTemplate(tx, TEMPLATE);
-        const empty = (await templateRows(tx)).find(
-          (row) => row.position === P + 2,
-        );
-        const assigned = await tx.product.create({
-          data: { name: 'Lata Pepsi', unit: 'UNIT' },
-          select: { id: true },
+        expect(result).toEqual({
+          rowsCreated: 3,
+          rowsKept: 5,
+          textDifferences: [],
         });
-        await tx.inventoryTemplateRow.update({
-          where: { id: empty?.id ?? '' },
-          data: { productId: assigned.id },
-        });
-
-        const result = await seedInventoryTemplate(
-          tx,
-          replaceRow(TEMPLATE, {
-            position: P + 2,
-            type: 'ARTICLE',
-            text: 'Lata Sprite',
-            unit: UnitOfMeasure.UNIT,
-          }),
-        );
-
-        const row = (await templateRows(tx)).find(
-          (item) => item.position === P + 2,
-        );
-        expect(row?.product?.name).toBe('Lata Sprite');
-        expect(row?.productId).not.toBe(assigned.id);
-        const kept = await tx.product.findUniqueOrThrow({
-          where: { id: assigned.id },
-        });
-        expect(kept.name).toBe('Lata Pepsi');
-        expect(result).toMatchObject({
-          productsCreated: 1,
-          productsRenamed: 0,
-          productsReleased: 1,
-        });
+        expect(await templateRows(tx)).toHaveLength(8);
       });
     });
 
     it('se detiene sin escribir nada si la plantilla cambia el tipo de una fila existente', async () => {
       await withinRollback(async (tx) => {
-        await seedInventoryTemplate(tx, TEMPLATE);
-        const conCambio = replaceRow(
-          [
-            ...TEMPLATE,
-            {
-              position: P + 8,
-              type: 'ARTICLE',
-              text: 'Producto nuevo',
-              unit: 'UNIT',
-            },
-            { position: P + 9, type: 'SECTION', text: 'COSTO DE VARIOS' },
-          ],
-          { position: P + 3, type: 'EMPTY' },
-        );
+        await seedInventoryTemplate(tx, TEMPLATE, STRUCTURE);
+        const withChange: InventoryTemplateRowSeed[] = [
+          ...TEMPLATE.map((row) =>
+            row.position === P + 3
+              ? { position: P + 3, type: 'EMPTY' as const }
+              : row,
+          ),
+          { position: P + 8, type: 'ARTICLE', text: 'Producto nuevo' },
+          { position: P + 9, type: 'SECTION', text: 'COSTO DE VARIOS' },
+        ];
 
-        await expect(seedInventoryTemplate(tx, conCambio)).rejects.toThrow(
+        await expect(
+          seedInventoryTemplate(tx, withChange, {
+            rows: 10,
+            articles: 5,
+            empty: 2,
+            blank: 0,
+            sectionPositions: [P + 4, P + 7, P + 9],
+          }),
+        ).rejects.toThrow(
           /fila 20003: es BLANK y la plantilla la declara ITEM/,
         );
-        const rows = await templateRows(tx);
-        expect(rows).toHaveLength(8);
+        expect(await templateRows(tx)).toHaveLength(8);
       });
     });
 
-    it('carga la plantilla real: 182 filas y 140 artículos con producto, sin cambios en una segunda carga', async () => {
+    it('se detiene sin escribir nada si la estructura no calza', async () => {
       await withinRollback(async (tx) => {
+        await expect(seedInventoryTemplate(tx, TEMPLATE)).rejects.toThrow(
+          /no tiene la estructura esperada[\s\S]*Se esperaban 182 filas y hay 8/,
+        );
+        expect(await templateRows(tx)).toHaveLength(0);
+      });
+    });
+
+    it('carga la plantilla real: 182 filas sin productos nuevos y sin cambios en una segunda carga', async () => {
+      await withinRollback(async (tx) => {
+        const products = await tx.product.count();
         await seedInventoryTemplate(tx, INVENTORY_TEMPLATE_ROWS);
 
         const second = await seedInventoryTemplate(tx, INVENTORY_TEMPLATE_ROWS);
 
         expect(second).toEqual({
           rowsCreated: 0,
-          rowsUpdated: 0,
-          productsCreated: 0,
-          productsRenamed: 0,
-          productsReleased: 0,
+          rowsKept: 182,
+          textDifferences: [],
         });
         const rows = await tx.inventoryTemplateRow.findMany({
           where: { position: { gte: 2, lte: 183 } },
           orderBy: { position: 'asc' },
-          include: { product: true },
         });
         expect(rows).toHaveLength(182);
-        const conProducto = rows.filter((r) => r.product !== null);
-        expect(conProducto).toHaveLength(140);
         expect(
-          conProducto.every((r) => r.product?.name === r.printedText),
-        ).toBe(true);
-        expect(rows.find((r) => r.position === 4)?.product).toMatchObject({
-          name: 'Carne Fajita (Beef Steak Saborizado)',
-          unit: 'KG',
-          packageName: 'bolsa',
-          packagesPerBox: 2,
-        });
+          rows.filter((r) => r.kind === 'SECTION').map((r) => r.position),
+        ).toEqual([45, 88, 141, 162, 183]);
+        expect(await tx.product.count()).toBe(products);
       });
     });
   },

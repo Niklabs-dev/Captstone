@@ -8,17 +8,17 @@
 
 ## Vista general por módulo
 
-| Módulo | Tablas | Propósito |
-| --- | --- | --- |
-| Núcleo | `stores`, `roles`, `users`, `refresh_tokens`, `audit_logs` | Locales, control de acceso por rol y local, autenticación JWT y auditoría inmutable |
-| Gestor Documental | `document_types`, `documents`, `document_versions`, `payslips` | Documentación laboral con hash SHA-256, versionado y conservación por 5 años; liquidaciones de sueldo con estado de publicación |
-| Propinas | `daily_tip_allocations`, `tip_payment_batches`, `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources`, `tip_pool_receipts`, `tip_pool_daily_operation_sources` | **Vigente (SPRINT-4A-T02):** propina diaria por participante, creada al guardar la operación diaria, y lotes de pago por local y período. **Histórico de solo lectura:** pacto de reparto (proporcional histórico y equitativo), horas trabajadas, reparto con snapshots (art. 64 CT) y constancias de pago; `tip_entries` conserva la captura histórica por medio (modo lectura desde SPRINT-4R-T01) y `tip_pool_daily_operation_sources` vincula el reparto con la operación diaria (SPRINT-4R-T02) |
-| Ventas y Caja | `payment_methods`, `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries` | **Histórico, modo lectura:** catálogo administrable de medios de pago (vigente: clasifica las líneas de la importación de ventas), ventas por local (manuales y totales netos MrComanda) y cierre de caja por local, día y turno con conciliación y vouchers. Reemplazado operativamente por la operación diaria |
-| Operación diaria | `daily_operations`, `daily_operation_vouchers`, `daily_operation_participants` | Una operación por local y fecha de negocio (SPRINT-4R-T01): propina tarjeta con voucher fotográfico, propina efectivo, fondo de propinas calculado y diferencia de efectivo con signo y motivo. Fuente operativa de ambos montos de propina y, desde SPRINT-4R-T02, de la selección de participantes del reparto (compartida por tarjeta y efectivo) |
-| Importación de ventas | `payment_method_aliases`, `sales_imports`, `sales_import_lines`, `sales_import_skipped_lines`, `store_external_codes` | Ventas diarias importadas desde el Excel de MrComanda (SPRINT-4R-T08): el local se identifica por `stores.subway_store_id` (SPRINT-4A-T17; `store_external_codes` queda sin uso), alias de medios de pago, resolución manual de lo no identificado y líneas en 0 omitidas (SPRINT-4A-T18/T21), archivo importado con hash SHA-256 y versiones (una vigente por local y fecha) y totales por medio de pago. No guarda propinas ni diferencias de efectivo (vienen de la operación diaria) ni escribe en `sales` |
-| Calendario de operación | `store_operating_schedules`, `store_closures` | Días semanales en que abre cada local, desde cuándo se exigen ventas y cierres por excepción con motivo (SPRINT-4R-T12). El estado diario de ventas (IMPORTADO / PENDIENTE / ATRASADO / CERRADO) se calcula al consultar, sin tablas de alertas |
-| Inventario | `products`, `inventory_template_rows`, `inventory_movements`, `inventory_counts`, `inventory_count_lines` | Catálogo de productos con SKU de proveedor, nombres alternativos y formato de caja y paquete; filas fijas de la plantilla impresa; toma de inventario por local (En curso / Finalizado) con conteo por caja, paquete y cantidad suelta (SPRINT-5-T01). El libro mayor de movimientos queda para la comparación contra el stock esperado |
-| Ley N°21.719 | `data_rights_requests` | Solicitudes de derechos ARCO de los titulares de datos personales |
+| Módulo                  | Tablas                                                                                                                                                                                                            | Propósito                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Núcleo                  | `stores`, `roles`, `users`, `refresh_tokens`, `audit_logs`                                                                                                                                                        | Locales, control de acceso por rol y local, autenticación JWT y auditoría inmutable                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Gestor Documental       | `document_types`, `documents`, `document_versions`, `payslips`                                                                                                                                                    | Documentación laboral con hash SHA-256, versionado y conservación por 5 años; liquidaciones de sueldo con estado de publicación                                                                                                                                                                                                                                                                                                                                                                                |
+| Propinas                | `daily_tip_allocations`, `tip_payment_batches`, `tip_entries`, `tip_agreements`, `work_hours_records`, `tip_pools`, `tip_pool_lines`, `tip_pool_sources`, `tip_pool_receipts`, `tip_pool_daily_operation_sources` | **Vigente (SPRINT-4A-T02):** propina diaria por participante, creada al guardar la operación diaria, y lotes de pago por local y período. **Histórico de solo lectura:** pacto de reparto (proporcional histórico y equitativo), horas trabajadas, reparto con snapshots (art. 64 CT) y constancias de pago; `tip_entries` conserva la captura histórica por medio (modo lectura desde SPRINT-4R-T01) y `tip_pool_daily_operation_sources` vincula el reparto con la operación diaria (SPRINT-4R-T02)          |
+| Ventas y Caja           | `payment_methods`, `sales`, `cash_closings`, `cash_closing_lines`, `cash_closing_vouchers`, `cash_closing_tip_entries`                                                                                            | **Histórico, modo lectura:** catálogo administrable de medios de pago (vigente: clasifica las líneas de la importación de ventas), ventas por local (manuales y totales netos MrComanda) y cierre de caja por local, día y turno con conciliación y vouchers. Reemplazado operativamente por la operación diaria                                                                                                                                                                                               |
+| Operación diaria        | `daily_operations`, `daily_operation_vouchers`, `daily_operation_participants`                                                                                                                                    | Una operación por local y fecha de negocio (SPRINT-4R-T01): propina tarjeta con voucher fotográfico, propina efectivo, fondo de propinas calculado y diferencia de efectivo con signo y motivo. Fuente operativa de ambos montos de propina y, desde SPRINT-4R-T02, de la selección de participantes del reparto (compartida por tarjeta y efectivo)                                                                                                                                                           |
+| Importación de ventas   | `payment_method_aliases`, `sales_imports`, `sales_import_lines`, `sales_import_skipped_lines`, `store_external_codes`                                                                                             | Ventas diarias importadas desde el Excel de MrComanda (SPRINT-4R-T08): el local se identifica por `stores.subway_store_id` (SPRINT-4A-T17; `store_external_codes` queda sin uso), alias de medios de pago, resolución manual de lo no identificado y líneas en 0 omitidas (SPRINT-4A-T18/T21), archivo importado con hash SHA-256 y versiones (una vigente por local y fecha) y totales por medio de pago. No guarda propinas ni diferencias de efectivo (vienen de la operación diaria) ni escribe en `sales` |
+| Calendario de operación | `store_operating_schedules`, `store_closures`                                                                                                                                                                     | Días semanales en que abre cada local, desde cuándo se exigen ventas y cierres por excepción con motivo (SPRINT-4R-T12). El estado diario de ventas (IMPORTADO / PENDIENTE / ATRASADO / CERRADO) se calcula al consultar, sin tablas de alertas                                                                                                                                                                                                                                                                |
+| Inventario              | `products`, `inventory_template_rows`, `inventory_movements`, `inventory_counts`, `inventory_count_lines`                                                                                                         | Catálogo de productos con SKU de proveedor, nombres alternativos y formato de caja y paquete; filas fijas de la plantilla impresa; toma de inventario por local (En curso / Finalizado) con conteo por caja, paquete y cantidad suelta (SPRINT-5-T01). El libro mayor de movimientos queda para la comparación contra el stock esperado                                                                                                                                                                        |
+| Ley N°21.719            | `data_rights_requests`                                                                                                                                                                                            | Solicitudes de derechos ARCO de los titulares de datos personales                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 **41 tablas y 19 enums**: el modelo base (27 tablas, hasta SPRINT-4-T32) más la
 operación diaria de SPRINT-4R-T01 (`daily_operations` y
@@ -133,16 +133,16 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 
 ## Cumplimiento de la Ley N°21.719 (protección de datos personales)
 
-| Principio / obligación | Mecanismo en el modelo |
-| --- | --- |
-| Minimización y finalidad | Los datos personales existen **solo en `users`** (email, nombres, RUT, teléfono, fecha de contratación); el resto del modelo referencia por UUID, sin duplicar datos personales |
-| Base legal | La relación laboral y la obligación legal de conservar documentación (art. 9 bis CT) fundamentan el tratamiento; no se requiere consentimiento adicional para estos datos |
-| Derecho de **cancelación** | **Anonimización, no borrado**: `users.anonymized_at` marca la anonimización; `rut`/`phone` quedan `NULL` (el índice único admite múltiples `NULL`), nombres se reemplazan por "Usuario Anonimizado" y el email por uno técnico. La trazabilidad laboral y documental se preserva |
-| Derechos **ARCO** (acceso, rectificación, cancelación, oposición) y portabilidad | Tabla `data_rights_requests`: tipo de derecho, estado (`PENDING` → `RESOLVED`/`REJECTED`), plazo legal de respuesta (`due_at`), quién resolvió y cuándo |
-| Seguridad del tratamiento | Contraseñas solo como hash (`password_hash`); refresh tokens solo como hash con expiración y revocación; secretos fuera del código (variables de entorno) |
-| Registro de actividades de tratamiento | `audit_logs` inmutable: usuario, operación, entidad, local, detalle (JSONB), IP y fecha de cada operación crítica |
-| Conservación limitada | `document_types.retention_years` (5 por defecto), `documents.retain_until` (fecha hasta la que se conserva cada documento) y `documents.expires_at` para gestionar plazos; el cumplimiento de conservación laboral prima sobre el borrado |
-| Aislamiento por titular (Portal del Trabajador) | `documents.subject_user_id` y `users.store_id` permiten que cada trabajador vea **solo su información**; el aislamiento se enforce en los servicios del backend |
+| Principio / obligación                                                           | Mecanismo en el modelo                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Minimización y finalidad                                                         | Los datos personales existen **solo en `users`** (email, nombres, RUT, teléfono, fecha de contratación); el resto del modelo referencia por UUID, sin duplicar datos personales                                                                                                  |
+| Base legal                                                                       | La relación laboral y la obligación legal de conservar documentación (art. 9 bis CT) fundamentan el tratamiento; no se requiere consentimiento adicional para estos datos                                                                                                        |
+| Derecho de **cancelación**                                                       | **Anonimización, no borrado**: `users.anonymized_at` marca la anonimización; `rut`/`phone` quedan `NULL` (el índice único admite múltiples `NULL`), nombres se reemplazan por "Usuario Anonimizado" y el email por uno técnico. La trazabilidad laboral y documental se preserva |
+| Derechos **ARCO** (acceso, rectificación, cancelación, oposición) y portabilidad | Tabla `data_rights_requests`: tipo de derecho, estado (`PENDING` → `RESOLVED`/`REJECTED`), plazo legal de respuesta (`due_at`), quién resolvió y cuándo                                                                                                                          |
+| Seguridad del tratamiento                                                        | Contraseñas solo como hash (`password_hash`); refresh tokens solo como hash con expiración y revocación; secretos fuera del código (variables de entorno)                                                                                                                        |
+| Registro de actividades de tratamiento                                           | `audit_logs` inmutable: usuario, operación, entidad, local, detalle (JSONB), IP y fecha de cada operación crítica                                                                                                                                                                |
+| Conservación limitada                                                            | `document_types.retention_years` (5 por defecto), `documents.retain_until` (fecha hasta la que se conserva cada documento) y `documents.expires_at` para gestionar plazos; el cumplimiento de conservación laboral prima sobre el borrado                                        |
+| Aislamiento por titular (Portal del Trabajador)                                  | `documents.subject_user_id` y `users.store_id` permiten que cada trabajador vea **solo su información**; el aislamiento se enforce en los servicios del backend                                                                                                                  |
 
 ## Cumplimiento del Código del Trabajo
 
@@ -193,11 +193,11 @@ aislamiento por `subject_user_id` / `store_id` aplicado en el backend.
 
 ## Plazos del Gestor Documental (E1-H3)
 
-| Plazo | Columnas | Regla |
-| --- | --- | --- |
-| Conservación (art. 9 bis CT) | `documents.retain_until` | Se fija al crear el documento: `issued_at` (o el día de carga, hora de Chile) + `document_types.retention_years`. Es una foto: no cambia si luego se modifica el tipo. Base del bloqueo de eliminación (SPRINT-2-T07). |
-| Registro en la Dirección del Trabajo | `document_types.requires_dt_registration`, `documents.dt_registration_due_at` | Los tipos marcados (`CONTRATO`, `ANEXO` y `FINIQUITO`) tienen 15 días desde su celebración para registrarse en la DT. `dt_registration_due_at` es `NULL` si el tipo no lo exige. |
-| Registro en la DT realizado | `documents.dt_registered_at`, `documents.dt_registered_by_id` | Mientras `dt_registered_at` sea `NULL`, la alerta sigue activa (SPRINT-2-T08). |
+| Plazo                                | Columnas                                                                      | Regla                                                                                                                                                                                                                  |
+| ------------------------------------ | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Conservación (art. 9 bis CT)         | `documents.retain_until`                                                      | Se fija al crear el documento: `issued_at` (o el día de carga, hora de Chile) + `document_types.retention_years`. Es una foto: no cambia si luego se modifica el tipo. Base del bloqueo de eliminación (SPRINT-2-T07). |
+| Registro en la Dirección del Trabajo | `document_types.requires_dt_registration`, `documents.dt_registration_due_at` | Los tipos marcados (`CONTRATO`, `ANEXO` y `FINIQUITO`) tienen 15 días desde su celebración para registrarse en la DT. `dt_registration_due_at` es `NULL` si el tipo no lo exige.                                       |
+| Registro en la DT realizado          | `documents.dt_registered_at`, `documents.dt_registered_by_id`                 | Mientras `dt_registered_at` sea `NULL`, la alerta sigue activa (SPRINT-2-T08).                                                                                                                                         |
 
 Dos `CHECK` mantienen la consistencia: un documento solo se marca como
 registrado en la DT si tiene plazo (`documents_dt_registered_requires_due_at`),
@@ -211,12 +211,12 @@ Una liquidación (`payslips`, SPRINT-2-T12) es un documento de tipo
 versionado, su hash SHA-256 y su plazo de conservación de 5 años, y agrega el
 período y el estado de publicación.
 
-| Columna | Regla |
-| --- | --- |
-| `period` | Mes de la remuneración, guardado como su primer día (`payslips_period_first_day_check`). |
-| `status` | `PENDING_SIGNATURE` al cargarla el contador (no visible para el trabajador) y `PUBLISHED` al confirmar su publicación. |
-| `signed_at`, `published_at`, `published_by_id` | Fecha de firma, de publicación y quién publicó: obligatorias solo en `PUBLISHED` y vacías mientras está pendiente (`payslips_status_publication_check`). |
-| `worker_id` | Repite `documents.subject_user_id` para exigir **una liquidación por trabajador y período** (`UNIQUE(worker_id, period)`); el trigger `payslips_check_document` rechaza un documento que no sea `LIQUIDACION` o de otro trabajador. |
+| Columna                                        | Regla                                                                                                                                                                                                                               |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `period`                                       | Mes de la remuneración, guardado como su primer día (`payslips_period_first_day_check`).                                                                                                                                            |
+| `status`                                       | `PENDING_SIGNATURE` al cargarla el contador (no visible para el trabajador) y `PUBLISHED` al confirmar su publicación.                                                                                                              |
+| `signed_at`, `published_at`, `published_by_id` | Fecha de firma, de publicación y quién publicó: obligatorias solo en `PUBLISHED` y vacías mientras está pendiente (`payslips_status_publication_check`).                                                                            |
+| `worker_id`                                    | Repite `documents.subject_user_id` para exigir **una liquidación por trabajador y período** (`UNIQUE(worker_id, period)`); el trigger `payslips_check_document` rechaza un documento que no sea `LIQUIDACION` o de otro trabajador. |
 
 Publicada, la liquidación es **inmutable** (SPRINT-2-T14, migración
 `liquidaciones_publicadas_inmutables`): sus triggers rechazan modificarla,
@@ -232,16 +232,16 @@ cambian; el único cambio de estado posible es a `PUBLISHED`.
 > [propina diaria por trabajador](#propinas-diarias-por-trabajador-y-lotes-de-pago-sprint-4a-t02).
 > Las tablas y sus filas se conservan sin cambios.
 
-| Tabla | Rol |
-| --- | --- |
-| `tip_entries` | Registro diario agregado por local, día de negocio y medio de pago. Es la **única fuente** que alimenta los repartos; `sales.tip_amount` se reconcilia con ella mediante `sales.tip_entry_id`. |
-| `tip_agreements` | Pacto de reparto vigente en un local (regla, vigencia, creador). `tip_pools` guarda una copia en `agreement_snapshot` para inmutabilidad. |
-| `work_hours_records` | Horas trabajadas por trabajador y período; `tip_pool_lines` referencia su registro fuente y fotografía las horas usadas. |
-| `tip_pools` | Reparto de un local para un período. Contiene el monto total (desde `tip_entries`), el estado, el pacto aplicado y las trazabilidades de cálculo y confirmación. Histórico de solo lectura desde SPRINT-4A-T08: la API ya no crea ni cambia repartos (el reparto vigente es `daily_tip_allocations`). |
-| `tip_pool_lines` | Línea del reparto por trabajador: horas fotografiadas, monto asignado, trabajador y referencia al registro de horas. |
-| `tip_pool_sources` | Fuente del reparto: vincula un `tip_pool` con el `tip_entry` usado y guarda el monto aplicado. Un registro diario solo puede usarse una vez. |
-| `tip_pool_receipts` | Constancia de pago del reparto para un trabajador: foto con nombres, local, período, horas, monto y detalle; inmutable y solo de un reparto `PAID`. |
-| `tip_pool_daily_operation_sources` | Fuente del reparto alimentada por la operación diaria (SPRINT-4R-T02): vincula un `tip_pool` con la `daily_operation` usada y guarda el fondo aplicado en CLP entero. Una operación solo puede alimentar un reparto. |
+| Tabla                              | Rol                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tip_entries`                      | Registro diario agregado por local, día de negocio y medio de pago. Es la **única fuente** que alimenta los repartos; `sales.tip_amount` se reconcilia con ella mediante `sales.tip_entry_id`.                                                                                                        |
+| `tip_agreements`                   | Pacto de reparto vigente en un local (regla, vigencia, creador). `tip_pools` guarda una copia en `agreement_snapshot` para inmutabilidad.                                                                                                                                                             |
+| `work_hours_records`               | Horas trabajadas por trabajador y período; `tip_pool_lines` referencia su registro fuente y fotografía las horas usadas.                                                                                                                                                                              |
+| `tip_pools`                        | Reparto de un local para un período. Contiene el monto total (desde `tip_entries`), el estado, el pacto aplicado y las trazabilidades de cálculo y confirmación. Histórico de solo lectura desde SPRINT-4A-T08: la API ya no crea ni cambia repartos (el reparto vigente es `daily_tip_allocations`). |
+| `tip_pool_lines`                   | Línea del reparto por trabajador: horas fotografiadas, monto asignado, trabajador y referencia al registro de horas.                                                                                                                                                                                  |
+| `tip_pool_sources`                 | Fuente del reparto: vincula un `tip_pool` con el `tip_entry` usado y guarda el monto aplicado. Un registro diario solo puede usarse una vez.                                                                                                                                                          |
+| `tip_pool_receipts`                | Constancia de pago del reparto para un trabajador: foto con nombres, local, período, horas, monto y detalle; inmutable y solo de un reparto `PAID`.                                                                                                                                                   |
+| `tip_pool_daily_operation_sources` | Fuente del reparto alimentada por la operación diaria (SPRINT-4R-T02): vincula un `tip_pool` con la `daily_operation` usada y guarda el fondo aplicado en CLP entero. Una operación solo puede alimentar un reparto.                                                                                  |
 
 Reglas clave:
 
@@ -270,10 +270,10 @@ solo lectura. Migración `20261110040000_propinas_diarias_lotes_pago` (con
 como participante en `20261110030000_participantes_incluyen_supervisor`
 (SPRINT-4A-T01).
 
-| Tabla | Rol |
-| --- | --- |
+| Tabla                   | Rol                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `daily_tip_allocations` | Propina de un participante en una operación diaria: operación, local y fecha (copiados de la operación), trabajador, monto CLP entero (`BIGINT >= 0`), estado `UNPAID`/`PAID` (`TipAllocationStatus`) y lote de pago opcional. Única por `(operation_id, worker_id)`; índices por `(store_id, business_date)` y `(worker_id, business_date)`. |
-| `tip_payment_batches` | Lote de pago: local, período (`period_start`–`period_end`, inclusive), total, cantidad de asignaciones, quién pagó (`paid_by_id`) y cuándo (`paid_at`). `legacy_pool_id` solo lo usan los lotes históricos creados por la migración para los repartos `PAID`. |
+| `tip_payment_batches`   | Lote de pago: local, período (`period_start`–`period_end`, inclusive), total, cantidad de asignaciones, quién pagó (`paid_by_id`) y cuándo (`paid_at`). `legacy_pool_id` solo lo usan los lotes históricos creados por la migración para los repartos `PAID`.                                                                                 |
 
 Reglas que garantiza la base (CHECK y triggers, para cualquier vía de
 escritura):
@@ -310,11 +310,11 @@ Migración `20261105021500_medios_pago_catalogo` (reversa manual en su
 catálogo relacional `payment_methods`, única fuente para ventas, propinas,
 líneas de cierre y clasificación de vouchers.
 
-| Tabla | Rol |
-| --- | --- |
-| `payment_methods` | Catálogo administrable de medios de pago: `code` único e inmutable (contrato operativo con frontend y DTO), nombre, `sort_order`, `is_active`, `behavior` y `available_for_tips`. Sin borrado físico: desactivar no elimina ni oculta el historial. |
-| `sales` | Agrega `source` (`MANUAL` o `MRCOMANDA`) y `period_start`/`period_end` (NULL en ventas manuales). Las cargas MrComanda guardan el total neto agregado por local, medio y período (`tip_amount` = 0: PROPINAS conserva su fuente propia en `tip_entries`). |
-| `cash_closing_vouchers` | Agrega `payment_method_id` opcional: clasifica vouchers MrComanda nuevos. Los vouchers históricos quedan sin clasificar (NULL) y conservan el comportamiento heredado. |
+| Tabla                   | Rol                                                                                                                                                                                                                                                       |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `payment_methods`       | Catálogo administrable de medios de pago: `code` único e inmutable (contrato operativo con frontend y DTO), nombre, `sort_order`, `is_active`, `behavior` y `available_for_tips`. Sin borrado físico: desactivar no elimina ni oculta el historial.       |
+| `sales`                 | Agrega `source` (`MANUAL` o `MRCOMANDA`) y `period_start`/`period_end` (NULL en ventas manuales). Las cargas MrComanda guardan el total neto agregado por local, medio y período (`tip_amount` = 0: PROPINAS conserva su fuente propia en `tip_entries`). |
+| `cash_closing_vouchers` | Agrega `payment_method_id` opcional: clasifica vouchers MrComanda nuevos. Los vouchers históricos quedan sin clasificar (NULL) y conservan el comportamiento heredado.                                                                                    |
 
 Reglas clave:
 
@@ -355,12 +355,12 @@ Reglas clave:
 Migración `20261104010649_cierres_caja_turno_conciliacion` (reversa manual en
 su `down.sql`, que Prisma no ejecuta).
 
-| Tabla | Rol |
-| --- | --- |
-| `cash_closings` | Cierre de un local, día de negocio y turno (`shift >= 1`; cada local define cuántos turnos tiene). Guarda responsable, fondo de caja, motivo de diferencia, quién y cuándo cerró y los totales de conciliación. |
-| `cash_closing_lines` | Una línea por medio de pago del catálogo: esperado vs. contado y su diferencia. |
-| `cash_closing_vouchers` | Vouchers de respaldo de la conciliación: fuente (`MRCOMANDA` o `MERCADO_PAGO`), período de corte que cubren, monto, propina incluida, referencia y, desde SPRINT-4-T32, medio de pago que clasifica los vouchers MrComanda nuevos. Puede haber varios por fuente y turno (terminales o cortes parciales). |
-| `cash_closing_tip_entries` | Vínculo de **solo referencia** entre el cierre y el registro diario de propinas (`tip_entries`) del mismo local y día. |
+| Tabla                      | Rol                                                                                                                                                                                                                                                                                                       |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cash_closings`            | Cierre de un local, día de negocio y turno (`shift >= 1`; cada local define cuántos turnos tiene). Guarda responsable, fondo de caja, motivo de diferencia, quién y cuándo cerró y los totales de conciliación.                                                                                           |
+| `cash_closing_lines`       | Una línea por medio de pago del catálogo: esperado vs. contado y su diferencia.                                                                                                                                                                                                                           |
+| `cash_closing_vouchers`    | Vouchers de respaldo de la conciliación: fuente (`MRCOMANDA` o `MERCADO_PAGO`), período de corte que cubren, monto, propina incluida, referencia y, desde SPRINT-4-T32, medio de pago que clasifica los vouchers MrComanda nuevos. Puede haber varios por fuente y turno (terminales o cortes parciales). |
+| `cash_closing_tip_entries` | Vínculo de **solo referencia** entre el cierre y el registro diario de propinas (`tip_entries`) del mismo local y día.                                                                                                                                                                                    |
 
 Reglas clave (CHECK y triggers; aplican a cualquier vía de escritura):
 
@@ -382,6 +382,7 @@ Reglas clave (CHECK y triggers; aplican a cualquier vía de escritura):
   puede superar su bruto. **SUPUESTO pendiente de confirmar con el PO**: (a)
   `mrcomanda_net_sales` es solo la porción de la venta cobrada por Mercado Pago
   y (b) todos los montos incluyen IVA.
+
 - **Vouchers**: período válido (`period_end > period_start`), monto y propina
   incluida `>= 0` con propina `<= monto`, y solo Mercado Pago informa propina
   (en MrComanda es siempre 0). Al cerrar, los tres totales de conciliación del
@@ -419,10 +420,10 @@ por turno con conciliación, a la captura de ventas y al registro de propinas
 por medio: **una sola operación por local y fecha de negocio**, declarada por
 el supervisor al final del día.
 
-| Entidad | Rol |
-| --- | --- |
-| `daily_operations` | Una fila por `(store_id, business_date)` (`UNIQUE`). Guarda `card_tip_amount` (propina tarjeta, entero `>= 0`), `cash_tip_amount` (propina efectivo, entero `>= 0`), `tip_fund_amount` (fondo calculado: tarjeta + efectivo, CHECK) y `cash_difference` (entero **con signo** en BIGINT: positivo = sobrante, negativo = faltante), con `difference_reason` obligatorio si la diferencia no es cero (CHECK). FK única opcional al voucher: exige voucher siempre que `card_tip_amount > 0` (CHECK sobre la misma fila). Referencia al local y al responsable (siempre desde el JWT). |
-| `daily_operation_vouchers` | Foto del voucher de propinas con tarjeta: solo metadatos (`file_name`, `file_path`, `mime_type`, `size_bytes`, `sha256_hash` `CHAR(64)`). Obligatorio si `card_tip_amount > 0`; JPEG/PNG/WebP, máximo 5 MiB (validado en la API). El archivo vive en el **volumen privado** del backend (mismo volumen que el gestor documental, subcarpeta `vouchers/`, nombre físico aleatorio) y solo se descarga mediante el endpoint autorizado `GET /daily-operations/:id/voucher`; no existe URL pública. Relación 1:1 con la operación. |
+| Entidad                    | Rol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `daily_operations`         | Una fila por `(store_id, business_date)` (`UNIQUE`). Guarda `card_tip_amount` (propina tarjeta, entero `>= 0`), `cash_tip_amount` (propina efectivo, entero `>= 0`), `tip_fund_amount` (fondo calculado: tarjeta + efectivo, CHECK) y `cash_difference` (entero **con signo** en BIGINT: positivo = sobrante, negativo = faltante), con `difference_reason` obligatorio si la diferencia no es cero (CHECK). FK única opcional al voucher: exige voucher siempre que `card_tip_amount > 0` (CHECK sobre la misma fila). Referencia al local y al responsable (siempre desde el JWT). |
+| `daily_operation_vouchers` | Foto del voucher de propinas con tarjeta: solo metadatos (`file_name`, `file_path`, `mime_type`, `size_bytes`, `sha256_hash` `CHAR(64)`). Obligatorio si `card_tip_amount > 0`; JPEG/PNG/WebP, máximo 5 MiB (validado en la API). El archivo vive en el **volumen privado** del backend (mismo volumen que el gestor documental, subcarpeta `vouchers/`, nombre físico aleatorio) y solo se descarga mediante el endpoint autorizado `GET /daily-operations/:id/voucher`; no existe URL pública. Relación 1:1 con la operación.                                                      |
 
 Reglas clave:
 
@@ -459,12 +460,12 @@ acotado de elegibles, `participantIds` repetido en el alta y corrección
 multipart de la operación diaria) y el cálculo diario equitativo es
 SPRINT-4R-T04; ambos consumen este modelo.
 
-| Entidad | Rol |
-| --- | --- |
-| `daily_operation_participants` | Participante del reparto de una operación diaria: un trabajador una sola vez por operación (`UNIQUE(operation_id, worker_id)`). FK a la operación en `Cascade` (la participación muere con su operación) y al trabajador en `Restrict` (un trabajador con historial no se borra). |
-| `TipAgreementRule.EQUAL_SHARES` | Valor explícito de la regla equitativa en el enum de pactos. Convive con `PROPORTIONAL_TO_HOURS`; ninguna fila existente se reescribe. |
+| Entidad                                                          | Rol                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `daily_operation_participants`                                   | Participante del reparto de una operación diaria: un trabajador una sola vez por operación (`UNIQUE(operation_id, worker_id)`). FK a la operación en `Cascade` (la participación muere con su operación) y al trabajador en `Restrict` (un trabajador con historial no se borra).                                                                             |
+| `TipAgreementRule.EQUAL_SHARES`                                  | Valor explícito de la regla equitativa en el enum de pactos. Convive con `PROPORTIONAL_TO_HOURS`; ninguna fila existente se reescribe.                                                                                                                                                                                                                        |
 | `tip_pool_lines.hours_worked` / `tip_pool_receipts.hours_worked` | `NULL` solo en repartos cuya regla aplicada es `EQUAL_SHARES`; obligatorias en cualquier otro caso, incluidos los repartos históricos sin pacto ni snapshot. La migración solo cae el `NOT NULL`: los valores existentes no se alteran. Desde SPRINT-4R-T04 el campo también es opcional en el cliente de Prisma (sin migración: la columna ya era NULLable). |
-| `tip_pool_daily_operation_sources` | Fuente de un reparto alimentada por la operación diaria, separada de `tip_pool_sources` (que sigue ligada a `tip_entries`). `amount` BIGINT en CLP entero aplica el fondo completo del día y `operation_id` es único: cada operación alimenta como máximo un reparto. |
+| `tip_pool_daily_operation_sources`                               | Fuente de un reparto alimentada por la operación diaria, separada de `tip_pool_sources` (que sigue ligada a `tip_entries`). `amount` BIGINT en CLP entero aplica el fondo completo del día y `operation_id` es único: cada operación alimenta como máximo un reparto.                                                                                         |
 
 Reglas clave (CHECK y triggers; aplican a cualquier vía de escritura):
 
@@ -533,13 +534,13 @@ SPRINT-4R-T09 y la API de previsualización y confirmación es SPRINT-4R-T10.
 Migración `20261108010000_importaciones_ventas_mrcomanda` (con reversa en
 `down.sql`, que Prisma no ejecuta). No toca ninguna tabla existente.
 
-| Tabla | Propósito |
-| --- | --- |
-| `store_external_codes` | Identificador explícito de un local en un sistema externo (`ExternalSystem`, hoy solo `MRCOMANDA`), con el nombre externo opcional. Un local tiene a lo más uno por sistema y un identificador nunca apunta a dos locales. **Sin uso desde SPRINT-4A-T17**: el local se identifica por `stores.subway_store_id`; se conserva por compatibilidad. |
-| `payment_method_aliases` | Alias externo de un medio del catálogo (`T. DEBITO` → `DEBIT_CARD`). Guarda la etiqueta configurada y su forma normalizada; una etiqueta normalizada resuelve un único medio por sistema. El código del medio no cambia. |
-| `sales_imports` | Cabecera por archivo importado: local, fecha de negocio, período y horario del reporte, fecha de emisión (`issued_at`, informativa, desde SPRINT-4R-T10), identificador y nombre externos del local, versión, estado, total del reporte, nombre original, ruta privada, tipo, tamaño, SHA-256, quién lo subió (`uploaded_by_id`, `created_at`) y quién lo confirmó. |
-| `sales_import_lines` | Total por medio de pago dentro de una importación: número de línea, etiqueta original, etiqueta normalizada, medio resuelto, monto CLP entero con signo y porcentaje opcional. |
-| `sales_import_skipped_lines` | Línea del reporte omitida (SPRINT-4A-T18; desde SPRINT-4A-T21 se omite sola): solo con monto 0 (CHECK) y sin alias para su etiqueta (trigger). Se conserva para la trazabilidad, no es una venta e inmutable. |
+| Tabla                        | Propósito                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `store_external_codes`       | Identificador explícito de un local en un sistema externo (`ExternalSystem`, hoy solo `MRCOMANDA`), con el nombre externo opcional. Un local tiene a lo más uno por sistema y un identificador nunca apunta a dos locales. **Sin uso desde SPRINT-4A-T17**: el local se identifica por `stores.subway_store_id`; se conserva por compatibilidad.                    |
+| `payment_method_aliases`     | Alias externo de un medio del catálogo (`T. DEBITO` → `DEBIT_CARD`). Guarda la etiqueta configurada y su forma normalizada; una etiqueta normalizada resuelve un único medio por sistema. El código del medio no cambia.                                                                                                                                            |
+| `sales_imports`              | Cabecera por archivo importado: local, fecha de negocio, período y horario del reporte, fecha de emisión (`issued_at`, informativa, desde SPRINT-4R-T10), identificador y nombre externos del local, versión, estado, total del reporte, nombre original, ruta privada, tipo, tamaño, SHA-256, quién lo subió (`uploaded_by_id`, `created_at`) y quién lo confirmó. |
+| `sales_import_lines`         | Total por medio de pago dentro de una importación: número de línea, etiqueta original, etiqueta normalizada, medio resuelto, monto CLP entero con signo y porcentaje opcional.                                                                                                                                                                                      |
+| `sales_import_skipped_lines` | Línea del reporte omitida (SPRINT-4A-T18; desde SPRINT-4A-T21 se omite sola): solo con monto 0 (CHECK) y sin alias para su etiqueta (trigger). Se conserva para la trazabilidad, no es una venta e inmutable.                                                                                                                                                       |
 
 **Resolución manual (SPRINT-4A-T18, migración `20261110070000_importaciones_resolucion_manual`).**
 `sales_imports.store_resolution` y `sales_import_lines.resolution`
@@ -612,10 +613,10 @@ Migración `20261108030000_calendario_operacion_locales` (con reversa en
 `down.sql`). No toca tablas existentes y es independiente de
 `work_hours_records` (horarios de trabajadores).
 
-| Tabla | Propósito |
-| --- | --- |
+| Tabla                       | Propósito                                                                                                                                                                                                                  |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `store_operating_schedules` | Uno por local (`store_id` único): siete columnas booleanas `opens_monday` … `opens_sunday` (al menos una verdadera, CHECK), `tracking_start_date` (primer día en que se exigen ventas) y quién lo modificó por última vez. |
-| `store_closures` | Cierre por excepción: local, `closure_date`, motivo obligatorio no vacío (CHECK) y quién lo registró. Uno por local y fecha (índice único). Se puede quitar (la API lo audita). |
+| `store_closures`            | Cierre por excepción: local, `closure_date`, motivo obligatorio no vacío (CHECK) y quién lo registró. Uno por local y fecha (índice único). Se puede quitar (la API lo audita).                                            |
 
 El estado diario de ventas **no se guarda**: la API lo calcula al consultar a
 partir de este calendario, de los cierres y de las importaciones `ACTIVE`
@@ -630,12 +631,12 @@ Migración `20261111120000_inventario_catalogo_toma` (con reversa en
 que existían desde la migración inicial sin uso ni filas, y agrega
 `inventory_template_rows`. `inventory_movements` no cambia.
 
-| Tabla | Cambio |
-| --- | --- |
-| `products` | `sku` opcional y único cuando existe (lo entrega el proveedor; PostgreSQL admite varios NULL) y nunca vacío. Agrega `alternative_names` (`VARCHAR(120)[]`, un producto con varios nombres y un solo SKU: Carne Fajita, Beef Steak y Carne Queso), `package_name` (bolsa, paquete, botella o pack), `box_content` y `package_content` (`DECIMAL(12,3)`, independientes), `packages_per_box` (entero, solo informativo) y `loose_only` («solo cantidad suelta»). |
-| `inventory_template_rows` | Una fila por fila de la hoja Excel: `position` (único, = número de fila; la 1 es el encabezado), `kind` (`ITEM`, `BLANK` o `SECTION`), `printed_text` (nombre, `<Vacío>` o rótulo; NULL solo en `BLANK`), `section` (rótulo de la sección que cierra el grupo) y `product_id` opcional y único (solo en `ITEM`). |
-| `inventory_counts` | `status` OPEN («En curso») o CONFIRMED («Finalizado»); agrega `count_date` (fecha de la toma), `finalized_at`, `finalized_by_id` y `template_snapshot` (JSONB, copia de la plantilla al finalizar). |
-| `inventory_count_lines` | Agrega `boxes`, `packages` (enteros), `loose_quantity` (`DECIMAL(12,3)`), `saved_by_id` y `saved_at` (último guardado) y la copia del producto al contarlo: `product_sku`, `product_name`, `unit`, `package_name`, `box_content`, `packages_per_box`, `package_content` y `loose_only`. `counted_quantity` guarda el total; `system_quantity` y `difference` pasan a opcionales (reservadas para la comparación contra el stock). |
+| Tabla                     | Cambio                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `products`                | `sku` opcional y único cuando existe (lo entrega el proveedor; PostgreSQL admite varios NULL) y nunca vacío. Agrega `alternative_names` (`VARCHAR(120)[]`, un producto con varios nombres y un solo SKU: Carne Fajita, Beef Steak y Carne Queso), `package_name` (bolsa, paquete, botella o pack), `box_content` y `package_content` (`DECIMAL(12,3)`, independientes), `packages_per_box` (entero, solo informativo) y `loose_only` («solo cantidad suelta»). |
+| `inventory_template_rows` | Una fila por fila de la hoja Excel: `position` (único, = número de fila; la 1 es el encabezado), `kind` (`ITEM`, `BLANK` o `SECTION`), `printed_text` (nombre, `<Vacío>` o rótulo; NULL solo en `BLANK`), `section` (rótulo de la sección que cierra el grupo) y `product_id` opcional y único (solo en `ITEM`).                                                                                                                                               |
+| `inventory_counts`        | `status` OPEN («En curso») o CONFIRMED («Finalizado»); agrega `count_date` (fecha de la toma), `finalized_at`, `finalized_by_id` y `template_snapshot` (JSONB, copia de la plantilla al finalizar).                                                                                                                                                                                                                                                            |
+| `inventory_count_lines`   | Agrega `boxes`, `packages` (enteros), `loose_quantity` (`DECIMAL(12,3)`), `saved_by_id` y `saved_at` (último guardado) y la copia del producto al contarlo: `product_sku`, `product_name`, `unit`, `package_name`, `box_content`, `packages_per_box`, `package_content` y `loose_only`. `counted_quantity` guarda el total; `system_quantity` y `difference` pasan a opcionales (reservadas para la comparación contra el stock).                              |
 
 **Total de una línea** (lo calcula el backend con aritmética decimal exacta y
 la base lo verifica sobre la copia del formato, CHECK
@@ -646,10 +647,11 @@ counted_quantity = boxes × box_content + packages × package_content + loose_qu
 ```
 
 Ejemplo: Carne Fajita (caja de 5 kg con 2 bolsas de 2,5 kg), 1 caja + 2 bolsas
-+ 0,300 kg = 10,300 kg. El contenido por caja no se deriva de los paquetes
-(Pepperoni: caja de 7,3 kg con paquetes de 0,93 kg). Una línea vacía (producto
-no contado) tiene `boxes`, `packages`, `loose_quantity` y `counted_quantity` en
-NULL, igual que la celda en blanco de la hoja impresa.
+
+- 0,300 kg = 10,300 kg. El contenido por caja no se deriva de los paquetes
+  (Pepperoni: caja de 7,3 kg con paquetes de 0,93 kg). Una línea vacía (producto
+  no contado) tiene `boxes`, `packages`, `loose_quantity` y `counted_quantity` en
+  NULL, igual que la celda en blanco de la hoja impresa.
 
 **Unidad**: `UnitOfMeasure` queda en `UNIT`, `KG` y `L`. Se recreó el enum en
 vez de agregar un CHECK para que el cliente Prisma y la API solo conozcan
@@ -688,43 +690,71 @@ Reglas que garantiza la base:
   la posición y el tipo no se actualizan y las filas no se borran, porque el Product
   Owner copia el Excel descargado y lo pega en otro cuadre. Solo cambian el
   texto impreso, la sección y el producto asignado. La carga de las 182 filas
-  es el seed de SPRINT-5-T02.
+  es el seed de SPRINT-5-T02 (solo la estructura, sin productos).
 - Un producto con líneas de toma, movimientos o fila asignada no se borra (FK
   Restrict).
 
-### Catálogo inicial desde la plantilla (SPRINT-5-T02)
+### Estructura de la plantilla (SPRINT-5-T02)
 
 El seed (`prisma/inventory-template.ts`, llamado desde `prisma/seed.ts`) carga
-las 182 filas de `docs/plantilla-inventario.xlsx` (filas 2 a 183): 140
-artículos, 34 `<Vacío>`, 3 filas sin texto y 5 secciones. La plantilla en
-blanco queda en el repositorio como fixture y el test
-`inventory-template-xlsx.spec.ts` compara el seed contra ella.
+las 182 filas de `docs/plantilla-inventario.xlsx` (filas 2 a 183) en
+`inventory_template_rows`, con su posición, tipo, texto impreso y sección:
+140 artículos, 34 `<Vacío>`, 3 filas sin texto (23, 24 y 65) y 5 secciones
+que cierran cada grupo (45, 88, 141, 162 y 183). La plantilla en blanco queda
+en el repositorio como fixture y el test `inventory-template-xlsx.spec.ts`
+compara el seed contra ella.
 
-- Cada artículo crea su producto con el nombre exacto, **sin SKU** (lo entrega
-  el proveedor y lo completa el administrador) y en **KG** (el inventario se
-  trabaja en kilos). Carne Fajita parte con caja de 5 kg y 2 bolsas de 2,5 kg;
-  Atún, Pollo Teriyaki y Meat Lover (Preparado) quedan «solo cantidad suelta».
-  El resto queda sin formato. «Lata Fanta Zero» se carga dos veces (filas 99
-  y 102), como viene en la hoja.
-- La carga es idempotente y se identifica por posición. La plantilla manda en
-  el texto impreso y la sección; el formato, el SKU y la unidad del producto
-  solo se asignan al crearlo, así que el seed no pisa lo que edita el
-  administrador. Si cambia el texto de un artículo en la plantilla, su
-  producto se renombra y conserva su id y su formato; un `<Vacío>` que pasa a
-  artículo crea su producto, y un artículo que pasa a `<Vacío>` se desvincula
-  sin borrar el producto.
-- La plantilla solo pisa al administrador cuando cambia su texto.
-  `printed_text` guarda siempre el texto de la última plantilla cargada: la
-  API de productos (SPRINT-5-T03) edita el producto y su asignación a la fila,
-  nunca `printed_text`. Así, un producto que el administrador ubica en una
-  fila `<Vacío>` o renombra se conserva en cada despliegue. Si una plantilla
-  nueva pone un artículo en una fila `<Vacío>` que el administrador ocupaba,
-  se crea el artículo de la plantilla y el producto del administrador queda
-  en el catálogo sin fila; nunca se renombra.
-- Toda la sincronización corre en una transacción: un error de la base no
-  deja la plantilla a medias.
-- Si la plantilla cambia el tipo de una fila existente, la carga se detiene
-  antes de escribir nada (las filas son fijas).
+- **No crea productos** (decisión del Product Owner del 11/11/2026): el
+  administrador los crea a mano con el SKU del proveedor y los ubica en su
+  fila (SPRINT-5-T03 y T04). Una fila de artículo sin producto es un artículo
+  pendiente de crear.
+- Antes de escribir valida la estructura completa (`INVENTORY_TEMPLATE_STRUCTURE`):
+  182 filas, posiciones de la 2 a la 183 sin huecos, filas por tipo y las
+  secciones en sus filas. Si algo no calza, se detiene sin escribir nada,
+  porque la base no permite corregir después la posición ni el tipo.
+- No es destructiva: solo inserta las filas que faltan. Una fila existente
+  no se toca, así que una segunda carga no duplica filas, no desasigna
+  productos y no pisa los textos que edita el administrador. Si la plantilla
+  cambia el tipo de una fila existente, la carga se detiene antes de escribir.
+- **Plantilla actualizada** (decisión del Product Owner del 12/11/2026): la
+  plantilla cambia seguido y es temporal, porque más adelante el cuadre se
+  hará dentro de la aplicación. Por eso el texto vigente de cada fila lo
+  mantiene el administrador desde la aplicación (SPRINT-5-T03), y el seed no lo
+  sobrescribe en cada despliegue. Cuando el texto de una fila existente difiere
+  del de la plantilla del repositorio, el seed lo informa en
+  `textDifferences` y muestra un aviso con la fila, el texto de la base y el de
+  la plantilla, sin modificar nada.
+- «Lata Fanta Zero» se carga dos veces (filas 99 y 102), como viene en la
+  hoja.
+- Los formatos de la caché de «BASE DE DATOS» quedan como referencia en
+  `INVENTORY_REFERENCE_FORMATS` (no se cargan): Carne Fajita (caja de 5 kg, 2
+  bolsas de 2,5 kg), Pepperoni (caja de 7,3 kg, paquetes de 0,93 kg), Pan
+  Blanco (caja de 70 unidades) y Atún, Pollo Teriyaki y Meat Lover
+  (Preparado), que solo admiten la cantidad suelta.
+- Una base donde ya corrió la versión anterior del seed (PR #89, que creaba
+  los 140 productos) los conserva: la carga nueva no borra productos ni
+  desasigna filas, y en esa base no quedan artículos pendientes de crear. Los
+  entornos desplegados no están afectados (no tenían el inventario). En una
+  base local se limpia de dos formas:
+  - recreando el volumen: `docker compose down -v && docker compose up --build`;
+  - o, para conservar el resto de los datos, con este SQL. Solo toca los
+    productos que creó ese seed: sin SKU, con el mismo nombre que el texto de
+    su fila y sin líneas de toma ni movimientos. El trigger de filas fijas
+    permite desasignar `product_id`.
+
+    ```sql
+    BEGIN;
+    CREATE TEMP TABLE seeded AS
+      SELECT p.id FROM products p
+      JOIN inventory_template_rows r ON r.product_id = p.id
+      WHERE p.sku IS NULL AND p.name = r.printed_text
+        AND NOT EXISTS (SELECT 1 FROM inventory_count_lines l WHERE l.product_id = p.id)
+        AND NOT EXISTS (SELECT 1 FROM inventory_movements m WHERE m.product_id = p.id);
+    UPDATE inventory_template_rows SET product_id = NULL, updated_at = now()
+      WHERE product_id IN (SELECT id FROM seeded);
+    DELETE FROM products WHERE id IN (SELECT id FROM seeded);
+    COMMIT;
+    ```
 
 ## Cómo ver el modelo de forma visual
 

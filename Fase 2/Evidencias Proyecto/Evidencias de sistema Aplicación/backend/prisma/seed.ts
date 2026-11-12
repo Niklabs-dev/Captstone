@@ -484,7 +484,7 @@ export async function seedDatabase(
     });
   }
 
-  // Plantilla de inventario y catálogo inicial (SPRINT-5-T02).
+  // Estructura de la plantilla de inventario, sin productos (SPRINT-5-T02).
   const inventoryTemplate = await seedInventoryTemplate(
     db,
     INVENTORY_TEMPLATE_ROWS,
@@ -705,11 +705,28 @@ async function main(): Promise<void> {
     );
     const plantilla = result.inventoryTemplate;
     console.log(
-      `Plantilla de inventario sincronizada (SPRINT-5-T02): ` +
-        `${INVENTORY_TEMPLATE_ROWS.length} filas; ${plantilla.rowsCreated} creadas, ` +
-        `${plantilla.rowsUpdated} actualizadas, ${plantilla.productsCreated} productos ` +
-        `creados y ${plantilla.productsRenamed} renombrados.`,
+      `Estructura de la plantilla de inventario cargada (SPRINT-5-T02): ` +
+        `${INVENTORY_TEMPLATE_ROWS.length} filas; ${plantilla.rowsCreated} creadas y ` +
+        `${plantilla.rowsKept} sin cambios (no crea productos).`,
     );
+    const differences = plantilla.textDifferences.length;
+    if (differences > 0) {
+      // No se sobrescriben: el texto vigente lo mantiene el administrador.
+      console.warn(
+        `Aviso: ${differences === 1 ? '1 fila' : `${differences} filas`} de la ` +
+          `plantilla con un texto en la base distinto al del repositorio; no se ` +
+          `modificaron. ` +
+          `Si la plantilla cambió, el administrador corrige el texto de cada ` +
+          `fila desde la aplicación:\n` +
+          plantilla.textDifferences
+            .map(
+              (d) =>
+                `- fila ${d.position}: «${d.current ?? ''}» en la base, ` +
+                `«${d.template ?? ''}» en la plantilla`,
+            )
+            .join('\n'),
+      );
+    }
     if (options.includeDemoData === true) {
       console.log(
         `Fixtures demo de propinas sincronizadas (SPRINT-3-T09) en ` +

@@ -1,32 +1,31 @@
 // =============================================================
-// Carga de la plantilla impresa de inventario (SPRINT-5-T02).
+// Carga de la estructura de la plantilla de inventario (SPRINT-5-T02).
 //
 // Cada fila de la hoja Excel (desde la 2; la 1 es el encabezado) se guarda
-// en `inventory_template_rows` con su posición fija. Las filas de artículo
-// crean su created en `products` la primera vez, con el nombre exacto de la
-// plantilla, sin SKU (lo completa el administrador con el del proveedor) y
-// «Sin formato» salvo los casos que la plantilla define.
+// en `inventory_template_rows` con su posición fija, su tipo, su texto
+// impreso y su sección. La carga NO crea productos: el administrador los
+// crea a mano con el SKU del proveedor y los ubica en su fila (SPRINT-5-T03 y
+// T04). Decisión del Product Owner del 11/11/2026.
 //
-// Reglas de la carga (idempotente, corre en cada despliegue):
-// - Las filas se identifican por su posición, nunca por el nombre.
-// - La plantilla manda en el texto impreso (printed_text) y en la sección.
-//   printed_text es siempre el texto de la última plantilla cargada: la API
-//   de productos (SPRINT-5-T03) no lo modifica; edita el created y su
-//   asignación a la fila.
-// - La plantilla solo pisa al administrador cuando cambia su texto. Si el
-//   texto de una fila de artículo cambia, se renombra su created; si no
-//   cambia, ni el created ni su nombre se tocan.
-// - El formato del created (caja, paquete, solo cantidad suelta) solo se
-//   asigna al crearlo: una segunda carga nunca pisa lo que editó el
-//   administrador.
-// - Una fila `<Vacío>` que pasa a ser artículo crea su created; un artículo
-//   que pasa a `<Vacío>` se desvincula y su created queda en el catálogo
-//   (sus tomas finalizadas guardan copia del created). Una fila `<Vacío>`
-//   que no cambió conserva el created que le asignó el administrador.
-// - Toda la sincronización corre en una transacción: un error de la base a
-//   mitad de camino no deja la plantilla a medias.
-// - El tipo de una fila no cambia (trigger de SPRINT-5-T01): si la
-//   plantilla lo cambia, la carga se detiene antes de escribir nada.
+// Reglas de la carga (corre en cada despliegue y no es destructiva):
+// - Antes de escribir valida la estructura completa: cantidad de filas,
+//   posiciones consecutivas, filas por tipo y posición de cada sección. Desde
+//   SPRINT-5-T01 la base no permite borrar filas ni cambiar su posición o su
+//   tipo, así que un error de carga no se podría corregir después.
+// - Solo inserta las filas que faltan. Una fila que ya existe no se toca: no
+//   se pisa el texto que editó el administrador ni se desasigna su producto.
+// - Si el texto de una fila existente difiere del de la plantilla, no se
+//   sobrescribe: se informa en `textDifferences` para que el administrador lo
+//   corrija desde la aplicación. La plantilla cambia seguido y es temporal
+//   (el cuadre pasará a la aplicación), así que el texto vigente lo mantiene
+//   el administrador y no cada despliegue (decisión del PO del 12/11/2026).
+// - Si la plantilla cambia el tipo de una fila existente, la carga se detiene
+//   antes de escribir nada.
+// - Toda la carga corre en una transacción.
+//
+// Los formatos que trae la caché de «BASE DE DATOS» quedan en
+// INVENTORY_REFERENCE_FORMATS como referencia para el administrador y los
+// tests; no se cargan.
 // =============================================================
 import {
   InventoryTemplateRowKind,
@@ -35,21 +34,23 @@ import {
   UnitOfMeasure,
 } from '../src/generated/prisma/client.js';
 
-/** Texto de las filas de artículo sin created asignado en la plantilla. */
+/** Texto de las filas de artículo libres de la plantilla. */
 export const INVENTORY_EMPTY_ITEM_TEXT = '<Vacío>';
 
 /** Primera fila de datos de la hoja (la 1 es el encabezado). */
 export const INVENTORY_TEMPLATE_FIRST_POSITION = 2;
 
 const MAX_TEXT_LENGTH = 120;
-const MAX_PACKAGE_NAME_LENGTH = 30;
-
 /**
- * Formato inicial de un created. Los contenidos van como texto decimal
- * ('2.5') para no pasar por float. Todo es opcional: sin formato, el created
- * queda «Sin formato» hasta que lo complete el administrador.
+ * Formato de referencia de un artículo, tomado de la caché de «BASE DE
+ * DATOS» de la plantilla del 14-10-2026. Los contenidos van como texto
+ * decimal ('2.5'). El contenido por caja y el del paquete son independientes
+ * (Pepperoni: caja de 7,3 kg y paquetes de 0,93 kg).
  */
-export interface InventoryProductFormatSeed {
+export interface InventoryReferenceFormat {
+  position: number;
+  text: string;
+  unit: UnitOfMeasure;
   packageName?: string;
   boxContent?: string;
   packagesPerBox?: number;
@@ -57,16 +58,14 @@ export interface InventoryProductFormatSeed {
   looseOnly?: boolean;
 }
 
-/** Artículo con nombre: crea su created. */
+/** Fila de artículo con el nombre impreso. */
 export interface InventoryArticleRowSeed {
   position: number;
   type: 'ARTICLE';
   text: string;
-  unit: UnitOfMeasure;
-  format?: InventoryProductFormatSeed;
 }
 
-/** Fila de artículo `<Vacío>`: sin created. */
+/** Fila de artículo libre, con el texto `<Vacío>`. */
 export interface InventoryEmptyRowSeed {
   position: number;
   type: 'EMPTY';
@@ -99,37 +98,43 @@ export interface ResolvedInventoryTemplateRow {
   section: string;
 }
 
-export interface InventoryTemplateSeedResult {
-  rowsCreated: number;
-  rowsUpdated: number;
-  productsCreated: number;
-  productsRenamed: number;
-  /** Productos del administrador que quedaron sin fila al ocuparla la plantilla. */
-  productsReleased: number;
+/** Fila existente cuyo texto en la base no coincide con el de la plantilla. */
+export interface InventoryTemplateTextDifference {
+  position: number;
+  /** Texto guardado en la base (el que se imprime hoy). */
+  current: string | null;
+  /** Texto que trae la plantilla del repositorio. */
+  template: string | null;
 }
 
-// Unidad inicial de los artículos: el Product Owner definió que el inventario
-// se trabaja en kilos (0,300 kg; 1,300 kg). El administrador la ajusta por
-// created si corresponde.
-const DEFAULT_UNIT = UnitOfMeasure.KG;
+export interface InventoryTemplateSeedResult {
+  rowsCreated: number;
+  /** Filas que ya existían y no se tocaron. */
+  rowsKept: number;
+  /** Filas existentes con un texto distinto al de la plantilla (no se pisan). */
+  textDifferences: InventoryTemplateTextDifference[];
+}
 
-// Carne Fajita: caja de 5 kg con 2 bolsas de 2,5 kg (definido por el PO).
-const CARNE_FAJITA_FORMAT: InventoryProductFormatSeed = {
-  packageName: 'bolsa',
-  boxContent: '5',
-  packagesPerBox: 2,
-  packageContent: '2.5',
+/** Estructura esperada de la plantilla, validada antes de escribir. */
+export interface InventoryTemplateStructure {
+  rows: number;
+  articles: number;
+  empty: number;
+  blank: number;
+  sectionPositions: readonly number[];
+}
+
+/** Estructura de docs/plantilla-inventario.xlsx (filas 2 a 183). */
+export const INVENTORY_TEMPLATE_STRUCTURE: InventoryTemplateStructure = {
+  rows: 182,
+  articles: 140,
+  empty: 34,
+  blank: 3,
+  sectionPositions: [45, 88, 141, 162, 183],
 };
 
-// Los artículos «(Preparado)» solo admiten la cantidad suelta en la plantilla.
-const LOOSE_ONLY_FORMAT: InventoryProductFormatSeed = { looseOnly: true };
-
-function article(
-  position: number,
-  text: string,
-  format?: InventoryProductFormatSeed,
-): InventoryArticleRowSeed {
-  return { position, type: 'ARTICLE', text, unit: DEFAULT_UNIT, format };
+function article(position: number, text: string): InventoryArticleRowSeed {
+  return { position, type: 'ARTICLE', text };
 }
 
 function empty(position: number): InventoryEmptyRowSeed {
@@ -152,7 +157,7 @@ function section(position: number, text: string): InventorySectionRowSeed {
 export const INVENTORY_TEMPLATE_ROWS: readonly InventoryTemplateRowSeed[] = [
   article(2, 'Atún'),
   article(3, 'Carne Mechada'),
-  article(4, 'Carne Fajita (Beef Steak Saborizado)', CARNE_FAJITA_FORMAT),
+  article(4, 'Carne Fajita (Beef Steak Saborizado)'),
   article(5, 'Costilla BBQ (BBQ Ribs)'),
   article(6, 'Jamón de Cerdo (Jamón Praga)'),
   article(7, 'Pollo Apanado'),
@@ -165,9 +170,9 @@ export const INVENTORY_TEMPLATE_ROWS: readonly InventoryTemplateRowSeed[] = [
   article(14, 'Mechada de cerdo'),
   empty(15),
   empty(16),
-  article(17, 'Atún (Preparado)', LOOSE_ONLY_FORMAT),
-  article(18, 'Pollo Teriyaki (Preparado)', LOOSE_ONLY_FORMAT),
-  article(19, 'Meat Lover (Preparado)', LOOSE_ONLY_FORMAT),
+  article(17, 'Atún (Preparado)'),
+  article(18, 'Pollo Teriyaki (Preparado)'),
+  article(19, 'Meat Lover (Preparado)'),
   empty(20),
   article(21, 'Queso Mozzarella Laminado'),
   article(22, 'Queso Cheddar Laminado'),
@@ -334,6 +339,55 @@ export const INVENTORY_TEMPLATE_ROWS: readonly InventoryTemplateRowSeed[] = [
   section(183, 'ARTÍCULOS DE LIMPIEZA'),
 ];
 
+/**
+ * Formatos de referencia de la caché de «BASE DE DATOS» (no se cargan). Los
+ * artículos «(Preparado)» solo admiten la cantidad suelta en la hoja.
+ */
+export const INVENTORY_REFERENCE_FORMATS: readonly InventoryReferenceFormat[] =
+  [
+    {
+      position: 4,
+      text: 'Carne Fajita (Beef Steak Saborizado)',
+      unit: UnitOfMeasure.KG,
+      packageName: 'bolsa',
+      boxContent: '5',
+      packagesPerBox: 2,
+      packageContent: '2.5',
+    },
+    {
+      position: 9,
+      text: 'Pepperoni',
+      unit: UnitOfMeasure.KG,
+      packageName: 'paquete',
+      boxContent: '7.3',
+      packageContent: '0.93',
+    },
+    {
+      position: 17,
+      text: 'Atún (Preparado)',
+      unit: UnitOfMeasure.KG,
+      looseOnly: true,
+    },
+    {
+      position: 18,
+      text: 'Pollo Teriyaki (Preparado)',
+      unit: UnitOfMeasure.KG,
+      looseOnly: true,
+    },
+    {
+      position: 19,
+      text: 'Meat Lover (Preparado)',
+      unit: UnitOfMeasure.KG,
+      looseOnly: true,
+    },
+    {
+      position: 46,
+      text: 'Pan Blanco',
+      unit: UnitOfMeasure.UNIT,
+      boxContent: '70',
+    },
+  ];
+
 function kindOf(row: InventoryTemplateRowSeed): InventoryTemplateRowKind {
   switch (row.type) {
     case 'ARTICLE':
@@ -358,14 +412,6 @@ function printedTextOf(row: InventoryTemplateRowSeed): string | null {
   }
 }
 
-function isPositiveDecimal(value: string): boolean {
-  return /^\d+(\.\d{1,3})?$/.test(value) && Number(value) > 0;
-}
-
-function isInteger(value: string): boolean {
-  return /^\d+(\.0{1,3})?$/.test(value);
-}
-
 function textErrors(position: number, text: string, label: string): string[] {
   const errors: string[] = [];
   if (text.trim() === '') {
@@ -378,54 +424,6 @@ function textErrors(position: number, text: string, label: string): string[] {
   if (text.length > MAX_TEXT_LENGTH) {
     errors.push(
       `Fila ${position}: ${label} de más de ${MAX_TEXT_LENGTH} caracteres.`,
-    );
-  }
-  return errors;
-}
-
-function formatErrors(row: InventoryArticleRowSeed): string[] {
-  const format = row.format;
-  if (format === undefined) return [];
-  const p = row.position;
-  const errors: string[] = [];
-  const contents: [string, string | undefined][] = [
-    ['contenido por caja', format.boxContent],
-    ['contenido por paquete', format.packageContent],
-  ];
-  for (const [label, value] of contents) {
-    if (value === undefined) continue;
-    if (!isPositiveDecimal(value)) {
-      errors.push(
-        `Fila ${p}: ${label} «${value}» debe ser mayor que 0 y con hasta 3 decimales.`,
-      );
-    } else if (row.unit === UnitOfMeasure.UNIT && !isInteger(value)) {
-      errors.push(`Fila ${p}: ${label} «${value}» debe ser entero en UNIT.`);
-    }
-  }
-  if (
-    format.packagesPerBox !== undefined &&
-    (!Number.isInteger(format.packagesPerBox) || format.packagesPerBox < 1)
-  ) {
-    errors.push(`Fila ${p}: paquetes por caja debe ser un entero >= 1.`);
-  }
-  if (format.packageName !== undefined) {
-    if (format.packageName.trim() === '') {
-      errors.push(`Fila ${p}: nombre del paquete vacío.`);
-    } else if (format.packageName.length > MAX_PACKAGE_NAME_LENGTH) {
-      errors.push(
-        `Fila ${p}: nombre del paquete de más de ${MAX_PACKAGE_NAME_LENGTH} caracteres.`,
-      );
-    }
-  }
-  if (
-    format.looseOnly === true &&
-    (format.boxContent !== undefined ||
-      format.packageContent !== undefined ||
-      format.packagesPerBox !== undefined ||
-      format.packageName !== undefined)
-  ) {
-    errors.push(
-      `Fila ${p}: un created «solo cantidad suelta» no lleva caja ni paquete.`,
     );
   }
   return errors;
@@ -465,7 +463,6 @@ export function resolveInventoryTemplate(
           `Fila ${row.position}: «${INVENTORY_EMPTY_ITEM_TEXT}» se declara como EMPTY, no como artículo.`,
         );
       }
-      errors.push(...formatErrors(row));
     } else if (row.type === 'SECTION') {
       errors.push(...textErrors(row.position, row.text, 'rótulo de sección'));
     }
@@ -500,39 +497,59 @@ export function resolveInventoryTemplate(
   }));
 }
 
-type SeedClient = PrismaClient | Prisma.TransactionClient;
-
-function productCreateData(
-  row: InventoryArticleRowSeed,
-): Prisma.ProductCreateInput {
-  const format = row.format ?? {};
-  return {
-    name: row.text,
-    unit: row.unit,
-    packageName: format.packageName ?? null,
-    boxContent:
-      format.boxContent === undefined
-        ? null
-        : new Prisma.Decimal(format.boxContent),
-    packagesPerBox: format.packagesPerBox ?? null,
-    packageContent:
-      format.packageContent === undefined
-        ? null
-        : new Prisma.Decimal(format.packageContent),
-    looseOnly: format.looseOnly ?? false,
-  };
+/**
+ * Compara la plantilla con su estructura esperada: cantidad de filas, filas
+ * por tipo y posición de cada sección. Devuelve los problemas encontrados.
+ */
+export function inventoryTemplateStructureErrors(
+  rows: readonly InventoryTemplateRowSeed[],
+  structure: InventoryTemplateStructure,
+): string[] {
+  const errors: string[] = [];
+  const count = (type: InventoryTemplateRowSeed['type']): number =>
+    rows.filter((row) => row.type === type).length;
+  const expected: [string, number, number][] = [
+    ['filas', rows.length, structure.rows],
+    ['artículos', count('ARTICLE'), structure.articles],
+    ['filas <Vacío>', count('EMPTY'), structure.empty],
+    ['filas sin texto', count('BLANK'), structure.blank],
+    ['secciones', count('SECTION'), structure.sectionPositions.length],
+  ];
+  for (const [label, actual, wanted] of expected) {
+    if (actual !== wanted) {
+      errors.push(`Se esperaban ${wanted} ${label} y hay ${actual}.`);
+    }
+  }
+  const sections = rows
+    .filter((row) => row.type === 'SECTION')
+    .map((row) => row.position);
+  if (sections.join(',') !== structure.sectionPositions.join(',')) {
+    errors.push(
+      `Las secciones deben estar en las filas ${structure.sectionPositions.join(', ')} y están en ${sections.join(', ') || 'ninguna'}.`,
+    );
+  }
+  return errors;
 }
 
+type SeedClient = PrismaClient | Prisma.TransactionClient;
+
 /**
- * Sincroniza la plantilla con la base (ver reglas al inicio del archivo).
+ * Carga la estructura de la plantilla (ver reglas al inicio del archivo).
  * Valida todo y compara los tipos contra las filas existentes antes de
  * escribir, para no dejar una carga a medias por un error de datos.
  */
 export async function seedInventoryTemplate(
   db: SeedClient,
   rows: readonly InventoryTemplateRowSeed[],
+  structure: InventoryTemplateStructure = INVENTORY_TEMPLATE_STRUCTURE,
 ): Promise<InventoryTemplateSeedResult> {
   const resolved = resolveInventoryTemplate(rows);
+  const structural = inventoryTemplateStructureErrors(rows, structure);
+  if (structural.length > 0) {
+    throw new Error(
+      `La plantilla de inventario no tiene la estructura esperada:\n- ${structural.join('\n- ')}`,
+    );
+  }
   // Un TransactionClient no expone $transaction: con un cliente completo
   // (incluido uno extendido) se abre la transacción aquí.
   if ('$transaction' in db && typeof db.$transaction === 'function') {
@@ -550,32 +567,28 @@ async function syncInventoryTemplate(
 ): Promise<InventoryTemplateSeedResult> {
   const result: InventoryTemplateSeedResult = {
     rowsCreated: 0,
-    rowsUpdated: 0,
-    productsCreated: 0,
-    productsRenamed: 0,
-    productsReleased: 0,
+    rowsKept: 0,
+    textDifferences: [],
   };
   if (resolved.length === 0) return result;
 
   const existing = await db.inventoryTemplateRow.findMany({
     where: { position: { in: resolved.map((r) => r.seed.position) } },
-    select: {
-      id: true,
-      position: true,
-      kind: true,
-      printedText: true,
-      section: true,
-      productId: true,
-    },
+    select: { position: true, kind: true, printedText: true },
   });
-  const byPosition = new Map(existing.map((e) => [e.position, e]));
+  const byPosition = new Map(existing.map((e) => [e.position, e.kind]));
+  const textByPosition = new Map(
+    existing.map((e) => [e.position, e.printedText]),
+  );
 
   const conflicts = resolved
-    .map((r) => ({ r, actual: byPosition.get(r.seed.position) }))
-    .filter(({ r, actual }) => actual !== undefined && actual.kind !== r.kind)
+    .filter((r) => {
+      const kind = byPosition.get(r.seed.position);
+      return kind !== undefined && kind !== r.kind;
+    })
     .map(
-      ({ r, actual }) =>
-        `fila ${r.seed.position}: es ${actual?.kind} y la plantilla la declara ${r.kind}`,
+      (r) =>
+        `fila ${r.seed.position}: es ${byPosition.get(r.seed.position)} y la plantilla la declara ${r.kind}`,
     );
   if (conflicts.length > 0) {
     throw new Error(
@@ -583,75 +596,30 @@ async function syncInventoryTemplate(
     );
   }
 
-  for (const r of resolved) {
-    const actual = byPosition.get(r.seed.position);
-    const articleSeed = r.seed.type === 'ARTICLE' ? r.seed : null;
+  result.textDifferences = resolved
+    .filter(
+      (r) =>
+        textByPosition.has(r.seed.position) &&
+        textByPosition.get(r.seed.position) !== r.printedText,
+    )
+    .map((r) => ({
+      position: r.seed.position,
+      current: textByPosition.get(r.seed.position) ?? null,
+      template: r.printedText,
+    }));
 
-    if (actual === undefined) {
-      let productId: string | null = null;
-      if (articleSeed !== null) {
-        const created = await db.product.create({
-          data: productCreateData(articleSeed),
-          select: { id: true },
-        });
-        productId = created.id;
-        result.productsCreated++;
-      }
-      await db.inventoryTemplateRow.create({
-        data: {
-          position: r.seed.position,
-          kind: r.kind,
-          printedText: r.printedText,
-          section: r.section,
-          productId,
-        },
-      });
-      result.rowsCreated++;
-      continue;
-    }
-
-    const textChanged = actual.printedText !== r.printedText;
-    // Fila `<Vacío>` que la plantilla convierte en artículo mientras el
-    // administrador ya la ocupaba: su producto queda en el catálogo (sin
-    // fila) y el artículo de la plantilla nace como producto propio, sin
-    // renombrar el del administrador.
-    const claimsOccupiedEmpty =
-      articleSeed !== null &&
-      actual.productId !== null &&
-      textChanged &&
-      actual.printedText === INVENTORY_EMPTY_ITEM_TEXT;
-    let productId = actual.productId;
-    if (articleSeed !== null && (productId === null || claimsOccupiedEmpty)) {
-      const created = await db.product.create({
-        data: productCreateData(articleSeed),
-        select: { id: true },
-      });
-      productId = created.id;
-      result.productsCreated++;
-      if (claimsOccupiedEmpty) result.productsReleased++;
-    } else if (articleSeed !== null && productId !== null && textChanged) {
-      await db.product.update({
-        where: { id: productId },
-        data: { name: articleSeed.text },
-      });
-      result.productsRenamed++;
-    } else if (articleSeed === null && textChanged) {
-      // Artículo que pasó a `<Vacío>`: se desvincula su producto.
-      productId = null;
-    }
-
-    if (
-      textChanged ||
-      actual.section !== r.section ||
-      actual.productId !== productId
-    ) {
-      await db.inventoryTemplateRow.update({
-        where: { id: actual.id },
-        data: { printedText: r.printedText, section: r.section, productId },
-      });
-      result.rowsUpdated++;
-    }
+  const missing = resolved.filter((r) => !byPosition.has(r.seed.position));
+  if (missing.length > 0) {
+    const created = await db.inventoryTemplateRow.createMany({
+      data: missing.map((r) => ({
+        position: r.seed.position,
+        kind: r.kind,
+        printedText: r.printedText,
+        section: r.section,
+      })),
+    });
+    result.rowsCreated = created.count;
   }
-
+  result.rowsKept = resolved.length - missing.length;
   return result;
 }
