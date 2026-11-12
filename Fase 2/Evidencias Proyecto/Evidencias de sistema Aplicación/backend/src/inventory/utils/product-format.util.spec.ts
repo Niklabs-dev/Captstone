@@ -1,8 +1,11 @@
 import { UnitOfMeasure } from '../../generated/prisma/client.js';
 import {
+  alternativeNamesError,
+  comparableName,
   hasProductFormat,
   normalizeProductName,
   resolveProductFormat,
+  suggestTemplateRow,
   type ProductFormatInput,
 } from './product-format.util.js';
 
@@ -16,84 +19,156 @@ const base: ProductFormatInput = {
 };
 
 describe('formato de productos de inventario (SPRINT-5-T03)', () => {
-  it('calcula el contenido por caja: 2 × 2,5 kg = 5 kg', () => {
+  it('guarda la caja y el paquete por separado: Pepperoni 7,3 kg y 0,93 kg', () => {
     const result = resolveProductFormat({
       ...base,
-      packageName: ' bolsa ',
-      packagesPerBox: 2,
-      packageContent: '2.5',
+      packageName: ' paquete ',
+      packagesPerBox: 8,
+      packageContent: '0.93',
+      boxContent: '7.3',
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.format.boxContent?.toFixed(3)).toBe('5.000');
-    expect(result.format.packageName).toBe('bolsa');
+    expect(result.format.boxContent?.toFixed(3)).toBe('7.300');
+    expect(result.format.packageContent?.toFixed(3)).toBe('0.930');
+    expect(result.format.packagesPerBox).toBe(8);
+    expect(result.format.packageName).toBe('paquete');
   });
 
-  it('acepta un contenido por caja que coincide y rechaza uno que lo contradice', () => {
-    const same = resolveProductFormat({
+  it('no calcula la caja desde los paquetes: sin caja queda sin caja', () => {
+    const result = resolveProductFormat({
       ...base,
       packagesPerBox: 2,
       packageContent: '2.5',
-      boxContent: '5.000',
     });
-    expect(same.ok).toBe(true);
-    const wrong = resolveProductFormat({
-      ...base,
-      packagesPerBox: 2,
-      packageContent: '2.5',
-      boxContent: '6',
-    });
-    expect(wrong.ok).toBe(false);
-    if (wrong.ok) return;
-    expect(wrong.errors.boxContent).toMatch(/2 × 2\.500 = 5\.000/);
+    expect(result.ok && result.format.boxContent).toBeNull();
   });
 
-  it('admite solo contenido por caja, o ningún formato', () => {
-    const onlyBox = resolveProductFormat({ ...base, boxContent: '10' });
-    expect(onlyBox.ok && onlyBox.format.boxContent?.toFixed(3)).toBe('10.000');
-    const none = resolveProductFormat(base);
-    expect(none.ok && hasProductFormat(none.format)).toBe(false);
-  });
-
-  it('valida contenidos positivos con hasta 3 decimales y enteros en UNIT', () => {
-    for (const value of ['0', '-1', '1.2345', 'abc', '1,5']) {
-      const result = resolveProductFormat({ ...base, packageContent: value });
-      expect(result.ok, value).toBe(false);
+  it('acepta solo bolsa, paquete, botella o pack como nombre del paquete', () => {
+    for (const packageName of ['bolsa', 'paquete', 'botella', 'pack']) {
+      expect(resolveProductFormat({ ...base, packageName }).ok).toBe(true);
     }
-    const unit = resolveProductFormat({
+    const result = resolveProductFormat({
+      ...base,
+      packageName: 'caja grande',
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: {
+        packageName:
+          'El nombre del paquete debe ser bolsa, paquete, botella, pack',
+      },
+    });
+  });
+
+  it('rechaza contenidos en 0, negativos o con más de 3 decimales', () => {
+    for (const value of ['0', '-1', '1.2345', 'abc']) {
+      const result = resolveProductFormat({ ...base, boxContent: value });
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.errors.boxContent).toMatch(/^El contenido por caja/);
+    }
+  });
+
+  it('exige contenidos enteros en UNIT (un pack de 6 bebidas = 6)', () => {
+    const result = resolveProductFormat({
       ...base,
       unit: UnitOfMeasure.UNIT,
-      packageContent: '1.5',
+      packageName: 'pack',
+      packageContent: '6.5',
     });
-    expect(unit.ok).toBe(false);
-    if (unit.ok) return;
-    expect(unit.errors.packageContent).toMatch(/entero/);
-  });
-
-  it('exige paquetes por caja enteros y mayores o iguales a 1', () => {
-    for (const packagesPerBox of [0, -2, 1.5]) {
-      const result = resolveProductFormat({
+    expect(result).toEqual({
+      ok: false,
+      errors: {
+        packageContent:
+          'El contenido por paquete debe ser un número entero cuando se cuenta por unidad',
+      },
+    });
+    expect(
+      resolveProductFormat({
         ...base,
-        packagesPerBox,
-        packageContent: '1',
-      });
-      expect(result.ok, String(packagesPerBox)).toBe(false);
-    }
+        unit: UnitOfMeasure.UNIT,
+        packageContent: '6',
+        boxContent: '24',
+      }).ok,
+    ).toBe(true);
   });
 
-  it('un producto solo suelto no admite caja ni paquete', () => {
-    expect(resolveProductFormat({ ...base, looseOnly: true }).ok).toBe(true);
-    const mixed = resolveProductFormat({
+  it('rechaza paquetes por caja menores que 1', () => {
+    const result = resolveProductFormat({ ...base, packagesPerBox: 0 });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.packagesPerBox).toMatch(/mayor o igual a 1/);
+  });
+
+  it('«solo cantidad suelta» no lleva caja ni paquete', () => {
+    expect(resolveProductFormat({ ...base, looseOnly: true })).toMatchObject({
+      ok: true,
+      format: { looseOnly: true, boxContent: null },
+    });
+    const invalid = resolveProductFormat({
       ...base,
       looseOnly: true,
       boxContent: '5',
     });
-    expect(mixed.ok).toBe(false);
-    const loose = resolveProductFormat({ ...base, looseOnly: true });
-    expect(loose.ok && hasProductFormat(loose.format)).toBe(true);
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.errors.looseOnly).toMatch(/no lleva caja/);
   });
 
-  it('normaliza el nombre sin cambiar mayúsculas', () => {
-    expect(normalizeProductName('  Lata   Coca  Cola ')).toBe('Lata Coca Cola');
+  it('indica si el producto tiene formato', () => {
+    const result = resolveProductFormat({ ...base, boxContent: '5' });
+    expect(result.ok && hasProductFormat(result.format)).toBe(true);
+    const empty = resolveProductFormat(base);
+    expect(empty.ok && hasProductFormat(empty.format)).toBe(false);
+  });
+});
+
+describe('nombres de productos de inventario (SPRINT-5-T03)', () => {
+  it('normaliza espacios y compara sin tildes ni mayúsculas', () => {
+    expect(normalizeProductName('  Lata   Coca Cola ')).toBe('Lata Coca Cola');
+    expect(comparableName(' ATÚN  (Preparado)')).toBe('atun (preparado)');
+  });
+
+  it('rechaza alternativos vacíos, repetidos o iguales al nombre', () => {
+    const name = 'Carne Fajita (Beef Steak Saborizado)';
+    expect(alternativeNamesError(name, ['Beef Steak', 'Carne Queso'])).toBe(
+      null,
+    );
+    expect(alternativeNamesError(name, ['   '])).toBe(
+      'Los nombres alternativos no pueden estar vacíos',
+    );
+    expect(alternativeNamesError(name, ['Dup', 'dup'])).toBe(
+      '«dup» está repetido',
+    );
+    expect(
+      alternativeNamesError(name, ['carne fajita (beef steak saborizado)']),
+    ).toMatch(/es el mismo nombre del producto/);
+  });
+
+  it('sugiere la fila del artículo por nombre o alternativo, si no una <Vacío>', () => {
+    const rows = [
+      { id: 'a', printedText: 'Pepperoni', isEmptyRow: false },
+      { id: 'b', printedText: '<Vacío>', isEmptyRow: true },
+      {
+        id: 'c',
+        printedText: 'Carne Fajita (Beef Steak Saborizado)',
+        isEmptyRow: false,
+      },
+    ];
+    expect(
+      suggestTemplateRow(rows, [
+        'Beef Steak',
+        'carne fajita (beef steak saborizado)',
+      ]),
+    ).toEqual({ row: rows[2], reason: 'MATCH' });
+    expect(suggestTemplateRow(rows, ['Pepperoni Nuevo', 'PEPPERONI'])).toEqual({
+      row: rows[0],
+      reason: 'MATCH',
+    });
+    expect(suggestTemplateRow(rows, ['Lata Pepsi'])).toEqual({
+      row: rows[1],
+      reason: 'EMPTY',
+    });
+    expect(suggestTemplateRow([rows[0]], ['Lata Pepsi'])).toBeNull();
   });
 });

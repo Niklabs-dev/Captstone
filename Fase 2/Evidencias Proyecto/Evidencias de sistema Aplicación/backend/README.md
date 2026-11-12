@@ -1168,11 +1168,25 @@ se genera desde el snapshot de T13, conservando el historial de local.
 
 ## Productos de inventario (SPRINT-5-T03)
 
-`/products` administra el catálogo de inventario. Crear, editar, desactivar y reactivar son del ADMINISTRADOR; el SUPERVISOR consulta los productos activos (`GET /products` y `GET /products/sections`).
+`/products` administra el catálogo de inventario y la estructura de la plantilla. Crear, editar, mover, desactivar y reactivar productos, corregir el texto de una fila y liberarla son del ADMINISTRADOR. El SUPERVISOR consulta los productos activos y la plantilla (`GET /products`, `GET /products/sections` y `GET /products/template`). CONTADOR y TRABAJADOR reciben 403.
 
-- **Formato:** unidad (`UNIT`, `KG`, `L`), nombre del paquete, paquetes por caja, contenido por paquete y por caja, como texto decimal con hasta 3 decimales. Si se informan paquetes por caja y contenido por paquete, el contenido por caja se calcula (2 × 2,5 kg = 5 kg), y un valor que lo contradiga responde 400 con el error en `errors.boxContent`. «Solo cantidad suelta» no admite caja ni paquete.
-- **Nombre no repetido** (409), sin distinguir mayúsculas ni tildes. Solo se valida al crear o al renombrar, así que los repetidos de la plantilla («Lata Fanta Zero») se pueden editar. El SKU es opcional, lo entrega el proveedor, y debe ser único.
-- **Ubicación en la plantilla:** un producto nuevo ocupa la primera fila «<Vacío>» libre de su sección. Si no queda ninguna, se agrega una fila nueva desde la posición 1000, con texto «<Vacío>» y su sección. La carga de la plantilla (SPRINT-5-T02) ignora esas posiciones, y el Excel (SPRINT-5-T08) debe ubicarlas antes del cierre de su sección.
-- **Contrato con la plantilla:** la API nunca modifica `printed_text`. Renombrar cambia el producto y conserva su fila. Un artículo impreso en la plantilla no se puede mover de sección (409); los ubicados en filas «<Vacío>» sí.
-- **Desactivar no borra:** el producto conserva su fila y sus tomas, y deja de aparecer para el supervisor y en tomas nuevas.
-- **Auditoría:** `PRODUCT_CREATED`, `PRODUCT_UPDATED`, `PRODUCT_DEACTIVATED` y `PRODUCT_REACTIVATED`, con `detail.before` y `detail.after`.
+| Endpoint | Rol | Descripción |
+| --- | --- | --- |
+| `GET /products` | ADMINISTRADOR, SUPERVISOR | Productos en el orden de la plantilla. Filtros `section`, `isActive`, `missingFormat`, `missingSku` y `search` (nombre, nombre alternativo o SKU, sin mayúsculas ni tildes). |
+| `GET /products/sections` | ADMINISTRADOR, SUPERVISOR | Secciones con sus filas libres (artículos pendientes y «<Vacío>»). |
+| `GET /products/template` | ADMINISTRADOR, SUPERVISOR | Las 182 filas en orden, cada una con su producto. Una fila de artículo sin producto es un artículo pendiente de crear. |
+| `GET /products/template/suggestion` | ADMINISTRADOR | Fila sugerida para un producto nuevo (`section`, `name`, `alternativeNames`). |
+| `POST /products` | ADMINISTRADOR | Crea el producto en la fila elegida (`templateRowId`) o en la sugerida. |
+| `PATCH /products/:id` | ADMINISTRADOR | Edita nombre, nombres alternativos, unidad, SKU o formato, sin cambiar su fila. |
+| `PATCH /products/:id/move` | ADMINISTRADOR | Mueve el producto a otra fila de artículo sin producto, de cualquier sección. |
+| `PATCH /products/:id/deactivate` y `/reactivate` | ADMINISTRADOR | Desactiva o reactiva sin borrar. |
+| `PATCH /products/template/rows/:id` | ADMINISTRADOR | Corrige el texto de una fila de artículo sin producto. |
+| `PATCH /products/template/rows/:id/release` | ADMINISTRADOR | Libera la fila de un producto desactivado para asignarla a otro. |
+
+- **Formato:** unidad (`UNIT`, `KG`, `L`), nombre del paquete (`bolsa`, `paquete`, `botella` o `pack`), contenido por caja, paquetes por caja y contenido por paquete. Los contenidos son texto decimal mayor que 0, con hasta 3 decimales en KG y L y enteros en UNIT. El contenido por caja y el del paquete son independientes: no se exige que caja = paquetes × paquete (Pepperoni: caja de 7,3 kg y paquetes de 0,93 kg), y los paquetes por caja son solo informativos. «Solo cantidad suelta» no admite caja ni paquete.
+- **Nombres únicos** (409), sin distinguir mayúsculas ni tildes: el nombre y cada nombre alternativo no pueden ser el nombre ni un alternativo de otro producto. Un alternativo vacío, repetido o igual al propio nombre responde 400. El SKU es opcional, lo entrega el proveedor, y es único (409).
+- **Ubicación en la plantilla:** al crear se usa la fila elegida o la sugerida: la fila de artículo sin producto que coincide con el nombre o un alternativo; si no, la primera «<Vacío>» libre de la sección. Si no queda ninguna, 409 con `errors.templateRowId`: hay que reutilizar la fila de un artículo que ya no se usa. **Nunca se insertan, borran ni reordenan filas**, porque el Excel descargado se copia y se pega en otro cuadre.
+- **Filas de la plantilla:** el texto de una fila de artículo sin producto se puede corregir, y la fila de un producto desactivado se puede liberar (el producto queda en el catálogo sin fila). Ninguno de esos cambios modifica la posición de la fila. Renombrar un producto conserva su fila (Lata Coca Cola pasa a Lata Pepsi).
+- **Desactivar no borra:** el producto conserva su fila y sus tomas, y deja de aparecer para el supervisor y en tomas nuevas. Las líneas de tomas guardan su propia copia del nombre, el SKU y el formato.
+- **Errores por campo:** las validaciones de negocio responden `{ statusCode, message, errors }`, con un mensaje en español por campo para mostrarlo junto a él. Un `null` en un campo obligatorio del PATCH responde 400.
+- **Auditoría:** `PRODUCT_CREATED`, `PRODUCT_UPDATED`, `PRODUCT_MOVED`, `PRODUCT_DEACTIVATED`, `PRODUCT_REACTIVATED`, `INVENTORY_TEMPLATE_ROW_UPDATED` e `INVENTORY_TEMPLATE_ROW_RELEASED`, con `detail.before` y `detail.after`. Una solicitud que no cambia nada no se audita.
