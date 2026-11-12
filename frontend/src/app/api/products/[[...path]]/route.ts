@@ -11,6 +11,8 @@ import {
   parseProducts,
   parseSections,
   parseSuggestion,
+  parseTemplateRow,
+  parseTemplateRowTextInput,
   parseTemplateRows,
   productErrorMessage,
 } from '@/lib/products';
@@ -21,7 +23,10 @@ import { getUsersSession } from '@/lib/users-session';
 // SPRINT-5-T04: BFF del catálogo de productos de inventario. Consultan el
 // administrador y el supervisor (el backend aplica los roles); solo el
 // administrador modifica. El token queda en el servidor y solo se reenvían
-// campos del contrato y errores por campo conocidos.
+// campos del contrato y errores por campo conocidos. SPRINT-5-T15 agrega dos
+// escrituras sobre la plantilla: corregir el texto de una fila
+// (PATCH template/rows/:id, solo printedText) y liberar la fila de un
+// producto desactivado (PATCH template/rows/:id/release, sin cuerpo).
 type Context = { params: Promise<{ path?: string[] }> };
 
 const QUERY_KEYS = [
@@ -142,9 +147,18 @@ async function mutate(
     path.length === 2 &&
     isProxyUuid(path[0]) &&
     path[1] === 'move';
-  if (!create && !edit && !state && !move) return failure(404);
+  const rowPath =
+    method === 'PATCH' &&
+    path[0] === 'template' &&
+    path[1] === 'rows' &&
+    path.length >= 3 &&
+    isProxyUuid(path[2]);
+  const rowText = rowPath && path.length === 3;
+  const release = rowPath && path.length === 4 && path[3] === 'release';
+  if (!create && !edit && !state && !move && !rowText && !release)
+    return failure(404);
   let body: string | undefined;
-  if (!state) {
+  if (!state && !release) {
     if (!request.headers.get('Content-Type')?.startsWith('application/json'))
       return failure(400);
     const text = await request.text();
@@ -155,7 +169,11 @@ async function mutate(
     } catch {
       return failure(400);
     }
-    const input = move ? parseMove(raw) : parseProductInput(raw, edit);
+    const input = move
+      ? parseMove(raw)
+      : rowText
+        ? parseTemplateRowTextInput(raw)
+        : parseProductInput(raw, edit);
     if (!input) return failure(400);
     body = JSON.stringify(input);
   }
@@ -168,7 +186,7 @@ async function mutate(
         ? { headers: { 'Content-Type': 'application/json' }, body }
         : {}),
     },
-    parseProduct,
+    rowText || release ? parseTemplateRow : parseProduct,
   );
 }
 

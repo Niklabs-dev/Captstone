@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   buildCatalog,
+  canReleaseRow,
+  catalogCounts,
+  catalogSummary,
   countLabel,
   creationProgress,
   formatExample,
@@ -14,12 +17,16 @@ import {
   parseProduct,
   parseProductInput,
   parseSuggestion,
+  parseTemplateRow,
+  parseTemplateRowTextInput,
   parseTemplateRows,
   productErrorMessage,
   productFormValues,
   productInputFromForm,
   productLoadErrorMessage,
   productUpdate,
+  templateRowTextError,
+  templateRowTextFromForm,
   type Product,
   type ProductFilters,
   type ProductFormValues,
@@ -306,6 +313,11 @@ test('Solo reenvía errores por campo conocidos', () => {
     }),
     { name: 'Repetido', templateRowId: 'Sin filas' },
   );
+  // El texto de una fila de la plantilla (SPRINT-5-T15) también es un campo.
+  assert.deepEqual(
+    parseFieldErrors({ errors: { printedText: 'La fila tiene un producto' } }),
+    { printedText: 'La fila tiene un producto' },
+  );
   assert.equal(parseFieldErrors({ message: 'x' }), null);
 });
 
@@ -387,4 +399,119 @@ test('Arma el listado por sección con pendientes, búsqueda por SKU y filtros',
     ids(buildCatalog(rows, [...products, orphan], filters)).at(-1),
     ['section-none', ['Sin fila']],
   );
+});
+
+// SPRINT-5-T15: corregir el texto de una fila y liberar la fila de un
+// producto desactivado.
+test('Lista las filas <Vacío> libres solo en su propio estado', () => {
+  const ids = (groups: ReturnType<typeof buildCatalog>) =>
+    groups.map((group) =>
+      group.entries.map((entry) =>
+        entry.kind === 'pending'
+          ? `${entry.row.isEmptyRow ? 'libre' : 'pendiente'}:${entry.row.position}`
+          : entry.product.name,
+      ),
+    );
+  const products = [fajita, bebida];
+  for (const status of ['active', 'pending', 'all', 'inactive'] as const)
+    assert.ok(
+      !ids(buildCatalog(rows, products, { ...filters, status }))
+        .flat()
+        .includes('libre:38'),
+      status,
+    );
+  const empty = buildCatalog(rows, products, { ...filters, status: 'empty' });
+  assert.deepEqual(ids(empty), [['libre:38']]);
+  assert.deepEqual(catalogCounts(empty[0].entries), {
+    products: 0,
+    pending: 0,
+    free: 1,
+  });
+  assert.deepEqual(
+    catalogCounts(buildCatalog(rows, products, filters)[0].entries),
+    { products: 1, pending: 1, free: 0 },
+  );
+  assert.equal(catalogSummary(empty[0].entries), '1 fila libre');
+  assert.equal(
+    catalogSummary(buildCatalog(rows, products, filters)[0].entries),
+    '1 producto · 1 pendiente',
+  );
+  assert.equal(
+    catalogSummary(
+      buildCatalog(rows, products, { ...filters, status: 'pending' })[0]
+        .entries,
+    ),
+    '1 pendiente',
+  );
+  assert.equal(catalogSummary([]), '0 productos');
+  assert.deepEqual(
+    buildCatalog(rows, products, {
+      ...filters,
+      status: 'empty',
+      missingSku: true,
+    }),
+    [],
+  );
+});
+
+test('Valida el texto corregido de una fila en el navegador', () => {
+  assert.deepEqual(templateRowTextFromForm('  Lata   Pepsi ', 'Pepperoni'), {
+    printedText: 'Lata Pepsi',
+  });
+  for (const empty of ['<vacio>', 'Vacío', ' <VACÍO> '])
+    assert.deepEqual(
+      templateRowTextFromForm(empty, 'Pepperoni'),
+      { printedText: '<Vacío>' },
+      empty,
+    );
+  assert.deepEqual(templateRowTextFromForm('   ', 'Pepperoni'), {
+    error: 'Ingresa el texto de la fila o <Vacío> para dejarla libre.',
+  });
+  assert.deepEqual(templateRowTextFromForm('x'.repeat(121), null), {
+    error: 'Máximo 120 caracteres.',
+  });
+  assert.deepEqual(templateRowTextFromForm('Pepperoni ', 'Pepperoni'), {
+    error: 'Escribe un texto distinto al actual.',
+  });
+  assert.deepEqual(templateRowTextFromForm('vacio', '<Vacío>'), {
+    error: 'Escribe un texto distinto al actual.',
+  });
+});
+
+test('El BFF solo reenvía el texto de la fila y valida su respuesta', () => {
+  assert.deepEqual(parseTemplateRowTextInput({ printedText: ' Lata ' }), {
+    printedText: 'Lata',
+  });
+  for (const bad of [
+    null,
+    {},
+    { printedText: '' },
+    { printedText: '   ' },
+    { printedText: 'x'.repeat(121) },
+    { printedText: 5 },
+    { printedText: 'Lata', position: 1 },
+    { printedText: 'Lata', productId: id(1) },
+  ])
+    assert.equal(parseTemplateRowTextInput(bad), null, JSON.stringify(bad));
+  assert.deepEqual(parseTemplateRow(rows[1]), rows[1]);
+  assert.deepEqual(parseTemplateRow(rows[0])?.product, fajita);
+  assert.equal(parseTemplateRow({ ...rows[1], position: '9' }), null);
+  assert.equal(parseTemplateRow({ ...rows[0], product: { id: 'x' } }), null);
+});
+
+test('El error del texto va junto al campo y solo se libera la fila de un desactivado', () => {
+  assert.equal(
+    templateRowTextError(409, { printedText: 'La fila tiene un producto' }),
+    'La fila tiene un producto',
+  );
+  assert.equal(
+    templateRowTextError(400, null),
+    'Usa entre 1 y 120 caracteres.',
+  );
+  assert.equal(templateRowTextError(404, null), null);
+  assert.equal(templateRowTextError(503, null), null);
+
+  assert.equal(canReleaseRow(bebida), true);
+  assert.equal(canReleaseRow(fajita), false);
+  assert.equal(canReleaseRow({ ...bebida, templateRowId: null }), false);
 });

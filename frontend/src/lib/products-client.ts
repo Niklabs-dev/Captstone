@@ -5,6 +5,7 @@ import {
   parseProducts,
   parseSections,
   parseSuggestion,
+  parseTemplateRow,
   parseTemplateRows,
   productErrorMessage,
   type PlacementSuggestion,
@@ -108,5 +109,25 @@ export function setProductActive(
     `/${id}/${isActive ? 'reactivate' : 'deactivate'}`,
     { method: 'PATCH' },
     parseProduct,
+  );
+}
+
+// Filas de la plantilla (SPRINT-5-T15): corregir el texto de una fila de
+// artículo sin producto y liberar la fila de un producto desactivado.
+export function updateTemplateRowText(
+  id: string,
+  printedText: string,
+): Promise<TemplateRow> {
+  return request(
+    `/template/rows/${id}`,
+    json('PATCH', { printedText }),
+    parseTemplateRow,
+  );
+}
+export function releaseTemplateRow(id: string): Promise<TemplateRow> {
+  return request(
+    `/template/rows/${id}/release`,
+    { method: 'PATCH' },
+    parseTemplateRow,
   );
 }
