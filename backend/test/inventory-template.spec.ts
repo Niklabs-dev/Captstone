@@ -1,8 +1,9 @@
-import { UnitOfMeasure } from '../src/generated/prisma/client.js';
 import {
   INVENTORY_EMPTY_ITEM_TEXT,
   INVENTORY_TEMPLATE_ROWS,
+  INVENTORY_TEMPLATE_STRUCTURE,
   type InventoryTemplateRowSeed,
+  inventoryTemplateStructureErrors,
   resolveInventoryTemplate,
 } from '../prisma/inventory-template.js';
 
@@ -15,23 +16,11 @@ const VALID: InventoryTemplateRowSeed[] = [
     position: 2,
     type: 'ARTICLE',
     text: 'Carne Fajita (Beef Steak Saborizado)',
-    unit: UnitOfMeasure.KG,
-    format: {
-      packageName: 'bolsa',
-      boxContent: '5',
-      packagesPerBox: 2,
-      packageContent: '2.5',
-    },
   },
   { position: 3, type: 'EMPTY' },
   { position: 4, type: 'BLANK' },
   { position: 5, type: 'SECTION', text: 'COSTO PROTEÍNAS' },
-  {
-    position: 6,
-    type: 'ARTICLE',
-    text: 'Lata Fanta Zero',
-    unit: UnitOfMeasure.UNIT,
-  },
+  { position: 6, type: 'ARTICLE', text: 'Lata Fanta Zero' },
   { position: 7, type: 'SECTION', text: 'COSTO DE BEBIDAS' },
 ];
 
@@ -70,8 +59,8 @@ describe('Plantilla de inventario (SPRINT-5-T02)', () => {
 
     it('acepta dos artículos con el mismo nombre en filas distintas', () => {
       const rows: InventoryTemplateRowSeed[] = [
-        { position: 2, type: 'ARTICLE', text: 'Lata Fanta Zero', unit: 'UNIT' },
-        { position: 3, type: 'ARTICLE', text: 'Lata Fanta Zero', unit: 'UNIT' },
+        { position: 2, type: 'ARTICLE', text: 'Lata Fanta Zero' },
+        { position: 3, type: 'ARTICLE', text: 'Lata Fanta Zero' },
         { position: 4, type: 'SECTION', text: 'COSTO DE BEBIDAS' },
       ];
 
@@ -110,7 +99,7 @@ describe('Plantilla de inventario (SPRINT-5-T02)', () => {
     it('rechaza un nombre vacío, con espacios sobrantes o declarado como <Vacío>', () => {
       expect(() =>
         resolveInventoryTemplate(
-          withRow(4, { position: 6, type: 'ARTICLE', text: ' ', unit: 'UNIT' }),
+          withRow(4, { position: 6, type: 'ARTICLE', text: ' ' }),
         ),
       ).toThrow(/Fila 6: nombre vacío/);
       expect(() =>
@@ -119,7 +108,6 @@ describe('Plantilla de inventario (SPRINT-5-T02)', () => {
             position: 6,
             type: 'ARTICLE',
             text: 'Lata Fanta Zero ',
-            unit: 'UNIT',
           }),
         ),
       ).toThrow(/Fila 6: nombre con espacios/);
@@ -129,7 +117,6 @@ describe('Plantilla de inventario (SPRINT-5-T02)', () => {
             position: 6,
             type: 'ARTICLE',
             text: INVENTORY_EMPTY_ITEM_TEXT,
-            unit: 'UNIT',
           }),
         ),
       ).toThrow(/se declara como EMPTY/);
@@ -140,7 +127,6 @@ describe('Plantilla de inventario (SPRINT-5-T02)', () => {
         position: 6,
         type: 'ARTICLE',
         text: 'x'.repeat(121),
-        unit: 'UNIT',
       });
 
       expect(() => resolveInventoryTemplate(rows)).toThrow(
@@ -148,67 +134,9 @@ describe('Plantilla de inventario (SPRINT-5-T02)', () => {
       );
     });
 
-    it('rechaza contenidos en 0, negativos o con más de 3 decimales', () => {
-      for (const boxContent of ['0', '-1', '1.2345', 'cinco']) {
-        const rows = withRow(0, {
-          position: 2,
-          type: 'ARTICLE',
-          text: 'Carne Fajita',
-          unit: 'KG',
-          format: { boxContent },
-        });
-        expect(() => resolveInventoryTemplate(rows)).toThrow(
-          /contenido por caja .* debe ser mayor que 0/,
-        );
-      }
-    });
-
-    it('exige contenidos enteros en UNIT', () => {
-      const rows = withRow(4, {
-        position: 6,
-        type: 'ARTICLE',
-        text: 'Lata Fanta Zero',
-        unit: 'UNIT',
-        format: { packageContent: '6.5' },
-      });
-
-      expect(() => resolveInventoryTemplate(rows)).toThrow(
-        /contenido por paquete «6.5» debe ser entero en UNIT/,
-      );
-    });
-
-    it('rechaza paquetes por caja menores que 1 o no enteros', () => {
-      for (const packagesPerBox of [0, 1.5]) {
-        const rows = withRow(0, {
-          position: 2,
-          type: 'ARTICLE',
-          text: 'Carne Fajita',
-          unit: 'KG',
-          format: { packagesPerBox },
-        });
-        expect(() => resolveInventoryTemplate(rows)).toThrow(
-          /paquetes por caja debe ser un entero >= 1/,
-        );
-      }
-    });
-
-    it('rechaza caja o paquete en un producto de solo cantidad suelta', () => {
-      const rows = withRow(0, {
-        position: 2,
-        type: 'ARTICLE',
-        text: 'Atún (Preparado)',
-        unit: 'KG',
-        format: { looseOnly: true, boxContent: '5' },
-      });
-
-      expect(() => resolveInventoryTemplate(rows)).toThrow(
-        /solo cantidad suelta» no lleva caja ni paquete/,
-      );
-    });
-
     it('informa todos los errores de una vez', () => {
       const rows: InventoryTemplateRowSeed[] = [
-        { position: 2, type: 'ARTICLE', text: '', unit: 'KG' },
+        { position: 2, type: 'ARTICLE', text: '' },
         { position: 4, type: 'BLANK' },
       ];
 
@@ -218,11 +146,46 @@ describe('Plantilla de inventario (SPRINT-5-T02)', () => {
     });
   });
 
+  describe('inventoryTemplateStructureErrors', () => {
+    const structure = {
+      rows: 6,
+      articles: 2,
+      empty: 1,
+      blank: 1,
+      sectionPositions: [5, 7],
+    };
+
+    it('acepta una plantilla con la estructura esperada', () => {
+      expect(inventoryTemplateStructureErrors(VALID, structure)).toEqual([]);
+    });
+
+    it('informa filas por tipo y secciones que no calzan', () => {
+      const rows = withRow(2, { position: 4, type: 'EMPTY' });
+
+      expect(
+        inventoryTemplateStructureErrors(rows, {
+          ...structure,
+          sectionPositions: [6, 7],
+        }),
+      ).toEqual([
+        'Se esperaban 1 filas <Vacío> y hay 2.',
+        'Se esperaban 1 filas sin texto y hay 0.',
+        'Las secciones deben estar en las filas 6, 7 y están en 5, 7.',
+      ]);
+    });
+  });
+
   describe('INVENTORY_TEMPLATE_ROWS', () => {
-    it('es una plantilla válida', () => {
+    it('es una plantilla válida con la estructura de la hoja', () => {
       expect(() =>
         resolveInventoryTemplate(INVENTORY_TEMPLATE_ROWS),
       ).not.toThrow();
+      expect(
+        inventoryTemplateStructureErrors(
+          INVENTORY_TEMPLATE_ROWS,
+          INVENTORY_TEMPLATE_STRUCTURE,
+        ),
+      ).toEqual([]);
     });
   });
 });
