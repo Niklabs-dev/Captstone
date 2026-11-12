@@ -15,8 +15,10 @@ import {
   parseProductInput,
   parseSuggestion,
   parseTemplateRows,
+  productErrorMessage,
   productFormValues,
   productInputFromForm,
+  productLoadErrorMessage,
   productUpdate,
   type Product,
   type ProductFilters,
@@ -215,6 +217,40 @@ test('El formulario guarda caja y paquete por separado y valida en el navegador'
 
   const unit = productInputFromForm({ ...form, unit: 'UNIT' });
   assert.ok('errors' in unit && unit.errors.packageContent);
+});
+
+test('Al editar exige una fila: cambiar la sección obliga a elegir una de la nueva', () => {
+  const values = productFormValues(fajita);
+  const kept = productInputFromForm(values, 'edit');
+  assert.ok('input' in kept && kept.input.templateRowId === id(5));
+
+  const otherSection = productInputFromForm(
+    { ...values, section: 'COSTO DE BEBIDAS', templateRowId: '' },
+    'edit',
+  );
+  assert.ok('errors' in otherSection);
+  assert.equal(
+    otherSection.errors.templateRowId,
+    'Elige una fila libre de «COSTO DE BEBIDAS».',
+  );
+
+  const moved = productInputFromForm(
+    { ...values, section: 'COSTO DE BEBIDAS', templateRowId: id(7) },
+    'edit',
+  );
+  assert.ok('input' in moved && moved.input.templateRowId === id(7));
+
+  // Al crear, sin fila se usa la sugerencia de la API.
+  const created = productInputFromForm({ ...values, templateRowId: '' });
+  assert.ok('input' in created && created.input.templateRowId === undefined);
+});
+
+test('El error de carga del listado no promete conservar lo escrito', () => {
+  assert.equal(
+    productLoadErrorMessage(503),
+    'No se pudo conectar con el servicio. Intenta nuevamente.',
+  );
+  assert.equal(productLoadErrorMessage(403), productErrorMessage(403));
 });
 
 test('Precarga al editar y desde una fila pendiente', () => {
