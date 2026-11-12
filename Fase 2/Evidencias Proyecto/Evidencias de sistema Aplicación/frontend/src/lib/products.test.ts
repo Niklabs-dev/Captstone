@@ -1,26 +1,32 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  computeBoxContent,
-  filterProducts,
+  buildCatalog,
+  countLabel,
+  creationProgress,
   formatExample,
   formatQuantity,
   formatSummary,
-  groupBySection,
+  freeRowOptions,
+  packageLabel,
   parseDecimalInput,
   parseFieldErrors,
   parseProduct,
   parseProductInput,
+  parseSuggestion,
+  parseTemplateRows,
   productFormValues,
   productInputFromForm,
+  productUpdate,
   type Product,
+  type ProductFilters,
   type ProductFormValues,
+  type TemplateRow,
 } from './products';
 
-const id = 'a9000000-0000-4000-8000-000000000001';
-const other = 'a9000000-0000-4000-8000-000000000002';
+const id = (n: number) => `a9000000-0000-4000-8000-00000000000${n}`;
 const fajita: Product = {
-  id,
+  id: id(1),
   sku: null,
   name: 'Carne Fajita (Beef Steak Saborizado)',
   alternativeNames: ['Beef Steak'],
@@ -32,65 +38,119 @@ const fajita: Product = {
   looseOnly: false,
   hasFormat: true,
   isActive: true,
+  templateRowId: id(5),
   section: 'COSTO PROTEÍNAS',
   templatePosition: 4,
 };
+const bebida: Product = {
+  ...fajita,
+  id: id(2),
+  sku: 'SUB-111',
+  name: 'Lata Fanta Zero',
+  alternativeNames: [],
+  hasFormat: false,
+  packageContent: null,
+  boxContent: null,
+  isActive: false,
+  templateRowId: id(7),
+  section: 'COSTO DE BEBIDAS',
+  templatePosition: 99,
+};
+const row = (
+  n: number,
+  position: number,
+  kind: TemplateRow['kind'],
+  printedText: string | null,
+  section: string,
+  product: Product | null = null,
+): TemplateRow => ({
+  id: id(n),
+  position,
+  kind,
+  printedText,
+  section,
+  isEmptyRow: printedText === '<Vacío>',
+  product,
+});
+const rows: TemplateRow[] = [
+  row(
+    5,
+    4,
+    'ITEM',
+    'Carne Fajita (Beef Steak Saborizado)',
+    'COSTO PROTEÍNAS',
+    fajita,
+  ),
+  row(6, 9, 'ITEM', 'Pepperoni', 'COSTO PROTEÍNAS'),
+  row(8, 38, 'ITEM', '<Vacío>', 'COSTO PROTEÍNAS'),
+  row(9, 45, 'SECTION', 'COSTO PROTEÍNAS', 'COSTO PROTEÍNAS'),
+  row(7, 99, 'ITEM', 'Lata Fanta Zero', 'COSTO DE BEBIDAS', bebida),
+  row(4, 141, 'SECTION', 'COSTO DE BEBIDAS', 'COSTO DE BEBIDAS'),
+];
+const filters: ProductFilters = {
+  search: '',
+  section: '',
+  status: 'active',
+  missingSku: false,
+  missingFormat: false,
+};
 const form: ProductFormValues = {
-  name: 'Carne Fajita',
+  name: 'Pepperoni',
   section: 'COSTO PROTEÍNAS',
+  templateRowId: '',
   unit: 'KG',
   sku: '',
   alternativeNames: '',
-  packageName: 'bolsa',
-  packagesPerBox: '2',
-  packageContent: '2,5',
-  boxContent: '',
+  packageName: 'paquete',
+  packagesPerBox: '8',
+  packageContent: '0,93',
+  boxContent: '7,3',
   looseOnly: false,
 };
 
-test('Muestra el formato en una línea o indica que falta', () => {
+test('Muestra el formato en una línea con plurales correctos', () => {
   assert.equal(formatSummary(fajita), 'Caja 5 kg · 2 bolsas de 2,5 kg');
   assert.equal(
-    formatSummary({ ...fajita, packageContent: null, packagesPerBox: null }),
-    'Caja 5 kg',
+    formatSummary({
+      ...fajita,
+      unit: 'UNIT',
+      packageName: 'pack',
+      packagesPerBox: 4,
+      packageContent: '6.000',
+      boxContent: '24.000',
+    }),
+    'Caja 24 u. · 4 packs de 6 u.',
   );
   assert.equal(
     formatSummary({ ...fajita, looseOnly: true }),
     'Solo cantidad suelta',
   );
-  assert.equal(
-    formatSummary({
-      ...fajita,
-      boxContent: null,
-      packageContent: null,
-      packagesPerBox: null,
-    }),
-    null,
-  );
+  assert.equal(formatSummary(bebida), null);
+  assert.equal(packageLabel('pack', 2), 'packs');
+  assert.equal(packageLabel('botella', 1), 'botella');
+  assert.equal(countLabel(1, 'producto', 'productos'), '1 producto');
+  assert.equal(countLabel(3, 'producto', 'productos'), '3 productos');
 });
 
-test('Acepta decimales con coma y calcula la caja sin errores de redondeo', () => {
+test('Acepta decimales con coma', () => {
   assert.equal(parseDecimalInput('2,5'), '2.5');
   assert.equal(parseDecimalInput(' 0,300 '), '0.300');
   assert.equal(parseDecimalInput(''), null);
   for (const bad of ['0', '-1', '1,2345', 'abc'])
     assert.equal(parseDecimalInput(bad), undefined, bad);
-  assert.equal(computeBoxContent(2, '2.5'), '5.000');
-  assert.equal(computeBoxContent(3, '0.1'), '0.300');
-  assert.equal(computeBoxContent(null, '2.5'), null);
   assert.equal(formatQuantity('1234.500'), '1.234,5');
 });
 
-test('Arma el ejemplo calculado del formato', () => {
+test('Arma el ejemplo calculado del formato ingresado', () => {
   assert.equal(
     formatExample({
       unit: 'KG',
       packageName: 'bolsa',
       packageContent: '2.5',
-      boxContent: '5.000',
+      boxContent: '5',
       looseOnly: false,
     }),
-    '1 caja + 2 bolsas + 0,300 kg = 10,300 kg',
+    '1 caja + 3 bolsas + 2,450 kg = 14,950 kg',
   );
   assert.equal(
     formatExample({
@@ -110,16 +170,24 @@ test('Arma el ejemplo calculado del formato', () => {
       boxContent: null,
       looseOnly: true,
     }),
-    '0,300 kg = 0,300 kg',
+    '2,450 kg = 2,450 kg',
   );
 });
 
-test('El formulario calcula el contenido por caja y valida en el navegador', () => {
+test('El formulario guarda caja y paquete por separado y valida en el navegador', () => {
   const ok = productInputFromForm(form);
   assert.ok('input' in ok);
-  assert.equal(ok.input.boxContent, '5.000');
-  assert.equal(ok.input.packageContent, '2.5');
-  assert.equal(ok.input.sku, null);
+  assert.equal(ok.input.boxContent, '7.3');
+  assert.equal(ok.input.packageContent, '0.93');
+  assert.equal(ok.input.packagesPerBox, 8);
+  assert.equal(ok.input.templateRowId, undefined);
+  assert.deepEqual(
+    Object.keys(productUpdate(ok.input)).includes('section'),
+    false,
+  );
+
+  const withRow = productInputFromForm({ ...form, templateRowId: id(6) });
+  assert.ok('input' in withRow && withRow.input.templateRowId === id(6));
 
   const bad = productInputFromForm({
     ...form,
@@ -127,11 +195,15 @@ test('El formulario calcula el contenido por caja y valida en el navegador', () 
     section: '',
     packagesPerBox: '0',
     packageContent: '2,5555',
+    packageName: 'caja',
+    alternativeNames: 'Dup, dup',
   });
   assert.ok('errors' in bad);
   assert.deepEqual(Object.keys(bad.errors).sort(), [
+    'alternativeNames',
     'name',
     'packageContent',
+    'packageName',
     'packagesPerBox',
     'section',
   ]);
@@ -141,20 +213,21 @@ test('El formulario calcula el contenido por caja y valida en el navegador', () 
   assert.equal(loose.input.boxContent, null);
   assert.equal(loose.input.packageName, null);
 
-  const unit = productInputFromForm({
-    ...form,
-    unit: 'UNIT',
-    packagesPerBox: '',
-    packageContent: '1,5',
-  });
+  const unit = productInputFromForm({ ...form, unit: 'UNIT' });
   assert.ok('errors' in unit && unit.errors.packageContent);
 });
 
-test('Al editar precarga el formulario con coma decimal', () => {
+test('Precarga al editar y desde una fila pendiente', () => {
   const values = productFormValues(fajita);
   assert.equal(values.packageContent, '2,5');
   assert.equal(values.boxContent, '5');
   assert.equal(values.alternativeNames, 'Beef Steak');
+  assert.equal(values.templateRowId, id(5));
+  const pending = productFormValues(null, rows[1]);
+  assert.equal(pending.name, 'Pepperoni');
+  assert.equal(pending.section, 'COSTO PROTEÍNAS');
+  assert.equal(pending.templateRowId, id(6));
+  assert.equal(productFormValues(null, rows[2]).name, '');
 });
 
 test('Valida respuestas de la API y cuerpos que reenvía el BFF', () => {
@@ -163,63 +236,119 @@ test('Valida respuestas de la API y cuerpos que reenvía el BFF', () => {
     { ...fajita, id: 'x' },
     { ...fajita, unit: 'G' },
     { ...fajita, boxContent: '5,0' },
-    { ...fajita, packagesPerBox: 0 },
+    { ...fajita, templateRowId: 'x' },
   ])
     assert.equal(parseProduct(bad), null);
+  assert.equal(parseTemplateRows(rows)?.length, rows.length);
+  assert.equal(parseTemplateRows([{ ...rows[0], kind: 'OTRO' }]), null);
+  assert.deepEqual(parseSuggestion({ row: null, reason: null }), {
+    row: null,
+    reason: null,
+  });
+  assert.equal(parseSuggestion({ row: rows[1], reason: 'OTRA' }), null);
+
   assert.ok(parseProductInput({ name: 'A', section: 'S', unit: 'KG' }, false));
+  assert.ok(
+    parseProductInput(
+      { name: 'A', section: 'S', unit: 'KG', templateRowId: id(6) },
+      false,
+    ),
+  );
   assert.equal(parseProductInput({ name: 'A' }, false), null);
   assert.ok(parseProductInput({ name: 'A' }, true));
+  assert.equal(parseProductInput({ section: 'S' }, true), null);
+  assert.equal(parseProductInput({ templateRowId: id(6) }, true), null);
   assert.equal(parseProductInput({ name: 'A', role: 'ADMIN' }, true), null);
+  assert.equal(parseProductInput({ packageName: 'caja' }, true), null);
   assert.equal(parseProductInput({ boxContent: '2,5' }, true), null);
 });
 
 test('Solo reenvía errores por campo conocidos', () => {
   assert.deepEqual(
-    parseFieldErrors({ errors: { name: 'Repetido', password: 'x', sku: 1 } }),
-    { name: 'Repetido' },
+    parseFieldErrors({
+      errors: { name: 'Repetido', templateRowId: 'Sin filas', password: 'x' },
+    }),
+    { name: 'Repetido', templateRowId: 'Sin filas' },
   );
   assert.equal(parseFieldErrors({ message: 'x' }), null);
 });
 
-test('Filtra y agrupa por sección en el orden de la plantilla', () => {
-  const bebida: Product = {
-    ...fajita,
-    id: other,
-    name: 'Lata Fanta Zero',
-    alternativeNames: [],
-    section: 'COSTO DE BEBIDAS',
-    hasFormat: false,
-    isActive: false,
+test('Cuenta los productos creados y lista las filas libres de una sección', () => {
+  assert.deepEqual(creationProgress(rows), { created: 2, total: 3 });
+  assert.deepEqual(
+    freeRowOptions(rows, 'COSTO PROTEÍNAS').map((option) => option.label),
+    ['Fila 9 · Pepperoni (pendiente)', 'Fila 38 · libre (<Vacío>)'],
+  );
+  assert.deepEqual(
+    freeRowOptions(rows, 'COSTO PROTEÍNAS', id(5)).map((option) => option.id),
+    [id(5), id(6), id(8)],
+  );
+});
+
+test('Arma el listado por sección con pendientes, búsqueda por SKU y filtros', () => {
+  const ids = (groups: ReturnType<typeof buildCatalog>) =>
+    groups.map((group) => [
+      group.id,
+      group.entries.map((entry) =>
+        entry.kind === 'pending'
+          ? `pendiente:${entry.row.position}`
+          : entry.product.name,
+      ),
+    ]);
+  const products = [fajita, bebida];
+  assert.deepEqual(ids(buildCatalog(rows, products, filters)), [
+    ['section-45', [fajita.name, 'pendiente:9']],
+  ]);
+  assert.deepEqual(
+    ids(
+      buildCatalog(rows, products, {
+        ...filters,
+        status: 'all',
+        search: 'sub-111',
+      }),
+    ),
+    [['section-141', ['Lata Fanta Zero']]],
+  );
+  assert.deepEqual(
+    ids(buildCatalog(rows, products, { ...filters, status: 'pending' })),
+    [['section-45', ['pendiente:9']]],
+  );
+  assert.deepEqual(
+    ids(
+      buildCatalog(rows, products, {
+        ...filters,
+        status: 'all',
+        missingSku: true,
+      }),
+    ),
+    [['section-45', [fajita.name]]],
+  );
+  assert.deepEqual(
+    ids(
+      buildCatalog(rows, products, {
+        ...filters,
+        status: 'all',
+        missingFormat: true,
+      }),
+    ),
+    [['section-141', ['Lata Fanta Zero']]],
+  );
+  assert.deepEqual(
+    ids(buildCatalog(rows, products, { ...filters, search: 'beef' })),
+    [['section-45', [fajita.name]]],
+  );
+  // Un producto sin fila (liberada) va al final.
+  const orphan: Product = {
+    ...bebida,
+    id: id(3),
+    name: 'Sin fila',
+    isActive: true,
+    templateRowId: null,
+    section: null,
+    templatePosition: null,
   };
-  const all = [bebida, fajita];
-  const sections = [
-    { name: 'COSTO PROTEÍNAS', position: 45, freeRows: 2 },
-    { name: 'COSTO DE BEBIDAS', position: 141, freeRows: 0 },
-  ];
   assert.deepEqual(
-    groupBySection(all, sections).map((group) => group.section),
-    ['COSTO PROTEÍNAS', 'COSTO DE BEBIDAS'],
-  );
-  const base = {
-    search: '',
-    section: '',
-    status: 'all' as const,
-    missingFormat: false,
-  };
-  assert.deepEqual(
-    filterProducts(all, { ...base, search: 'beef' }).map((p) => p.id),
-    [id],
-  );
-  assert.deepEqual(
-    filterProducts(all, { ...base, search: 'FANTA' }).map((p) => p.id),
-    [other],
-  );
-  assert.deepEqual(
-    filterProducts(all, { ...base, missingFormat: true }).map((p) => p.id),
-    [other],
-  );
-  assert.deepEqual(
-    filterProducts(all, { ...base, status: 'active' }).map((p) => p.id),
-    [id],
+    ids(buildCatalog(rows, [...products, orphan], filters)).at(-1),
+    ['section-none', ['Sin fila']],
   );
 });

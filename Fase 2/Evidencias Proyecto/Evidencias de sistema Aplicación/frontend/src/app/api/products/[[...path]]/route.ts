@@ -3,12 +3,15 @@ import { cookies } from 'next/headers';
 import { ACCESS_COOKIE } from '@/lib/auth';
 import { callBackend } from '@/lib/auth-backend';
 import { isProxyUuid } from '@/lib/backend-proxy';
+import { isUuid } from '@/lib/users';
 import {
   parseFieldErrors,
   parseProduct,
   parseProductInput,
   parseProducts,
   parseSections,
+  parseSuggestion,
+  parseTemplateRows,
   productErrorMessage,
 } from '@/lib/products';
 import { getSession } from '@/lib/session';
@@ -21,7 +24,14 @@ import { getUsersSession } from '@/lib/users-session';
 // campos del contrato y errores por campo conocidos.
 type Context = { params: Promise<{ path?: string[] }> };
 
-const QUERY_KEYS = ['section', 'isActive', 'missingFormat', 'search'];
+const QUERY_KEYS = [
+  'section',
+  'isActive',
+  'missingFormat',
+  'missingSku',
+  'search',
+];
+const SUGGESTION_KEYS = ['section', 'name', 'alternativeNames'];
 
 function respond(data: unknown, status = 200): NextResponse {
   return NextResponse.json(data, {
@@ -71,8 +81,25 @@ export async function GET(
   if (!token) return failure(401);
   const path = (await context.params).path ?? [];
   const query = new URL(request.url).searchParams;
-  if (path.length === 1 && path[0] === 'sections' && query.size === 0)
+  const route = path.join('/');
+  if (route === 'sections' && query.size === 0)
     return forward('/products/sections', token, {}, parseSections);
+  if (route === 'template' && query.size === 0)
+    return forward('/products/template', token, {}, parseTemplateRows);
+  if (route === 'template/suggestion') {
+    if (
+      [...query.keys()].some((key) => !SUGGESTION_KEYS.includes(key)) ||
+      [...query.values()].some((value) => value.length > 120) ||
+      query.getAll('alternativeNames').length > 10
+    )
+      return failure(400);
+    return forward(
+      '/products/template/suggestion?' + query.toString(),
+      token,
+      {},
+      parseSuggestion,
+    );
+  }
   if (path.length > 0) return failure(404);
   if ([...query.keys()].some((key) => !QUERY_KEYS.includes(key)))
     return failure(400);
@@ -82,6 +109,16 @@ export async function GET(
     {},
     parseProducts,
   );
+}
+
+function parseMove(value: unknown): { templateRowId: string } | null {
+  return typeof value === 'object' &&
+    value !== null &&
+    Object.keys(value).length === 1 &&
+    'templateRowId' in value &&
+    isUuid(value.templateRowId)
+    ? { templateRowId: value.templateRowId }
+    : null;
 }
 
 async function mutate(
@@ -100,7 +137,12 @@ async function mutate(
     path.length === 2 &&
     isProxyUuid(path[0]) &&
     ['deactivate', 'reactivate'].includes(path[1]);
-  if (!create && !edit && !state) return failure(404);
+  const move =
+    method === 'PATCH' &&
+    path.length === 2 &&
+    isProxyUuid(path[0]) &&
+    path[1] === 'move';
+  if (!create && !edit && !state && !move) return failure(404);
   let body: string | undefined;
   if (!state) {
     if (!request.headers.get('Content-Type')?.startsWith('application/json'))
@@ -113,7 +155,7 @@ async function mutate(
     } catch {
       return failure(400);
     }
-    const input = parseProductInput(raw, edit);
+    const input = move ? parseMove(raw) : parseProductInput(raw, edit);
     if (!input) return failure(400);
     body = JSON.stringify(input);
   }

@@ -4,11 +4,16 @@ import {
   parseProduct,
   parseProducts,
   parseSections,
+  parseSuggestion,
+  parseTemplateRows,
   productErrorMessage,
+  type PlacementSuggestion,
   type Product,
   type ProductFieldErrors,
   type ProductInput,
   type ProductSection,
+  type ProductUpdate,
+  type TemplateRow,
 } from './products';
 
 // Cliente del BFF de productos de inventario (SPRINT-5-T04).
@@ -49,6 +54,11 @@ async function request<T>(
   if (parsed === null) throw new ProductRequestError(502);
   return parsed;
 }
+const json = (method: 'POST' | 'PATCH', body: unknown): RequestInit => ({
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+});
 
 export function loadProducts(signal: AbortSignal): Promise<Product[]> {
   return request('', { signal }, parseProducts);
@@ -56,19 +66,39 @@ export function loadProducts(signal: AbortSignal): Promise<Product[]> {
 export function loadSections(signal: AbortSignal): Promise<ProductSection[]> {
   return request('/sections', { signal }, parseSections);
 }
-export function saveProduct(
-  input: ProductInput,
-  id: string | null,
-): Promise<Product> {
+export function loadTemplate(signal: AbortSignal): Promise<TemplateRow[]> {
+  return request('/template', { signal }, parseTemplateRows);
+}
+export function loadSuggestion(
+  query: { section: string; name: string; alternativeNames: string[] },
+  signal: AbortSignal,
+): Promise<PlacementSuggestion> {
+  const params = new URLSearchParams({
+    section: query.section,
+    name: query.name,
+  });
+  for (const name of query.alternativeNames)
+    params.append('alternativeNames', name);
   return request(
-    id ? '/' + id : '',
-    {
-      method: id ? 'PATCH' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    },
-    parseProduct,
+    '/template/suggestion?' + params.toString(),
+    { signal },
+    parseSuggestion,
   );
+}
+export function createProduct(input: ProductInput): Promise<Product> {
+  return request('', json('POST', input), parseProduct);
+}
+export function updateProduct(
+  id: string,
+  input: ProductUpdate,
+): Promise<Product> {
+  return request('/' + id, json('PATCH', input), parseProduct);
+}
+export function moveProduct(
+  id: string,
+  templateRowId: string,
+): Promise<Product> {
+  return request(`/${id}/move`, json('PATCH', { templateRowId }), parseProduct);
 }
 export function setProductActive(
   id: string,
