@@ -1165,3 +1165,14 @@ Estos últimos conservan listado y descarga de otras personas desde
 usuario desde el JWT; no aceptan filtros de identidad. Ajena, inexistente
 o sin reparto pagado responde 404. Descarga auditada y sin caché. El PDF
 se genera desde el snapshot de T13, conservando el historial de local.
+
+## Productos de inventario (SPRINT-5-T03)
+
+`/products` administra el catálogo de inventario. Crear, editar, desactivar y reactivar son del ADMINISTRADOR; el SUPERVISOR consulta los productos activos (`GET /products` y `GET /products/sections`).
+
+- **Formato:** unidad (`UNIT`, `KG`, `L`), nombre del paquete, paquetes por caja, contenido por paquete y por caja, como texto decimal con hasta 3 decimales. Si se informan paquetes por caja y contenido por paquete, el contenido por caja se calcula (2 × 2,5 kg = 5 kg), y un valor que lo contradiga responde 400 con el error en `errors.boxContent`. «Solo cantidad suelta» no admite caja ni paquete.
+- **Nombre no repetido** (409), sin distinguir mayúsculas ni tildes. Solo se valida al crear o al renombrar, así que los repetidos de la plantilla («Lata Fanta Zero») se pueden editar. El SKU es opcional, lo entrega el proveedor, y debe ser único.
+- **Ubicación en la plantilla:** un producto nuevo ocupa la primera fila «<Vacío>» libre de su sección. Si no queda ninguna, se agrega una fila nueva desde la posición 1000, con texto «<Vacío>» y su sección. La carga de la plantilla (SPRINT-5-T02) ignora esas posiciones, y el Excel (SPRINT-5-T08) debe ubicarlas antes del cierre de su sección.
+- **Contrato con la plantilla:** la API nunca modifica `printed_text`. Renombrar cambia el producto y conserva su fila. Un artículo impreso en la plantilla no se puede mover de sección (409); los ubicados en filas «<Vacío>» sí.
+- **Desactivar no borra:** el producto conserva su fila y sus tomas, y deja de aparecer para el supervisor y en tomas nuevas.
+- **Auditoría:** `PRODUCT_CREATED`, `PRODUCT_UPDATED`, `PRODUCT_DEACTIVATED` y `PRODUCT_REACTIVATED`, con `detail.before` y `detail.after`.
