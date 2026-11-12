@@ -713,6 +713,13 @@ blanco queda en el repositorio como fixture y el test
   producto se renombra y conserva su id y su formato; un `<Vacío>` que pasa a
   artículo crea su producto, y un artículo que pasa a `<Vacío>` se desvincula
   sin borrar el producto.
+- La plantilla solo pisa al administrador cuando cambia su texto.
+  `printed_text` guarda siempre el texto de la última plantilla cargada: la
+  API de productos (SPRINT-5-T03) edita el producto y su asignación a la fila,
+  nunca `printed_text`. Así, un producto que el administrador ubica en una
+  fila `<Vacío>` o renombra se conserva en cada despliegue.
+- Toda la sincronización corre en una transacción: un error de la base no
+  deja la plantilla a medias.
 - Si la plantilla cambia el tipo de una fila existente, la carga se detiene
   antes de escribir nada (las filas son fijas).
 
