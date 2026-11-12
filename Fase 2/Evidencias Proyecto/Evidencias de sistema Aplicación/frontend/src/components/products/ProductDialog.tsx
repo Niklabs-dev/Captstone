@@ -157,7 +157,10 @@ export function ProductDialog({
   async function submit(event: FormEvent<HTMLFormElement>): Promise<undefined> {
     event.preventDefault();
     if (busy) return;
-    const result = productInputFromForm(values);
+    const result = productInputFromForm(
+      values,
+      action.kind === 'create' ? 'create' : 'edit',
+    );
     if ('errors' in result) {
       setClientErrors(result.errors);
       window.setTimeout(
@@ -371,7 +374,7 @@ export function ProductDialog({
                 <option value="">
                   {action.kind === 'create'
                     ? 'La que sugiera la API'
-                    : 'Sin fila'}
+                    : 'Elige una fila'}
                 </option>
                 {rowOptions.map((option) => (
                   <option key={option.id} value={option.id}>

@@ -423,15 +423,20 @@ export function productFormValues(
 
 // Valida el formulario en el navegador y arma el cuerpo de la API. El
 // contenido por caja y el del paquete son independientes; los paquetes por
-// caja son solo informativos.
+// caja son solo informativos. Al editar, la fila es obligatoria: cambiar la
+// sección exige elegir una fila libre de la nueva sección (mover el producto)
+// y un producto sin fila se ubica al guardarlo.
 export function productInputFromForm(
   values: ProductFormValues,
+  mode: 'create' | 'edit' = 'create',
 ): { input: ProductInput } | { errors: ProductFieldErrors } {
   const errors: ProductFieldErrors = {};
   const name = values.name.trim().replace(/\s+/g, ' ');
   if (!name) errors.name = 'Ingresa el nombre del producto.';
   else if (name.length > 120) errors.name = 'Máximo 120 caracteres.';
   if (!values.section) errors.section = 'Selecciona la sección.';
+  else if (mode === 'edit' && !values.templateRowId)
+    errors.templateRowId = `Elige una fila libre de «${values.section}».`;
   if (!isUnit(values.unit)) errors.unit = 'Selecciona la unidad.';
   const sku = values.sku.trim();
   if (sku.length > 40) errors.sku = 'Máximo 40 caracteres.';
@@ -669,4 +674,11 @@ export function productErrorMessage(status: number): string {
     503: 'No se pudo conectar con el servicio. Conservamos lo que escribiste.',
   };
   return messages[status] ?? messages[502];
+}
+
+// Mensaje al cargar el listado: no hay nada escrito que conservar.
+export function productLoadErrorMessage(status: number): string {
+  return status === 503
+    ? 'No se pudo conectar con el servicio. Intenta nuevamente.'
+    : productErrorMessage(status);
 }

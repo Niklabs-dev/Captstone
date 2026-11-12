@@ -25,6 +25,7 @@ import {
   creationProgress,
   formatSummary,
   productErrorMessage,
+  productLoadErrorMessage,
   productUpdate,
   type CatalogEntry,
   type Product,
@@ -93,10 +94,9 @@ export function ProductsPanel(): ReactElement {
         if (!controller.signal.aborted)
           setState({
             status: 'error',
-            message:
-              cause instanceof ProductRequestError
-                ? cause.message
-                : productErrorMessage(503),
+            message: productLoadErrorMessage(
+              cause instanceof ProductRequestError ? cause.status : 503,
+            ),
           });
       },
     );
@@ -176,7 +176,14 @@ export function ProductsPanel(): ReactElement {
       setAction(null);
       reload();
     } catch (cause) {
-      fail(cause);
+      // Reactivar un producto sin fila responde 409 con el motivo en
+      // templateRowId: el diálogo de confirmación no tiene ese campo.
+      const rowError =
+        cause instanceof ProductRequestError
+          ? cause.fieldErrors?.templateRowId
+          : undefined;
+      if (rowError) setDialogError(rowError);
+      else fail(cause);
     } finally {
       inFlight.current = false;
       setBusy(false);
