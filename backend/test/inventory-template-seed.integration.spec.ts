@@ -91,7 +91,11 @@ describe.skipIf(!databaseUrl)(
 
         const result = await seedInventoryTemplate(tx, TEMPLATE, STRUCTURE);
 
-        expect(result).toEqual({ rowsCreated: 8, rowsKept: 0 });
+        expect(result).toEqual({
+          rowsCreated: 8,
+          rowsKept: 0,
+          textDifferences: [],
+        });
         const rows = await templateRows(tx);
         expect(
           rows.map((r) => [
@@ -128,7 +132,11 @@ describe.skipIf(!databaseUrl)(
 
         const second = await seedInventoryTemplate(tx, TEMPLATE, STRUCTURE);
 
-        expect(second).toEqual({ rowsCreated: 0, rowsKept: 8 });
+        expect(second).toEqual({
+          rowsCreated: 0,
+          rowsKept: 8,
+          textDifferences: [],
+        });
         expect(await templateRows(tx)).toEqual(before);
       });
     });
@@ -156,7 +164,23 @@ describe.skipIf(!databaseUrl)(
 
         const result = await seedInventoryTemplate(tx, changed, STRUCTURE);
 
-        expect(result).toEqual({ rowsCreated: 0, rowsKept: 8 });
+        // Las diferencias se informan, pero no se aplican.
+        expect(result).toEqual({
+          rowsCreated: 0,
+          rowsKept: 8,
+          textDifferences: [
+            {
+              position: P,
+              current: 'Carne Fajita (Beef Steak Saborizado)',
+              template: 'Otro texto',
+            },
+            {
+              position: P + 1,
+              current: 'Atún Preparado (nuevo)',
+              template: 'Atún (Preparado)',
+            },
+          ],
+        });
         const rows = await templateRows(tx);
         expect(rows[0]).toMatchObject({
           printedText: 'Carne Fajita (Beef Steak Saborizado)',
@@ -166,6 +190,40 @@ describe.skipIf(!databaseUrl)(
         expect(
           await tx.product.findUnique({ where: { id: product.id } }),
         ).toMatchObject({ name: 'Carne Fajita Proveedor' });
+      });
+    });
+
+    it('informa sin aplicar el texto que cambió en una plantilla actualizada', async () => {
+      await withinRollback(async (tx) => {
+        await seedInventoryTemplate(tx, TEMPLATE, STRUCTURE);
+        // La plantilla nueva cambia el texto de una fila libre y de una sección.
+        const updated = TEMPLATE.map((row) => {
+          if (row.position === P + 5) {
+            return { ...row, text: 'Lata Fanta Zero 350 ml' };
+          }
+          if (row.position === P + 7) {
+            return { ...row, text: 'COSTO BEBIDAS' };
+          }
+          return row;
+        });
+
+        const result = await seedInventoryTemplate(tx, updated, STRUCTURE);
+
+        expect(result.textDifferences).toEqual([
+          {
+            position: P + 5,
+            current: 'Lata Fanta Zero',
+            template: 'Lata Fanta Zero 350 ml',
+          },
+          {
+            position: P + 7,
+            current: 'COSTO DE BEBIDAS',
+            template: 'COSTO BEBIDAS',
+          },
+        ]);
+        const rows = await templateRows(tx);
+        expect(rows[5].printedText).toBe('Lata Fanta Zero');
+        expect(rows[7].printedText).toBe('COSTO DE BEBIDAS');
       });
     });
 
@@ -180,7 +238,11 @@ describe.skipIf(!databaseUrl)(
 
         const result = await seedInventoryTemplate(tx, TEMPLATE, STRUCTURE);
 
-        expect(result).toEqual({ rowsCreated: 3, rowsKept: 5 });
+        expect(result).toEqual({
+          rowsCreated: 3,
+          rowsKept: 5,
+          textDifferences: [],
+        });
         expect(await templateRows(tx)).toHaveLength(8);
       });
     });
@@ -229,7 +291,11 @@ describe.skipIf(!databaseUrl)(
 
         const second = await seedInventoryTemplate(tx, INVENTORY_TEMPLATE_ROWS);
 
-        expect(second).toEqual({ rowsCreated: 0, rowsKept: 182 });
+        expect(second).toEqual({
+          rowsCreated: 0,
+          rowsKept: 182,
+          textDifferences: [],
+        });
         const rows = await tx.inventoryTemplateRow.findMany({
           where: { position: { gte: 2, lte: 183 } },
           orderBy: { position: 'asc' },

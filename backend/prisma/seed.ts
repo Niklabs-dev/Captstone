@@ -709,6 +709,24 @@ async function main(): Promise<void> {
         `${INVENTORY_TEMPLATE_ROWS.length} filas; ${plantilla.rowsCreated} creadas y ` +
         `${plantilla.rowsKept} sin cambios (no crea productos).`,
     );
+    const differences = plantilla.textDifferences.length;
+    if (differences > 0) {
+      // No se sobrescriben: el texto vigente lo mantiene el administrador.
+      console.warn(
+        `Aviso: ${differences === 1 ? '1 fila' : `${differences} filas`} de la ` +
+          `plantilla con un texto en la base distinto al del repositorio; no se ` +
+          `modificaron. ` +
+          `Si la plantilla cambió, el administrador corrige el texto de cada ` +
+          `fila desde la aplicación:\n` +
+          plantilla.textDifferences
+            .map(
+              (d) =>
+                `- fila ${d.position}: «${d.current ?? ''}» en la base, ` +
+                `«${d.template ?? ''}» en la plantilla`,
+            )
+            .join('\n'),
+      );
+    }
     if (options.includeDemoData === true) {
       console.log(
         `Fixtures demo de propinas sincronizadas (SPRINT-3-T09) en ` +
