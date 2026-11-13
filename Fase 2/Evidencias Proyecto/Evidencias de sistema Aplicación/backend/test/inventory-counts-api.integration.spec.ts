@@ -605,6 +605,15 @@ describe.skipIf(!databaseUrl)(
           data: { isActive: false },
         });
         expect(await search(`sar-${f.suffix}`)).toEqual([f.descaler]);
+        // Su línea se puede corregir (un desactivado sin línea da 409).
+        const corrected = await save(f.supervisorA, countId, f.descaler, {
+          boxes: 3,
+        }).expect(200);
+        expect((corrected.body as InventoryCountItem).line).toMatchObject({
+          id: mine[1].line?.id,
+          countedQuantity: '144',
+        });
+
         // Finalizada (simulada en la base: la finalización es de T06), solo
         // muestra sus líneas y no admite cambios.
         await f.tx.inventoryCount.update({
@@ -626,7 +635,14 @@ describe.skipIf(!databaseUrl)(
           finalizedBy: { id: f.supervisorA.id },
           totalProducts: 1,
         });
-        await save(f.supervisorA, countId, f.fajita, { boxes: 1 }).expect(409);
+        const locked = await save(f.supervisorA, countId, f.fajita, {
+          boxes: 1,
+        }).expect(409);
+        expect(locked.body).toMatchObject({
+          statusCode: 409,
+          message: 'La toma de inventario está finalizada',
+          errors: { countId: 'La toma está finalizada: no admite cambios' },
+        });
       });
     }, 60_000);
 

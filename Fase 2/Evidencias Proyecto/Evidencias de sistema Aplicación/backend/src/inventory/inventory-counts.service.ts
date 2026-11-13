@@ -223,6 +223,12 @@ export class InventoryCountsService {
     } catch (error) {
       if (isUniqueViolation(error)) {
         await this.assertNoOpenCount(this.prisma, storeId);
+        // La toma que chocó ya no existe (otra transacción revirtió entre
+        // medio): conflicto genérico, nunca un 500.
+        throw fieldErrors(409, 'Otra toma de este local se estaba iniciando', {
+          store:
+            'Vuelve a intentarlo: otra toma de tu local se estaba iniciando',
+        });
       }
       throw error;
     }
@@ -319,16 +325,25 @@ export class InventoryCountsService {
       }
       this.assertStoreAccess(locked[0].store_id, user);
       if (locked[0].status !== InventoryCountStatus.OPEN) {
-        throw new ConflictException(
-          'La toma de inventario está finalizada: no admite cambios',
-        );
+        throw fieldErrors(409, 'La toma de inventario está finalizada', {
+          countId: 'La toma está finalizada: no admite cambios',
+        });
       }
       const product = await readProduct(tx, productId);
+      // Un producto desactivado no se empieza a contar, pero si ya tiene
+      // línea en esta toma se puede corregir: la consulta la sigue mostrando
+      // y no debe pasar con un error de tipeo a la toma finalizada.
       if (!product.isActive) {
-        throw fieldErrors(409, 'El producto está desactivado', {
-          productId:
-            'El producto está desactivado: ya no se cuenta en las tomas',
+        const existing = await tx.inventoryCountLine.findUnique({
+          where: { countId_productId: { countId, productId } },
+          select: { id: true },
         });
+        if (existing === null) {
+          throw fieldErrors(409, 'El producto está desactivado', {
+            productId:
+              'El producto está desactivado: ya no se cuenta en las tomas',
+          });
+        }
       }
       const result = resolveCountLine(product, {
         boxes: dto.boxes,
