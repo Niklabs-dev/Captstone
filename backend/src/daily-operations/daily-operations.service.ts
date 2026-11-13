@@ -16,6 +16,7 @@ import {
 import { sanitizeFileName } from '../documents/utils/file-name.util.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { triggerErrorInfo } from '../prisma/utils/database-error.util.js';
 import { StoresService } from '../stores/stores.service.js';
 import { DailyVoucherStorageService } from './daily-voucher-storage.service.js';
 import type { CreateDailyOperationDto } from './dto/create-daily-operation.dto.js';
@@ -177,36 +178,11 @@ interface CorrectionPlan {
 }
 
 // Los triggers de SPRINT-4R-T02 rechazan con RAISE EXCEPTION (ERRCODE
-// check_violation / insufficient_privilege): Prisma los expone como P2039 con
-// el código y mensaje originales del driver. Se normalizan aquí para mapearlos
-// a un error HTTP claro (los rechazos de validación propia llegan antes, pero
-// una carrera —ej. un trabajador desactivado entre la validación y el INSERT—
+// check_violation / insufficient_privilege): triggerErrorInfo
+// (prisma/utils/database-error.util.ts) los normaliza para mapearlos a un
+// error HTTP claro (los rechazos de validación propia llegan antes, pero una
+// carrera —ej. un trabajador desactivado entre la validación y el INSERT—
 // solo la puede cerrar la base).
-function triggerErrorInfo(
-  error: unknown,
-): { code: string; message: string } | null {
-  if (
-    !(error instanceof Prisma.PrismaClientKnownRequestError) ||
-    error.code !== 'P2039'
-  ) {
-    return null;
-  }
-  const meta = error.meta as
-    | {
-        driverAdapterError?: {
-          cause?: { originalCode?: unknown; originalMessage?: unknown };
-        };
-      }
-    | undefined;
-  const cause = meta?.driverAdapterError?.cause;
-  if (
-    typeof cause?.originalCode !== 'string' ||
-    typeof cause.originalMessage !== 'string'
-  ) {
-    return null;
-  }
-  return { code: cause.originalCode, message: cause.originalMessage };
-}
 
 @Injectable()
 export class DailyOperationsService {
