@@ -710,6 +710,36 @@ Uso desde la API (SPRINT-5-T05, `/inventory-counts`, sin cambios de schema):
 - Un producto con líneas de toma, movimientos o fila asignada no se borra (FK
   Restrict).
 
+Finalización desde la API (SPRINT-5-T06,
+`POST /inventory-counts/:id/finalize`, sin cambios de schema: las columnas y
+los triggers ya existen desde SPRINT-5-T01):
+
+- En una sola transacción, primero bloquea la toma con
+  `SELECT … FROM inventory_counts WHERE id = $1 FOR UPDATE` (dos
+  finalizaciones, o una y un guardado, se serializan; la que llega tarde
+  vuelve a leer la toma, la ve CONFIRMED y responde 409 sin insertar nada);
+  luego el bloqueo compartido del catálogo
+  (`pg_advisory_xact_lock_shared`, que los cambios de productos y de la
+  plantilla toman en exclusivo); después inserta una línea vacía por cada
+  producto activo sin línea y, al final, pasa la toma a CONFIRMED.
+- Línea vacía: `boxes`, `packages`, `loose_quantity` y `counted_quantity` en
+  NULL (CHECK `inventory_count_lines_counted_state`), con la copia de
+  `product_sku`, `product_name`, `unit`, `package_name`, `box_content`,
+  `packages_per_box`, `package_content` y `loose_only`; `saved_by_id` es quien
+  finalizó y `saved_at` lo pone el trigger.
+- `finalized_by_id` es el usuario de la sesión y `finalized_at` la fecha-hora
+  de la finalización. `template_snapshot` guarda un arreglo JSON con las filas
+  de la plantilla en el orden de la hoja:
+  `{ position, kind, printedText, section, productId, productName }`
+  (`productName` es el nombre del producto de la fila al finalizar; NULL en
+  filas sin producto).
+- Exige al menos una línea con cantidades. El rechazo del trigger por una
+  toma ya CONFIRMED (SQLSTATE `42501`, P2039), un deadlock (`40P01`) o un
+  conflicto de transacción (P2034) se traducen a 409
+  (`src/prisma/utils/database-error.util.ts`).
+- Al pasar a CONFIRMED la toma sale del índice parcial
+  `inventory_counts_store_id_open_key`, así que el local puede iniciar otra.
+
 ### Estructura de la plantilla (SPRINT-5-T02)
 
 El seed (`prisma/inventory-template.ts`, llamado desde `prisma/seed.ts`) carga
