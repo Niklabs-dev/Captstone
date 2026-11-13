@@ -106,6 +106,11 @@ export const AUDIT_ACTION = {
   // detalle guarda la fila antes y después (posición, texto y producto).
   INVENTORY_TEMPLATE_ROW_UPDATED: 'INVENTORY_TEMPLATE_ROW_UPDATED',
   INVENTORY_TEMPLATE_ROW_RELEASED: 'INVENTORY_TEMPLATE_ROW_RELEASED',
+  // Toma de inventario (SPRINT-5-T05): inicio de la toma del local del
+  // supervisor. El detalle registra la fecha de la toma; el local y el
+  // responsable van en el evento. Guardar líneas no se audita: cada línea
+  // registra quién la guardó y cuándo (saved_by_id y saved_at).
+  INVENTORY_COUNT_STARTED: 'INVENTORY_COUNT_STARTED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];
