@@ -1202,6 +1202,7 @@ se genera desde el snapshot de T13, conservando el historial de local.
 | `GET /inventory-counts/:id` | ADMINISTRADOR, SUPERVISOR | La toma con sus productos en el orden de la plantilla: formato, lo contado (`line`) y lo pendiente (`counted: false`, `line: null`), más `totalProducts`, `countedProducts` y `pendingProducts`. `search` filtra por nombre, nombre alternativo o SKU sin mayúsculas ni tildes (los totales no dependen de la búsqueda). |
 | `PUT /inventory-counts/:id/lines/:productId` | SUPERVISOR | Guarda lo contado de un producto en una toma En curso de su local. Guardar de nuevo el mismo producto reemplaza su línea. |
 | `POST /inventory-counts/:id/finalize` | SUPERVISOR | Finaliza una toma En curso de su local con al menos un producto contado (sin ninguno, 400 con `errors.countId`). Responde 200 con la toma (`status: CONFIRMED`, `finalizedAt`, `finalizedBy`) más `countedProducts`, `uncountedProducts` y `totalProducts`. Ver [Finalización](#finalización-de-la-toma-sprint-5-t06). |
+| `GET /inventory-counts/:id/export` | ADMINISTRADOR, SUPERVISOR | Descarga `inventario_<local>_<fecha>.xlsx` de una toma **finalizada** con el formato de la plantilla impresa (En curso, 409 con `errors.countId`). El SUPERVISOR solo las de su local. Ver [Descarga en Excel](#descarga-en-excel-de-la-toma-sprint-5-t08). |
 
 - **Total:** `cajas × contenido por caja + paquetes × contenido por paquete + cantidad suelta`, con aritmética decimal exacta (`Prisma.Decimal`, nunca float), sobre el formato vigente del producto, que la línea copia (SKU, nombre, unidad, nombre del paquete, contenidos, paquetes por caja y «solo cantidad suelta»). Editar después el producto no cambia la línea. Carne Fajita (caja de 5 kg, bolsa de 2,5 kg): 1 caja + 2 bolsas + 0,300 kg = `10.300`; 1 caja + 3 bolsas + 2,450 kg = `14.950`. Sobre Eliminador de Sarro (caja de 48): 1 caja + 6 = `54`. Las cantidades se devuelven como texto decimal exacto: enteras en `UNIT` y con 3 decimales en `KG` y `L`.
 - **Cantidades:** `boxes` y `packages` son enteros ≥ 0 (los paquetes no se limitan a los que trae una caja); `looseQuantity` es ≥ 0, con hasta 3 decimales y punto en `KG` y `L` y entera en `UNIT` (enviarla siempre como texto, `"0.300"`: un número JSON se lee por su texto, pero un cálculo en float del cliente como `0.1 + 0.2` se rechaza por tener más de 3 decimales). Un campo que no aplica se omite o va en `null`; hay que informar al menos uno (0 es un conteo válido). Se rechaza con 400 y errores por campo (`{ statusCode, message, errors }`): cajas en un producto sin contenido por caja, paquetes en uno sin contenido por paquete, cajas o paquetes en uno «solo cantidad suelta» (aunque sean 0), negativos, no numéricos, decimales en cajas o paquetes, más de 3 decimales o decimales en `UNIT`.
@@ -1223,3 +1224,26 @@ se genera desde el snapshot de T13, conservando el historial de local.
 - **Toma nueva:** al finalizar, el local queda sin toma En curso y puede iniciar otra.
 - **Concurrencia:** todo ocurre en una transacción que empieza con `SELECT … FROM inventory_counts WHERE id = $1 FOR UPDATE`, antes de insertar las líneas vacías: dos finalizaciones (o una finalización y un guardado) se serializan y la que llega tarde ve la toma finalizada y responde 409, sin líneas duplicadas. Luego toma el bloqueo compartido del catálogo (`pg_advisory_xact_lock_shared`, el mismo que usan en exclusivo los cambios de productos y de la plantilla), para copiar la plantilla y los productos activos sin que un cambio del catálogo se cruce. Si aun así la base rechaza la escritura —el trigger por una toma ya finalizada (SQLSTATE `42501`, que Prisma entrega como `P2039` con el código en `meta.driverAdapterError.cause.originalCode`), un deadlock (`40P01`) o un conflicto de transacción (`P2034`)— la API responde 409, nunca 500. La lectura de esos códigos está en `src/prisma/utils/database-error.util.ts`, compartida con la operación diaria.
 - **Pruebas:** `test/inventory-counts-api.integration.spec.ts` (flujo por HTTP dentro de `withinRollback`) y `test/inventory-count-finalize-concurrency.integration.spec.ts` (dos finalizaciones en paralelo, y una finalización con un guardado, con transacciones reales).
+
+### Descarga en Excel de la toma (SPRINT-5-T08)
+
+`GET /inventory-counts/:id/export` descarga la toma finalizada como `inventario_<local>_<fecha de la toma>.xlsx` (local en slug sin tildes ni espacios, fecha AAAA-MM-DD), con `Cache-Control: private, no-store`. Lo descargan el ADMINISTRADOR (cualquier local) y el SUPERVISOR (solo su local); CONTADOR y TRABAJADOR reciben 403. Una toma En curso responde 409 (`errors.countId`): su contenido todavía puede cambiar.
+
+- **Hoja «Inventario»:** replica la plantilla impresa (`docs/plantilla-inventario.xlsx`): encabezado en la fila 1, anchos, alto de filas y colores de la plantilla, y cada fila de `template_snapshot` en su misma posición (la fila n del Excel es la posición n), así cada artículo queda donde el local lo conoce.
+
+  | Columna | Encabezado | Contenido |
+  | --- | --- | --- |
+  | A | ARTÍCULO | Texto impreso de la fila |
+  | B | BULTO (CAJA) | Cajas contadas |
+  | C | BULTO RESTANTE (KG-LTRS) | Cajas × contenido por caja |
+  | D | PAQUETE (…) | Paquetes contados |
+  | E | UNIDAD RESTANTES (KG-LTRS) | Paquetes × contenido por paquete |
+  | F | LINEA Y UNIDADES (PESOS) | Cantidad suelta |
+  | G | RESTANTES (WISR CHILE) | Total contado (C + E + F) |
+
+  Las cantidades son celdas numéricas calculadas con `Prisma.Decimal` sobre la copia del formato de cada línea. Un artículo sin contar, una fila `<Vacío>` o una fila sin texto quedan con las celdas vacías, para distinguir «no se contó» de «se contó 0». Las líneas de productos que ya no tenían fila en la plantilla al finalizar van al final, cerradas por la fila «PRODUCTOS SIN FILA EN LA PLANTILLA». Todas las secciones van en negro (la copia no guarda el color de cada sección de la plantilla impresa).
+- **Hoja «Datos»:** local, fecha de la toma, estado, quién la inició y la finalizó con su fecha-hora en hora de Chile, y cuántos productos se contaron y cuántos no.
+- **Inmutable:** el archivo se arma solo con las copias de la finalización (`template_snapshot` y la copia del producto en cada línea): no cambia aunque después se edite el catálogo o la plantilla.
+- **Librería:** `write-excel-file`, la misma del Excel de propinas (ver `src/tips/export/daily-tips-xlsx.writer.ts`); el contenido lo arman funciones puras en `src/inventory/export/inventory-count-workbook.ts`.
+- **Auditoría:** `INVENTORY_COUNT_EXPORTED` (local, quién descargó y `detail` con `countDate`, `countedProducts` y `uncountedProducts`, sin cantidades).
+- **Pruebas:** `src/inventory/export/inventory-count-workbook.spec.ts` (contenido de las hojas) y `test/inventory-count-export.integration.spec.ts` (descarga por HTTP contra PostgreSQL, relectura del archivo, permisos e inmutabilidad).
