@@ -1,0 +1,175 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  Query,
+  Res,
+} from '@nestjs/common';
+import {
+  ApiBadRequestResponse,
+  ApiBearerAuth,
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
+import type { Response } from 'express';
+import { AUDIT_ACTION } from '../audit/constants/audit-actions.constants.js';
+import { Audited } from '../audit/decorators/audited.decorator.js';
+import { setAuditContext } from '../audit/utils/audit-context.util.js';
+import { ROLE } from '../auth/constants/roles.constants.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import type { AuthUser } from '../auth/types/auth.types.js';
+import {
+  InventoryCountDetailQueryDto,
+  ListInventoryCountsQueryDto,
+  SaveInventoryCountLineDto,
+  StartInventoryCountDto,
+} from './dto/inventory-count-request.dto.js';
+import {
+  InventoryCountConflictDto,
+  InventoryCountDetailDto,
+  InventoryCountItemDto,
+  InventoryCountSummaryDto,
+} from './dto/inventory-count-response.dto.js';
+import { ProductFieldErrorsDto } from './dto/product-response.dto.js';
+import { InventoryCountsService } from './inventory-counts.service.js';
+import type {
+  InventoryCountDetail,
+  InventoryCountItem,
+  InventoryCountSummary,
+} from './types/inventory-counts.types.js';
+
+// Tomas de inventario (SPRINT-5-T05). Iniciar y guardar líneas son del
+// SUPERVISOR, solo en su local; el ADMINISTRADOR consulta todas en solo
+// lectura; CONTADOR y TRABAJADOR reciben 403. La finalización es de
+// SPRINT-5-T06.
+@ApiTags('inventory-counts')
+@ApiBearerAuth()
+@ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
+@Controller('inventory-counts')
+export class InventoryCountsController {
+  constructor(private readonly counts: InventoryCountsService) {}
+
+  @Post()
+  @Roles(ROLE.SUPERVISOR)
+  @Audited({
+    action: AUDIT_ACTION.INVENTORY_COUNT_STARTED,
+    entityType: 'inventory_counts',
+    entityIdFrom: 'response.id',
+  })
+  @ApiOperation({
+    summary: 'Inicia la toma de inventario del local del supervisor',
+    description:
+      'Rol: SUPERVISOR. El local sale de la sesión, nunca del cuerpo. La fecha de la toma es la indicada (de hoy o de hasta 7 días atrás, MAX_COUNT_DATE_AGE_DAYS) o el día en curso en hora de Chile, y queda fija aunque la toma se finalice después de medianoche. Como máximo una toma En curso por local: si ya hay una responde 409 con su id (existingCountId) para retomarla. Queda en auditoría (INVENTORY_COUNT_STARTED).',
+  })
+  @ApiCreatedResponse({ type: InventoryCountSummaryDto })
+  @ApiBadRequestResponse({
+    description:
+      'Fecha inválida, posterior a hoy o de más de 7 días atrás (errors.countDate), o local inactivo.',
+    type: ProductFieldErrorsDto,
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Solo el SUPERVISOR inicia tomas, y solo si tiene un local asignado.',
+  })
+  @ApiConflictResponse({
+    description:
+      'Ya hay una toma En curso en el local: indica cuál es (existingCountId). Si otro inicio simultáneo chocó y ya no existe, 409 con errors.store para reintentar.',
+    type: InventoryCountConflictDto,
+  })
+  async start(
+    @Body() dto: StartInventoryCountDto,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<InventoryCountSummary> {
+    const count = await this.counts.start(dto, user);
+    setAuditContext(res, { detail: { countDate: count.countDate } });
+    return count;
+  }
+
+  @Get()
+  @Roles(ROLE.ADMINISTRADOR, ROLE.SUPERVISOR)
+  @ApiOperation({
+    summary: 'Lista las tomas de inventario por local, estado y fechas',
+    description:
+      'Roles: ADMINISTRADOR (todos los locales, o el de storeId) y SUPERVISOR (solo su local: otro storeId responde 403). Filtra por estado (OPEN «En curso» o CONFIRMED «Finalizado») y por rango de fechas de la toma (from y to inclusive). Ordenadas de la más reciente a la más antigua.',
+  })
+  @ApiOkResponse({ type: InventoryCountSummaryDto, isArray: true })
+  @ApiBadRequestResponse({
+    description: 'Filtros con formato inválido o rango de fechas invertido.',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'CONTADOR y TRABAJADOR no consultan tomas; un SUPERVISOR no ve otro local.',
+  })
+  findAll(
+    @Query() query: ListInventoryCountsQueryDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<InventoryCountSummary[]> {
+    return this.counts.findAll(query, user);
+  }
+
+  @Get(':id')
+  @Roles(ROLE.ADMINISTRADOR, ROLE.SUPERVISOR)
+  @ApiOperation({
+    summary: 'Consulta una toma con lo contado y lo pendiente',
+    description:
+      'Roles: ADMINISTRADOR (cualquier local, solo lectura) y SUPERVISOR (solo su local). Devuelve los productos en el orden de la plantilla, con su formato, la línea guardada (cajas, paquetes, cantidad suelta, total, quién y cuándo) o null si está pendiente. En curso incluye los productos activos más los que ya tengan línea; finalizada, solo sus líneas. search filtra por nombre, nombre alternativo o SKU sin distinguir mayúsculas ni tildes; totalProducts, countedProducts y pendingProducts no dependen de la búsqueda.',
+  })
+  @ApiOkResponse({ type: InventoryCountDetailDto })
+  @ApiBadRequestResponse({ description: 'El ID no es un UUID válido.' })
+  @ApiForbiddenResponse({
+    description:
+      'CONTADOR y TRABAJADOR no consultan tomas; un SUPERVISOR no ve otro local.',
+  })
+  @ApiNotFoundResponse({ description: 'Toma de inventario no encontrada.' })
+  findOne(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query() query: InventoryCountDetailQueryDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<InventoryCountDetail> {
+    return this.counts.findOne(id, query, user);
+  }
+
+  @Put(':id/lines/:productId')
+  @Roles(ROLE.SUPERVISOR)
+  @ApiOperation({
+    summary: 'Guarda lo contado de un producto en la toma',
+    description:
+      'Rol: SUPERVISOR, solo en una toma En curso de su local. Guarda las cajas, los paquetes y la cantidad suelta; guardar de nuevo el mismo producto reemplaza su línea (no la duplica). El total = cajas × contenido por caja + paquetes × contenido por paquete + cantidad suelta se calcula en el backend con aritmética decimal exacta y se guarda con la copia del SKU, el nombre, la unidad y el formato del producto. Registra quién guardó (sesión) y cuándo (la base). Un campo que no aplica al formato se omite o va en null. Un producto desactivado solo se guarda si ya tenía línea en esta toma (para corregirla).',
+  })
+  @ApiOkResponse({ type: InventoryCountItemDto })
+  @ApiBadRequestResponse({
+    description:
+      'IDs inválidos, o cantidades inválidas para el formato (errores por campo): cajas sin contenido por caja, paquetes sin contenido por paquete, cajas o paquetes en un producto «solo cantidad suelta», negativos, no numéricos, decimales en cajas o paquetes, más de 3 decimales, decimales en UNIT o ningún campo informado.',
+    type: ProductFieldErrorsDto,
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Solo el SUPERVISOR guarda, y solo en su local (el ADMINISTRADOR consulta en solo lectura).',
+  })
+  @ApiNotFoundResponse({ description: 'Toma o producto no encontrados.' })
+  @ApiConflictResponse({
+    description:
+      'La toma está finalizada (errors.countId) o el producto está desactivado y no tiene línea en esta toma (errors.productId). Un producto desactivado que ya tenía línea se puede corregir.',
+    type: ProductFieldErrorsDto,
+  })
+  saveLine(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('productId', new ParseUUIDPipe()) productId: string,
+    @Body() dto: SaveInventoryCountLineDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<InventoryCountItem> {
+    return this.counts.saveLine(id, productId, dto, user);
+  }
+}

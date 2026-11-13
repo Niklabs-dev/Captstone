@@ -84,6 +84,10 @@ const API_TAGS: ReadonlyArray<readonly [name: string, description: string]> = [
     'Catálogo de productos de inventario: el ADMINISTRADOR crea, edita, desactiva y reactiva productos con su formato de caja y paquete; el SUPERVISOR consulta los activos.',
   ],
   [
+    'inventory-counts',
+    'Toma de inventario por local: el SUPERVISOR inicia la toma de su local y guarda por producto las cajas, los paquetes y la cantidad suelta (el total lo calcula el backend); el ADMINISTRADOR consulta las de todos los locales en solo lectura.',
+  ],
+  [
     'cash-closings',
     'Histórico de solo lectura de los cierres de caja por turno (anteriores a la operación diaria).',
   ],
