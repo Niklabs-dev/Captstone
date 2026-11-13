@@ -1197,7 +1197,7 @@ se genera desde el snapshot de T13, conservando el historial de local.
 
 | Endpoint | Rol | Descripción |
 | --- | --- | --- |
-| `POST /inventory-counts` | SUPERVISOR | Inicia la toma de **su** local (el local sale de la sesión; un `storeId` en el cuerpo responde 400). `countDate` opcional (AAAA-MM-DD, no posterior a hoy); por defecto, el día en curso en hora de Chile. Si ya hay una En curso en el local, 409 con `existingCountId` y `existingCountDate` para retomarla. |
+| `POST /inventory-counts` | SUPERVISOR | Inicia la toma de **su** local (el local sale de la sesión; un `storeId` en el cuerpo responde 400). `countDate` opcional (AAAA-MM-DD): de hoy o de hasta 7 días atrás en hora de Chile (`MAX_COUNT_DATE_AGE_DAYS`, la toma es semanal); fuera de ese rango, 400 con `errors.countDate`. Por defecto, el día en curso. Si ya hay una En curso en el local, 409 con `existingCountId` y `existingCountDate` para retomarla. |
 | `GET /inventory-counts` | ADMINISTRADOR, SUPERVISOR | Tomas por `storeId`, `status` (`OPEN` «En curso» o `CONFIRMED` «Finalizado») y rango `from`/`to` de la fecha de la toma (inclusive), de la más reciente a la más antigua. El SUPERVISOR solo ve su local (otro `storeId`, 403). |
 | `GET /inventory-counts/:id` | ADMINISTRADOR, SUPERVISOR | La toma con sus productos en el orden de la plantilla: formato, lo contado (`line`) y lo pendiente (`counted: false`, `line: null`), más `totalProducts`, `countedProducts` y `pendingProducts`. `search` filtra por nombre, nombre alternativo o SKU sin mayúsculas ni tildes (los totales no dependen de la búsqueda). |
 | `PUT /inventory-counts/:id/lines/:productId` | SUPERVISOR | Guarda lo contado de un producto en una toma En curso de su local. Guardar de nuevo el mismo producto reemplaza su línea. |
