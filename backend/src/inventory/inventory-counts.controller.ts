@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Post,
@@ -38,6 +39,7 @@ import {
 import {
   InventoryCountConflictDto,
   InventoryCountDetailDto,
+  InventoryCountFinalizationDto,
   InventoryCountItemDto,
   InventoryCountSummaryDto,
 } from './dto/inventory-count-response.dto.js';
@@ -45,14 +47,14 @@ import { ProductFieldErrorsDto } from './dto/product-response.dto.js';
 import { InventoryCountsService } from './inventory-counts.service.js';
 import type {
   InventoryCountDetail,
+  InventoryCountFinalization,
   InventoryCountItem,
   InventoryCountSummary,
 } from './types/inventory-counts.types.js';
 
-// Tomas de inventario (SPRINT-5-T05). Iniciar y guardar líneas son del
-// SUPERVISOR, solo en su local; el ADMINISTRADOR consulta todas en solo
-// lectura; CONTADOR y TRABAJADOR reciben 403. La finalización es de
-// SPRINT-5-T06.
+// Tomas de inventario (SPRINT-5-T05). Iniciar, guardar líneas y finalizar
+// (SPRINT-5-T06) son del SUPERVISOR, solo en su local; el ADMINISTRADOR
+// consulta todas en solo lectura; CONTADOR y TRABAJADOR reciben 403.
 @ApiTags('inventory-counts')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
@@ -171,5 +173,50 @@ export class InventoryCountsController {
     @CurrentUser() user: AuthUser,
   ): Promise<InventoryCountItem> {
     return this.counts.saveLine(id, productId, dto, user);
+  }
+
+  @Post(':id/finalize')
+  @HttpCode(200)
+  @Roles(ROLE.SUPERVISOR)
+  @Audited({
+    action: AUDIT_ACTION.INVENTORY_COUNT_FINALIZED,
+    entityType: 'inventory_counts',
+    entityIdFrom: 'response.id',
+  })
+  @ApiOperation({
+    summary: 'Finaliza la toma de inventario y bloquea sus cambios',
+    description:
+      'Rol: SUPERVISOR, solo en una toma En curso de su local, con al menos un producto contado. Registra quién la finalizó (sesión) y cuándo. Los productos activos sin contar quedan con una línea sin cantidades, con la copia de su nombre, SKU y formato, y la toma guarda la copia de la estructura de la plantilla: el Excel de la toma no cambia aunque después se edite el catálogo o la plantilla. La respuesta informa cuántos productos se contaron (countedProducts) y cuántos no (uncountedProducts). Desde ese momento guardar líneas responde 409 (y la base rechaza cualquier escritura sobre la toma o sus líneas) y el local puede iniciar una toma nueva. Finalizar dos veces o en paralelo no duplica líneas: una responde 200 y la otra 409. Queda en auditoría (INVENTORY_COUNT_FINALIZED).',
+  })
+  @ApiOkResponse({ type: InventoryCountFinalizationDto })
+  @ApiBadRequestResponse({
+    description:
+      'El ID no es un UUID válido, o la toma no tiene ningún producto contado (errors.countId).',
+    type: ProductFieldErrorsDto,
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Solo el SUPERVISOR finaliza, y solo tomas de su local (el ADMINISTRADOR consulta en solo lectura).',
+  })
+  @ApiNotFoundResponse({ description: 'Toma de inventario no encontrada.' })
+  @ApiConflictResponse({
+    description:
+      'La toma ya está finalizada (errors.countId), también si otra finalización simultánea ganó la carrera o la base rechazó la escritura; o bien otra solicitud estaba escribiendo la toma en ese momento (deadlock o conflicto de transacción): vuelve a consultarla. Nunca 500.',
+    type: ProductFieldErrorsDto,
+  })
+  async finalize(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<InventoryCountFinalization> {
+    const count = await this.counts.finalize(id, user);
+    setAuditContext(res, {
+      detail: {
+        countDate: count.countDate,
+        countedProducts: count.countedProducts,
+        uncountedProducts: count.uncountedProducts,
+      },
+    });
+    return count;
   }
 }

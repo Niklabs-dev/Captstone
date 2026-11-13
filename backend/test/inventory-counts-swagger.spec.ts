@@ -14,8 +14,9 @@ interface SchemaObject {
   >;
 }
 
-// Contrato OpenAPI de la toma de inventario (SPRINT-5-T05): JWT, resumen en
-// español con los roles, respuestas de error y DTOs tipados.
+// Contrato OpenAPI de la toma de inventario (SPRINT-5-T05) y su finalización
+// (SPRINT-5-T06): JWT, resumen en español con los roles, respuestas de error
+// y DTOs tipados.
 describe('Swagger de la toma de inventario (SPRINT-5-T05)', () => {
   let app: INestApplication;
   let document: OpenAPIObject;
@@ -77,6 +78,12 @@ describe('Swagger de la toma de inventario (SPRINT-5-T05)', () => {
       roles: 'SUPERVISOR',
       statuses: ['200', '400', '401', '403', '404', '409'],
     },
+    {
+      method: 'post' as const,
+      path: '/inventory-counts/{id}/finalize',
+      roles: 'SUPERVISOR',
+      statuses: ['200', '400', '401', '403', '404', '409'],
+    },
   ])(
     '$method $path documenta JWT, roles y respuestas',
     ({ method, path, roles, statuses }) => {
@@ -88,6 +95,31 @@ describe('Swagger de la toma de inventario (SPRINT-5-T05)', () => {
       expect(Object.keys(op.responses).sort()).toEqual([...statuses].sort());
     },
   );
+
+  it('la finalización responde la toma con lo contado y lo no contado, y queda auditada', () => {
+    const op = operation('post', '/inventory-counts/{id}/finalize');
+    expect(op.summary).toBe(
+      'Finaliza la toma de inventario y bloquea sus cambios',
+    );
+    expect(op.description).toContain('INVENTORY_COUNT_FINALIZED');
+    const ok = op.responses['200'] as {
+      content: Record<string, { schema: { $ref: string } }>;
+    };
+    expect(ok.content['application/json'].schema.$ref).toBe(
+      '#/components/schemas/InventoryCountFinalizationDto',
+    );
+    const finalization = schema('InventoryCountFinalizationDto');
+    expect(Object.keys(finalization.properties)).toEqual(
+      expect.arrayContaining([
+        'status',
+        'finalizedAt',
+        'finalizedBy',
+        'countedProducts',
+        'uncountedProducts',
+        'totalProducts',
+      ]),
+    );
+  });
 
   it('el 409 del inicio indica la toma en curso', () => {
     expect(Object.keys(schema('InventoryCountConflictDto').properties)).toEqual(
@@ -119,6 +151,7 @@ describe('Swagger de la toma de inventario (SPRINT-5-T05)', () => {
     for (const name of [
       'InventoryCountSummaryDto',
       'InventoryCountDetailDto',
+      'InventoryCountFinalizationDto',
       'InventoryCountItemDto',
       'InventoryCountLineDto',
       'SaveInventoryCountLineDto',

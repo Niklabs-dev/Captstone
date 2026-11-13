@@ -111,6 +111,10 @@ export const AUDIT_ACTION = {
   // responsable van en el evento. Guardar líneas no se audita: cada línea
   // registra quién la guardó y cuándo (saved_by_id y saved_at).
   INVENTORY_COUNT_STARTED: 'INVENTORY_COUNT_STARTED',
+  // Finalización de la toma (SPRINT-5-T06): el supervisor del local la cierra
+  // y queda inmutable. El detalle registra la fecha de la toma y cuántos
+  // productos se contaron y cuántos no.
+  INVENTORY_COUNT_FINALIZED: 'INVENTORY_COUNT_FINALIZED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

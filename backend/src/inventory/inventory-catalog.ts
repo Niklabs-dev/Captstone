@@ -29,6 +29,15 @@ export async function lockCatalog(tx: Tx): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(${CATALOG_LOCK_KEY})`;
 }
 
+// Versión compartida del mismo bloqueo (SPRINT-5-T06): la finalización de una
+// toma copia la plantilla y los productos activos sin que un cambio del
+// catálogo se cruce a mitad de camino. Las finalizaciones de distintos
+// locales no se esperan entre sí; un cambio del catálogo espera a que
+// terminen (y viceversa).
+export async function lockCatalogShared(tx: Tx): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(${CATALOG_LOCK_KEY})`;
+}
+
 const ROW_SELECT = {
   id: true,
   position: true,
