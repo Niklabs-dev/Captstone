@@ -21,12 +21,14 @@ import {
 } from '@/components/ui/styles';
 import {
   buildCatalog,
-  countLabel,
+  canReleaseRow,
+  catalogSummary,
   creationProgress,
   formatSummary,
   productErrorMessage,
   productLoadErrorMessage,
   productUpdate,
+  templateRowTextError,
   type CatalogEntry,
   type Product,
   type ProductFieldErrors,
@@ -42,10 +44,13 @@ import {
   loadTemplate,
   moveProduct,
   ProductRequestError,
+  releaseTemplateRow,
   setProductActive,
   updateProduct,
+  updateTemplateRowText,
 } from '@/lib/products-client';
 import { ProductDialog, type ProductAction } from './ProductDialog';
+import { TemplateRowDialog, type TemplateRowAction } from './TemplateRowDialog';
 
 type State =
   | { status: 'loading' }
@@ -61,7 +66,9 @@ const HEADINGS = ['Fila', 'Producto', 'SKU', 'Formato', 'Estado', 'Acciones'];
 
 // Administración de productos de inventario (SPRINT-5-T04): listado en el
 // orden de la plantilla con los artículos que faltan por crear, filtros y
-// formulario de crear y editar.
+// formulario de crear y editar. SPRINT-5-T15 agrega corregir el texto de una
+// fila sin producto (pendiente o «<Vacío>») y liberar la fila de un producto
+// desactivado.
 export function ProductsPanel(): ReactElement {
   const [state, setState] = useState<State>({ status: 'loading' });
   const [revision, setRevision] = useState(0);
@@ -72,7 +79,9 @@ export function ProductsPanel(): ReactElement {
     missingSku: false,
     missingFormat: false,
   });
-  const [action, setAction] = useState<ProductAction | null>(null);
+  const [action, setAction] = useState<
+    ProductAction | TemplateRowAction | null
+  >(null);
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState('');
   const [serverErrors, setServerErrors] = useState<ProductFieldErrors>({});
@@ -103,7 +112,7 @@ export function ProductsPanel(): ReactElement {
     return () => controller.abort();
   }, [revision]);
 
-  function open(next: ProductAction): void {
+  function open(next: ProductAction | TemplateRowAction): void {
     setAction(next);
     setDialogError('');
     setServerErrors({});
@@ -125,7 +134,11 @@ export function ProductsPanel(): ReactElement {
   }
 
   async function save(input: ProductInput): Promise<undefined> {
-    if (inFlight.current || !action || action.kind === 'state') return;
+    if (
+      inFlight.current ||
+      (action?.kind !== 'create' && action?.kind !== 'edit')
+    )
+      return;
     inFlight.current = true;
     setBusy(true);
     setDialogError('');
@@ -190,6 +203,68 @@ export function ProductsPanel(): ReactElement {
     }
   }
 
+  // Corrige el texto de una fila sin producto. El error de la API (409, o
+  // 400 por campo) va junto al campo y el diálogo conserva lo escrito.
+  async function saveText(printedText: string): Promise<undefined> {
+    if (inFlight.current || action?.kind !== 'text') return;
+    inFlight.current = true;
+    setBusy(true);
+    setDialogError('');
+    setServerErrors({});
+    try {
+      const saved = await updateTemplateRowText(action.row.id, printedText);
+      setNotice(
+        saved.isEmptyRow
+          ? `La fila ${saved.position} de ${saved.section} quedó libre (<Vacío>).`
+          : `Fila ${saved.position} corregida: «${saved.printedText ?? ''}».`,
+      );
+      setAction(null);
+      reload();
+    } catch (cause) {
+      if (cause instanceof ProductRequestError) {
+        setDialogError(cause.message);
+        const fieldError = templateRowTextError(
+          cause.status,
+          cause.fieldErrors,
+        );
+        if (fieldError) setServerErrors({ printedText: fieldError });
+      } else setDialogError(productErrorMessage(503));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  // Libera la fila de un producto desactivado: queda «Sin fila en la
+  // plantilla». Si lo reactivaron mientras tanto, la API responde 409 con el
+  // motivo en templateRowId y se muestra en la confirmación.
+  async function release(): Promise<undefined> {
+    if (inFlight.current || action?.kind !== 'release') return;
+    const { product } = action;
+    if (!product.templateRowId) return;
+    inFlight.current = true;
+    setBusy(true);
+    setDialogError('');
+    try {
+      const saved = await releaseTemplateRow(product.templateRowId);
+      setNotice(
+        `Fila ${saved.position} liberada. «${product.name}» quedó en «Sin fila en la plantilla».`,
+      );
+      setAction(null);
+      reload();
+    } catch (cause) {
+      const rowError =
+        cause instanceof ProductRequestError
+          ? cause.fieldErrors?.templateRowId
+          : undefined;
+      if (rowError) setDialogError(rowError);
+      else fail(cause);
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
   const ready = state.status === 'ready' ? state : null;
   const sections = ready?.sections ?? [];
   const groups = ready ? buildCatalog(ready.rows, ready.products, filters) : [];
@@ -219,6 +294,10 @@ export function ProductsPanel(): ReactElement {
       : entry.product.name;
   }
   function status(entry: CatalogEntry): ReactElement {
+    if (entry.kind === 'pending' && entry.row.isEmptyRow)
+      return (
+        <span className={`${badgeClass} bg-info-bg text-info`}>Fila libre</span>
+      );
     if (entry.kind === 'pending')
       return (
         <span className={`${badgeClass} bg-tint2 text-ink2`}>
@@ -250,17 +329,29 @@ export function ProductsPanel(): ReactElement {
     );
   }
   function actions(entry: CatalogEntry): ReactElement {
-    if (entry.kind === 'pending')
+    if (entry.kind === 'pending') {
+      const { row } = entry;
       return (
-        <button
-          type="button"
-          onClick={() => open({ kind: 'create', row: entry.row })}
-          className={buttonClass}
-          aria-label={`Crear producto en la fila ${entry.row.position}, ${entry.row.printedText ?? ''}`}
-        >
-          Crear producto
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => open({ kind: 'create', row })}
+            className={buttonClass}
+            aria-label={`Crear producto en la fila ${row.position}, ${row.printedText ?? ''}`}
+          >
+            Crear producto
+          </button>
+          <button
+            type="button"
+            onClick={() => open({ kind: 'text', row })}
+            className={buttonClass}
+            aria-label={`Corregir texto de la fila ${row.position}, ${row.printedText ?? ''}`}
+          >
+            Corregir texto
+          </button>
+        </div>
       );
+    }
     const product = entry.product;
     return (
       <div className="flex flex-wrap gap-3">
@@ -280,6 +371,16 @@ export function ProductsPanel(): ReactElement {
         >
           {product.isActive ? 'Desactivar' : 'Activar'}
         </button>
+        {canReleaseRow(product) && (
+          <button
+            type="button"
+            onClick={() => open({ kind: 'release', product })}
+            className={buttonClass}
+            aria-label={`Liberar la fila de ${product.name}`}
+          >
+            Liberar fila
+          </button>
+        )}
       </div>
     );
   }
@@ -351,6 +452,7 @@ export function ProductsPanel(): ReactElement {
               <option value="pending">Pendientes de crear</option>
               <option value="inactive">Inactivos</option>
               <option value="all">Todos</option>
+              <option value="empty">Filas libres (&lt;Vacío&gt;)</option>
             </select>
           </label>
         </div>
@@ -408,10 +510,6 @@ export function ProductsPanel(): ReactElement {
       )}
 
       {groups.map((group) => {
-        const products = group.entries.filter(
-          (entry) => entry.kind === 'product',
-        ).length;
-        const pending = group.entries.length - products;
         return (
           <section
             key={group.id}
@@ -424,9 +522,7 @@ export function ProductsPanel(): ReactElement {
                   {group.section}
                 </h2>
                 <p className={tableDescriptionClass}>
-                  {countLabel(products, 'producto', 'productos')}
-                  {pending > 0 &&
-                    ` · ${countLabel(pending, 'pendiente', 'pendientes')}`}
+                  {catalogSummary(group.entries)}
                 </p>
               </div>
             </header>
@@ -525,24 +621,43 @@ export function ProductsPanel(): ReactElement {
         );
       })}
 
-      {action && ready && (
-        <ProductDialog
+      {(action?.kind === 'text' || action?.kind === 'release') && ready && (
+        <TemplateRowDialog
           key={
-            action.kind === 'create'
-              ? 'create' + (action.row?.id ?? '')
-              : action.product.id + action.kind
+            action.kind === 'text'
+              ? 'text' + action.row.id
+              : 'release' + action.product.id
           }
           action={action}
-          sections={sections}
-          rows={ready.rows}
           busy={busy}
           error={dialogError}
-          serverErrors={serverErrors}
+          fieldError={serverErrors.printedText ?? ''}
           onClose={close}
-          onSave={save}
-          onState={toggle}
+          onSaveText={saveText}
+          onRelease={release}
         />
       )}
+      {action &&
+        action.kind !== 'text' &&
+        action.kind !== 'release' &&
+        ready && (
+          <ProductDialog
+            key={
+              action.kind === 'create'
+                ? 'create' + (action.row?.id ?? '')
+                : action.product.id + action.kind
+            }
+            action={action}
+            sections={sections}
+            rows={ready.rows}
+            busy={busy}
+            error={dialogError}
+            serverErrors={serverErrors}
+            onClose={close}
+            onSave={save}
+            onState={toggle}
+          />
+        )}
     </div>
   );
 }

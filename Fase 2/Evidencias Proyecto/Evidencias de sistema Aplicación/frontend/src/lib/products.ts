@@ -42,7 +42,11 @@ export const PRODUCT_FIELDS = [
   'looseOnly',
 ] as const;
 export type ProductField = (typeof PRODUCT_FIELDS)[number];
-export type ProductFieldErrors = Partial<Record<ProductField, string>>;
+// Campos con errores que devuelve la API: los del producto y el texto de una
+// fila de la plantilla (SPRINT-5-T15).
+const ERROR_FIELDS = [...PRODUCT_FIELDS, 'printedText'] as const;
+export type ProductErrorField = (typeof ERROR_FIELDS)[number];
+export type ProductFieldErrors = Partial<Record<ProductErrorField, string>>;
 // Al editar no se cambian la sección ni la fila: se mueve aparte.
 const CREATE_ONLY_FIELDS: readonly ProductField[] = [
   'section',
@@ -211,14 +215,15 @@ function parseRowSummary(value: unknown): TemplateRowSummary | null {
     isEmptyRow: value.isEmptyRow,
   };
 }
+export function parseTemplateRow(value: unknown): TemplateRow | null {
+  const row = parseRowSummary(value);
+  if (!row || !isRecord(value)) return null;
+  if (value.product === null) return { ...row, product: null };
+  const product = parseProduct(value.product);
+  return product ? { ...row, product } : null;
+}
 export function parseTemplateRows(value: unknown): TemplateRow[] | null {
-  return list(value, (item) => {
-    const row = parseRowSummary(item);
-    if (!row || !isRecord(item)) return null;
-    if (item.product === null) return { ...row, product: null };
-    const product = parseProduct(item.product);
-    return product ? { ...row, product } : null;
-  });
+  return list(value, parseTemplateRow);
 }
 export function parseSuggestion(value: unknown): PlacementSuggestion | null {
   if (!isRecord(value)) return null;
@@ -278,12 +283,12 @@ export function parseFieldErrors(value: unknown): ProductFieldErrors | null {
   const errors: ProductFieldErrors = {};
   for (const [key, message] of Object.entries(value.errors)) {
     if (
-      (PRODUCT_FIELDS as readonly string[]).includes(key) &&
+      (ERROR_FIELDS as readonly string[]).includes(key) &&
       typeof message === 'string' &&
       message.trim() &&
       message.length <= 300
     )
-      errors[key as ProductField] = message;
+      errors[key as ProductErrorField] = message;
   }
   return Object.keys(errors).length ? errors : null;
 }
@@ -567,7 +572,11 @@ export function creationProgress(rows: readonly TemplateRow[]): {
   return { created, total: created + pending };
 }
 
-export type ProductStatusFilter = 'active' | 'inactive' | 'all' | 'pending';
+// «empty»: filas «<Vacío>» libres, para corregir su texto o crear en ellas
+// (SPRINT-5-T15). No se mezclan con los demás estados para no llenar el
+// listado de filas vacías.
+export type ProductStatusFilter =
+  'active' | 'inactive' | 'all' | 'pending' | 'empty';
 export interface ProductFilters {
   search: string;
   section: string;
@@ -587,6 +596,7 @@ function matchesProduct(product: Product, filters: ProductFilters): boolean {
   const search = comparable(filters.search);
   return (
     filters.status !== 'pending' &&
+    filters.status !== 'empty' &&
     (filters.status === 'all' ||
       product.isActive === (filters.status === 'active')) &&
     (!filters.missingSku || product.sku === null) &&
@@ -598,14 +608,17 @@ function matchesProduct(product: Product, filters: ProductFilters): boolean {
   );
 }
 // Los pendientes se muestran con los activos, con todos y en «Pendientes»;
-// no tienen SKU ni formato, así que esos filtros los ocultan.
-function matchesPending(
+// las filas «<Vacío>» libres, solo en su propio estado. No tienen SKU ni
+// formato, así que esos filtros los ocultan.
+function matchesFreeRow(
   row: TemplateRowSummary,
   filters: ProductFilters,
 ): boolean {
   const search = comparable(filters.search);
   return (
-    filters.status !== 'inactive' &&
+    (row.isEmptyRow
+      ? filters.status === 'empty'
+      : ['active', 'all', 'pending'].includes(filters.status)) &&
     !filters.missingSku &&
     !filters.missingFormat &&
     (!search || comparable(row.printedText ?? '').includes(search))
@@ -629,7 +642,7 @@ export function buildCatalog(
         : null;
       if (product && matchesProduct(product, filters))
         current.push({ kind: 'product', product });
-      else if (!product && !row.isEmptyRow && matchesPending(row, filters))
+      else if (!product && matchesFreeRow(row, filters))
         current.push({ kind: 'pending', row });
     } else if (row.kind === 'SECTION') {
       if (
@@ -660,6 +673,95 @@ export function buildCatalog(
       entries: orphans.map((product) => ({ kind: 'product', product })),
     });
   return groups;
+}
+
+// Conteo del encabezado de cada sección: productos, artículos pendientes y
+// filas «<Vacío>» libres.
+export function catalogCounts(entries: readonly CatalogEntry[]): {
+  products: number;
+  pending: number;
+  free: number;
+} {
+  const rows = entries.flatMap((entry) =>
+    entry.kind === 'pending' ? [entry.row] : [],
+  );
+  const free = rows.filter((row) => row.isEmptyRow).length;
+  return {
+    products: entries.length - rows.length,
+    pending: rows.length - free,
+    free,
+  };
+}
+
+// «2 productos · 1 pendiente · 3 filas libres»: los productos se omiten si
+// no hay ninguno y la sección muestra otras filas.
+export function catalogSummary(entries: readonly CatalogEntry[]): string {
+  const { products, pending, free } = catalogCounts(entries);
+  return [
+    products > 0 || pending + free === 0
+      ? countLabel(products, 'producto', 'productos')
+      : '',
+    pending > 0 ? countLabel(pending, 'pendiente', 'pendientes') : '',
+    free > 0 ? countLabel(free, 'fila libre', 'filas libres') : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+// Texto de las filas de artículo libres (lo usa la API: EMPTY_ITEM_TEXT).
+export const EMPTY_ROW_TEXT = '<Vacío>';
+export const TEMPLATE_TEXT_MAX = 120;
+
+// Corrección del texto de una fila de artículo sin producto (SPRINT-5-T15).
+// Normaliza espacios y acepta «vacío» o «<vacio>» como la fila libre
+// «<Vacío>», que es el texto exacto que la API reconoce.
+export function templateRowTextFromForm(
+  text: string,
+  current: string | null,
+): { printedText: string } | { error: string } {
+  const value = text.trim().replace(/\s+/g, ' ');
+  if (!value)
+    return {
+      error: `Ingresa el texto de la fila o ${EMPTY_ROW_TEXT} para dejarla libre.`,
+    };
+  if (value.length > TEMPLATE_TEXT_MAX)
+    return { error: `Máximo ${TEMPLATE_TEXT_MAX} caracteres.` };
+  const printedText = /^<?vacio>?$/.test(comparable(value))
+    ? EMPTY_ROW_TEXT
+    : value;
+  if (printedText === current)
+    return { error: 'Escribe un texto distinto al actual.' };
+  return { printedText };
+}
+
+// Cuerpo que el BFF reenvía al corregir el texto: solo printedText.
+export function parseTemplateRowTextInput(
+  value: unknown,
+): { printedText: string } | null {
+  return isRecord(value) &&
+    Object.keys(value).length === 1 &&
+    isText(value.printedText, TEMPLATE_TEXT_MAX)
+    ? { printedText: value.printedText.trim() }
+    : null;
+}
+
+// Error junto al campo de texto: el motivo de la API (409, o 400 por campo)
+// o, si la validación del DTO no lo detalla, el formato esperado.
+export function templateRowTextError(
+  status: number,
+  errors: ProductFieldErrors | null,
+): string | null {
+  if (errors?.printedText) return errors.printedText;
+  return status === 400
+    ? `Usa entre 1 y ${TEMPLATE_TEXT_MAX} caracteres.`
+    : null;
+}
+
+// Solo se libera la fila de un producto desactivado que todavía la ocupa.
+export function canReleaseRow(
+  product: Pick<Product, 'isActive' | 'templateRowId'>,
+): boolean {
+  return !product.isActive && product.templateRowId !== null;
 }
 
 export function productErrorMessage(status: number): string {
