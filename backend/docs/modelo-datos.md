@@ -686,6 +686,22 @@ Reglas que garantiza la base:
   (SPRINT-5-T06) lo traduce a 409.
 - `saved_at` lo asigna el mismo trigger (`now()`) en cada INSERT y UPDATE
   permitido; `saved_by_id` lo informa el servicio.
+
+Uso desde la API (SPRINT-5-T05, `/inventory-counts`, sin cambios de schema):
+
+- Iniciar la toma inserta `inventory_counts` con el local de la sesión del
+  supervisor, `created_by_id` y `count_date` (por defecto el día en curso en
+  `America/Santiago`). Antes de insertar, el servicio bloquea la fila del local
+  en `stores` (`FOR NO KEY UPDATE`) y busca una toma OPEN: si existe responde
+  409 con su id; el índice parcial `inventory_counts_store_id_open_key` es la
+  última defensa.
+- Guardar un producto hace `upsert` sobre `(count_id, product_id)`: una línea
+  por producto, que se reemplaza. El servicio calcula `counted_quantity` con
+  `Prisma.Decimal` sobre el formato vigente, copia el SKU, el nombre, la unidad
+  y el formato, y asigna `saved_by_id`; los campos no informados quedan en
+  NULL (celda vacía) y cuentan como 0 en el total. Antes del `upsert` bloquea
+  la toma con `FOR NO KEY UPDATE` (el mismo bloqueo del trigger) y verifica que
+  siga OPEN.
 - Filas de la plantilla fijas (trigger `inventory_template_rows_fixed_rows`):
   la posición y el tipo no se actualizan y las filas no se borran, porque el Product
   Owner copia el Excel descargado y lo pega en otro cuadre. Solo cambian el
