@@ -1,10 +1,12 @@
 import type {
   InventoryCountStatus,
+  InventoryTemplateRowKind,
   UnitOfMeasure,
 } from '../../generated/prisma/client.js';
 import type { ProductResponse } from './products.types.js';
 
-// Tipos de la API de tomas de inventario (SPRINT-5-T05).
+// Tipos de la API de tomas de inventario (SPRINT-5-T05; finalización,
+// SPRINT-5-T06).
 
 /**
  * Días hacia atrás que admite la fecha de una toma (hoy incluido, en hora de
@@ -76,3 +78,30 @@ export interface InventoryCountDetail extends InventoryCountSummary {
   // Productos en el orden de la plantilla, filtrados por la búsqueda.
   items: InventoryCountItem[];
 }
+
+/** Resultado de finalizar la toma (SPRINT-5-T06). */
+export interface InventoryCountFinalization extends InventoryCountSummary {
+  // Líneas de la toma finalizada: contadas más las vacías que agregó la
+  // finalización (una por producto activo no contado).
+  totalProducts: number;
+  // Productos sin cantidades (líneas vacías).
+  uncountedProducts: number;
+}
+
+/**
+ * Fila de la plantilla copiada en template_snapshot al finalizar la toma
+ * (SPRINT-5-T06): el Excel de una toma finalizada se arma con esta copia y no
+ * cambia aunque después se corrija la plantilla o el catálogo. Es un alias de
+ * tipo (no una interfaz) para que Prisma la acepte como JSON.
+ */
+export type InventoryTemplateSnapshotRow = {
+  // Número de fila de la hoja Excel.
+  position: number;
+  kind: InventoryTemplateRowKind;
+  // Texto impreso de la fila (null solo en BLANK).
+  printedText: string | null;
+  section: string;
+  // Producto asignado a la fila al finalizar y su nombre en ese momento.
+  productId: string | null;
+  productName: string | null;
+};
