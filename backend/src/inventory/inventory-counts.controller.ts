@@ -83,7 +83,8 @@ export class InventoryCountsController {
       'Solo el SUPERVISOR inicia tomas, y solo si tiene un local asignado.',
   })
   @ApiConflictResponse({
-    description: 'Ya hay una toma En curso en el local: indica cuál es.',
+    description:
+      'Ya hay una toma En curso en el local: indica cuál es (existingCountId). Si otro inicio simultáneo chocó y ya no existe, 409 con errors.store para reintentar.',
     type: InventoryCountConflictDto,
   })
   async start(
@@ -145,7 +146,7 @@ export class InventoryCountsController {
   @ApiOperation({
     summary: 'Guarda lo contado de un producto en la toma',
     description:
-      'Rol: SUPERVISOR, solo en una toma En curso de su local. Guarda las cajas, los paquetes y la cantidad suelta; guardar de nuevo el mismo producto reemplaza su línea (no la duplica). El total = cajas × contenido por caja + paquetes × contenido por paquete + cantidad suelta se calcula en el backend con aritmética decimal exacta y se guarda con la copia del SKU, el nombre, la unidad y el formato del producto. Registra quién guardó (sesión) y cuándo (la base). Un campo que no aplica al formato se omite o va en null.',
+      'Rol: SUPERVISOR, solo en una toma En curso de su local. Guarda las cajas, los paquetes y la cantidad suelta; guardar de nuevo el mismo producto reemplaza su línea (no la duplica). El total = cajas × contenido por caja + paquetes × contenido por paquete + cantidad suelta se calcula en el backend con aritmética decimal exacta y se guarda con la copia del SKU, el nombre, la unidad y el formato del producto. Registra quién guardó (sesión) y cuándo (la base). Un campo que no aplica al formato se omite o va en null. Un producto desactivado solo se guarda si ya tenía línea en esta toma (para corregirla).',
   })
   @ApiOkResponse({ type: InventoryCountItemDto })
   @ApiBadRequestResponse({
@@ -160,7 +161,7 @@ export class InventoryCountsController {
   @ApiNotFoundResponse({ description: 'Toma o producto no encontrados.' })
   @ApiConflictResponse({
     description:
-      'La toma está finalizada o el producto está desactivado (errors.productId).',
+      'La toma está finalizada (errors.countId) o el producto está desactivado y no tiene línea en esta toma (errors.productId). Un producto desactivado que ya tenía línea se puede corregir.',
     type: ProductFieldErrorsDto,
   })
   saveLine(

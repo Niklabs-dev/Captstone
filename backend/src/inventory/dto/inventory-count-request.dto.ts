@@ -62,7 +62,7 @@ export class SaveInventoryCountLineDto {
 
   @ApiPropertyOptional({
     description:
-      'Cantidad suelta en la unidad del producto: mayor o igual a 0, con hasta 3 decimales y punto en KG y L, y entera en UNIT. Se recomienda enviarla como texto.',
+      'Cantidad suelta en la unidad del producto: mayor o igual a 0, con hasta 3 decimales y punto en KG y L, y entera en UNIT. Enviarla siempre como texto ("0.300"), tal como la escribe el supervisor: un número JSON se acepta y se lee por su texto, pero el cálculo en float del cliente (0.1 + 0.2 = 0.30000000000000004) se rechaza por tener más de 3 decimales.',
     example: '0.300',
     type: String,
     nullable: true,
