@@ -70,12 +70,12 @@ export class InventoryCountsController {
   @ApiOperation({
     summary: 'Inicia la toma de inventario del local del supervisor',
     description:
-      'Rol: SUPERVISOR. El local sale de la sesión, nunca del cuerpo. La fecha de la toma es la indicada (no posterior a hoy) o el día en curso en hora de Chile, y queda fija aunque la toma se finalice después de medianoche. Como máximo una toma En curso por local: si ya hay una responde 409 con su id (existingCountId) para retomarla. Queda en auditoría (INVENTORY_COUNT_STARTED).',
+      'Rol: SUPERVISOR. El local sale de la sesión, nunca del cuerpo. La fecha de la toma es la indicada (de hoy o de hasta 7 días atrás, MAX_COUNT_DATE_AGE_DAYS) o el día en curso en hora de Chile, y queda fija aunque la toma se finalice después de medianoche. Como máximo una toma En curso por local: si ya hay una responde 409 con su id (existingCountId) para retomarla. Queda en auditoría (INVENTORY_COUNT_STARTED).',
   })
   @ApiCreatedResponse({ type: InventoryCountSummaryDto })
   @ApiBadRequestResponse({
     description:
-      'Fecha inválida o posterior a hoy (errors.countDate), o local inactivo.',
+      'Fecha inválida, posterior a hoy o de más de 7 días atrás (errors.countDate), o local inactivo.',
     type: ProductFieldErrorsDto,
   })
   @ApiForbiddenResponse({

@@ -10,6 +10,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { InventoryCountStatus } from '../../generated/prisma/client.js';
+import { MAX_COUNT_DATE_AGE_DAYS } from '../types/inventory-counts.types.js';
 
 // Cuerpos y filtros de la API de tomas de inventario (SPRINT-5-T05). Los
 // mensajes van en español: la vista los muestra.
@@ -23,8 +24,7 @@ function trimmed({ value }: { value: unknown }): unknown {
 
 export class StartInventoryCountDto {
   @ApiPropertyOptional({
-    description:
-      'Fecha de la toma (AAAA-MM-DD), no posterior a hoy. Por defecto, el día en curso en hora de Chile (America/Santiago). Queda fija: no cambia aunque la toma se finalice después de medianoche. El local sale de la sesión, nunca del cuerpo.',
+    description: `Fecha de la toma (AAAA-MM-DD): de hoy o de hasta ${MAX_COUNT_DATE_AGE_DAYS} días atrás, en hora de Chile (America/Santiago). Por defecto, el día en curso. Queda fija: no cambia aunque la toma se finalice después de medianoche. El local sale de la sesión, nunca del cuerpo.`,
     example: '2026-11-10',
   })
   @IsOptional()

@@ -9,6 +9,7 @@ import { AUDIT_ACTION } from '../src/audit/constants/audit-actions.constants.js'
 import { ROLE, type RoleCode } from '../src/auth/constants/roles.constants.js';
 import type { JwtPayload } from '../src/auth/types/auth.types.js';
 import {
+  addDays,
   businessDateOf,
   formatDbDate,
   toDbDate,
@@ -71,7 +72,10 @@ interface Fixture {
 const errorsOf = (body: unknown): Record<string, string> =>
   (body as { errors: Record<string, string> }).errors;
 
-const today = (): string => formatDbDate(toDbDate(businessDateOf(new Date())));
+// Fecha de hace n días en hora de Chile (AAAA-MM-DD); 0 es hoy.
+const daysAgo = (days: number): string =>
+  formatDbDate(toDbDate(addDays(businessDateOf(new Date()), -days)));
+const today = (): string => daysAgo(0);
 
 describe.skipIf(!databaseUrl)(
   'API de tomas de inventario (SPRINT-5-T05)',
@@ -333,11 +337,11 @@ describe.skipIf(!databaseUrl)(
 
         // Otro local inicia la suya sin problemas, con la fecha indicada.
         const other = await start(f.supervisorB, {
-          countDate: '2026-11-10',
+          countDate: daysAgo(3),
         }).expect(201);
         expect(other.body).toMatchObject({
           storeId: f.storeB,
-          countDate: '2026-11-10',
+          countDate: daysAgo(3),
         });
       });
     }, 60_000);
@@ -348,6 +352,14 @@ describe.skipIf(!databaseUrl)(
           countDate: '2999-01-01',
         }).expect(400);
         expect(errorsOf(future.body).countDate).toMatch(/posterior a hoy/);
+        // La toma es semanal: hasta 7 días atrás (el límite se prueba en el
+        // listado); 8 días o un error de tipeo responden 400.
+        for (const countDate of [daysAgo(8), '2001-01-01']) {
+          const old = await start(f.supervisorA, { countDate }).expect(400);
+          expect(errorsOf(old.body).countDate).toBe(
+            `La fecha de la toma puede ser de hoy o de hasta 7 días atrás (desde el ${daysAgo(7)})`,
+          );
+        }
         const invalid = await start(f.supervisorA, {
           countDate: '2026-02-30',
         }).expect(400);
@@ -593,7 +605,6 @@ describe.skipIf(!databaseUrl)(
           data: { isActive: false },
         });
         expect(await search(`sar-${f.suffix}`)).toEqual([f.descaler]);
-
         // Finalizada (simulada en la base: la finalización es de T06), solo
         // muestra sus líneas y no admite cambios.
         await f.tx.inventoryCount.update({
@@ -623,7 +634,7 @@ describe.skipIf(!databaseUrl)(
       await withinRollback(async (f) => {
         const countA = await startedCount(f);
         const countB = (
-          (await start(f.supervisorB, { countDate: '2026-11-03' }).expect(201))
+          (await start(f.supervisorB, { countDate: daysAgo(7) }).expect(201))
             .body as InventoryCountSummary
         ).id;
 
@@ -692,15 +703,15 @@ describe.skipIf(!databaseUrl)(
         expect(
           await list(f.admin, {
             storeId: f.storeB,
-            from: '2026-11-03',
-            to: '2026-11-03',
+            from: daysAgo(7),
+            to: daysAgo(7),
           }),
         ).toEqual([countB]);
         expect(
-          await list(f.admin, { storeId: f.storeB, from: '2026-11-04' }),
+          await list(f.admin, { storeId: f.storeB, from: daysAgo(6) }),
         ).toEqual([]);
         expect(
-          await list(f.admin, { storeId: f.storeB, to: '2026-11-02' }),
+          await list(f.admin, { storeId: f.storeB, to: daysAgo(8) }),
         ).toEqual([]);
         const inverted = await http()
           .get('/inventory-counts')

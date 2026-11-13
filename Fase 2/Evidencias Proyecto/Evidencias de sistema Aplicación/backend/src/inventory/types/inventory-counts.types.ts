@@ -6,6 +6,14 @@ import type { ProductResponse } from './products.types.js';
 
 // Tipos de la API de tomas de inventario (SPRINT-5-T05).
 
+/**
+ * Días hacia atrás que admite la fecha de una toma (hoy incluido, en hora de
+ * Chile). La toma es semanal: una del martes en la noche se puede registrar el
+ * miércoles, y un error de tipeo (2001-01-01) no deja una toma En curso que
+ * bloquee el local.
+ */
+export const MAX_COUNT_DATE_AGE_DAYS = 7;
+
 /** Persona que inició, guardó o finalizó (solo nombre: nunca RUT ni correo). */
 export interface InventoryCountPerson {
   id: string;

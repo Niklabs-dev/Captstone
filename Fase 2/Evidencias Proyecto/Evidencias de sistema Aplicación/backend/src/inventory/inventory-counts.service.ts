@@ -14,6 +14,7 @@ import { ROLE } from '../auth/constants/roles.constants.js';
 import { canAccessStore } from '../auth/policies/store-access.policy.js';
 import type { AuthUser } from '../auth/types/auth.types.js';
 import {
+  addDays,
   businessDateOf,
   formatDbDate,
   toDbDate,
@@ -34,12 +35,13 @@ import {
   type ProductRecord,
   type Tx,
 } from './inventory-catalog.js';
-import type {
-  InventoryCountDetail,
-  InventoryCountItem,
-  InventoryCountLineResponse,
-  InventoryCountPerson,
-  InventoryCountSummary,
+import {
+  MAX_COUNT_DATE_AGE_DAYS,
+  type InventoryCountDetail,
+  type InventoryCountItem,
+  type InventoryCountLineResponse,
+  type InventoryCountPerson,
+  type InventoryCountSummary,
 } from './types/inventory-counts.types.js';
 import { formatQuantity, resolveCountLine } from './utils/count-line.util.js';
 import { comparableName } from './utils/product-format.util.js';
@@ -393,8 +395,8 @@ export class InventoryCountsService {
     }
   }
 
-  // Fecha de la toma: la indicada o el día en curso en hora de Chile. Nunca
-  // posterior a hoy.
+  // Fecha de la toma: la indicada o el día en curso en hora de Chile. Entre
+  // hoy y MAX_COUNT_DATE_AGE_DAYS días atrás.
   private countDate(value: string | undefined): CalendarDate {
     const today = businessDateOf(new Date());
     if (value === undefined) return today;
@@ -404,9 +406,16 @@ export class InventoryCountsService {
         countDate: 'La fecha no existe en el calendario',
       });
     }
-    if (formatDbDate(toDbDate(parsed)) > formatDbDate(toDbDate(today))) {
+    const date = formatDbDate(toDbDate(parsed));
+    if (date > formatDbDate(toDbDate(today))) {
       throw fieldErrors(400, 'La fecha de la toma no es válida', {
         countDate: 'La fecha de la toma no puede ser posterior a hoy',
+      });
+    }
+    const oldest = addDays(today, -MAX_COUNT_DATE_AGE_DAYS);
+    if (date < formatDbDate(toDbDate(oldest))) {
+      throw fieldErrors(400, 'La fecha de la toma no es válida', {
+        countDate: `La fecha de la toma puede ser de hoy o de hasta ${MAX_COUNT_DATE_AGE_DAYS} días atrás (desde el ${formatDbDate(toDbDate(oldest))})`,
       });
     }
     return parsed;
