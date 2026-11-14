@@ -21,6 +21,10 @@ import {
 } from '../documents/utils/document-dates.util.js';
 import { InventoryCountStatus, Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  isTransactionConflict,
+  triggerErrorInfo,
+} from '../prisma/utils/database-error.util.js';
 import type {
   InventoryCountDetailQueryDto,
   ListInventoryCountsQueryDto,
@@ -29,6 +33,7 @@ import type {
 } from './dto/inventory-count-request.dto.js';
 import {
   fieldErrors,
+  lockCatalogShared,
   PRODUCT_SELECT,
   readProduct,
   toProductResponse,
@@ -38,11 +43,17 @@ import {
 import {
   MAX_COUNT_DATE_AGE_DAYS,
   type InventoryCountDetail,
+  type InventoryCountFinalization,
   type InventoryCountItem,
   type InventoryCountLineResponse,
   type InventoryCountPerson,
   type InventoryCountSummary,
 } from './types/inventory-counts.types.js';
+import {
+  emptyLinesFor,
+  finalizationTotals,
+  toTemplateSnapshot,
+} from './utils/count-finalization.util.js';
 import { formatQuantity, resolveCountLine } from './utils/count-line.util.js';
 import { comparableName } from './utils/product-format.util.js';
 
@@ -50,7 +61,8 @@ import { comparableName } from './utils/product-format.util.js';
 // toma de su local (el local sale de la sesión, nunca del cuerpo), guarda por
 // producto las cajas, los paquetes y la cantidad suelta y la consulta para
 // retomarla. El ADMINISTRADOR ve las de todos los locales en solo lectura.
-// La finalización es de SPRINT-5-T06.
+// El SUPERVISOR finaliza la toma de su local (SPRINT-5-T06): desde ese
+// momento la toma y sus líneas no admiten cambios.
 //
 // Una toma En curso muestra los productos activos en el orden de la
 // plantilla (todo producto activo tiene fila) más los que ya tengan línea en
@@ -107,11 +119,76 @@ type LineRecord = Prisma.InventoryCountLineGetPayload<{
   select: typeof LINE_SELECT;
 }>;
 
+// Filas de la plantilla que copia la finalización (template_snapshot).
+const SNAPSHOT_ROW_SELECT = {
+  position: true,
+  kind: true,
+  printedText: true,
+  section: true,
+  productId: true,
+  product: { select: { name: true } },
+} satisfies Prisma.InventoryTemplateRowSelect;
+
+// Formato de los productos activos que copia cada línea vacía.
+const EMPTY_LINE_PRODUCT_SELECT = {
+  id: true,
+  sku: true,
+  name: true,
+  unit: true,
+  packageName: true,
+  boxContent: true,
+  packagesPerBox: true,
+  packageContent: true,
+  looseOnly: true,
+} satisfies Prisma.ProductSelect;
+
+// Plazo de la transacción de finalización: inserta una línea vacía por cada
+// producto activo no contado (la plantilla tiene ~140 artículos) y puede
+// esperar a que termine un guardado o un cambio del catálogo.
+const FINALIZE_TIMEOUT_MS = 15_000;
+
 function isUniqueViolation(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === 'P2002'
   );
+}
+
+// 409 único para cualquier cambio sobre una toma finalizada (guardar,
+// finalizar de nuevo o el rechazo del trigger de la base).
+function finalizedConflict(): Error {
+  return fieldErrors(409, 'La toma de inventario está finalizada', {
+    countId: 'La toma está finalizada: no admite cambios',
+  });
+}
+
+// Mensaje de los triggers de 20261111120000/20261111130000 al rechazar una
+// escritura sobre una toma CONFIRMED (o sus líneas).
+const FINALIZED_TRIGGER_MESSAGE = /La toma de inventario \S+ está finalizada/;
+
+// Traduce a 409 los rechazos de la base al escribir una toma o sus líneas,
+// nunca un 500 (SPRINT-5-T06):
+// - el trigger de las líneas o de la toma rechaza una toma ya CONFIRMED con
+//   SQLSTATE 42501 («La toma de inventario … está finalizada», P2039);
+// - un deadlock (40P01) o conflicto de serialización (P2034) y un choque con
+//   la línea única por producto (P2002) indican que otra solicitud estaba
+//   escribiendo la misma toma.
+// Devuelve null si el error es de otro tipo (se propaga tal cual).
+function countWriteConflict(error: unknown): Error | null {
+  const trigger = triggerErrorInfo(error);
+  if (trigger !== null) {
+    return trigger.code === '42501' &&
+      FINALIZED_TRIGGER_MESSAGE.test(trigger.message)
+      ? finalizedConflict()
+      : fieldErrors(409, trigger.message, { countId: trigger.message });
+  }
+  if (isTransactionConflict(error) || isUniqueViolation(error)) {
+    return fieldErrors(409, 'Otra solicitud estaba modificando esta toma', {
+      countId:
+        'Otra solicitud estaba guardando o finalizando esta toma: vuelve a consultarla',
+    });
+  }
+  return null;
 }
 
 function toSummary(count: CountRecord): InventoryCountSummary {
@@ -313,73 +390,179 @@ export class InventoryCountsService {
     dto: SaveInventoryCountLineDto,
     user: AuthUser,
   ): Promise<InventoryCountItem> {
-    return this.prisma.$transaction(async (tx) => {
-      // Mismo bloqueo que toma el trigger de las líneas: los guardados de
-      // una toma se serializan entre sí y con su finalización (SPRINT-5-T06).
-      const locked = await tx.$queryRaw<{ store_id: string; status: string }[]>`
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // Mismo bloqueo que toma el trigger de las líneas: los guardados de
+        // una toma se serializan entre sí y con su finalización (SPRINT-5-T06).
+        const locked = await tx.$queryRaw<
+          { store_id: string; status: string }[]
+        >`
         SELECT store_id::text AS store_id, status::text AS status
         FROM inventory_counts WHERE id = ${countId}::uuid
         FOR NO KEY UPDATE`;
-      if (locked.length === 0) {
-        throw new NotFoundException('Toma de inventario no encontrada');
-      }
-      this.assertStoreAccess(locked[0].store_id, user);
-      if (locked[0].status !== InventoryCountStatus.OPEN) {
-        throw fieldErrors(409, 'La toma de inventario está finalizada', {
-          countId: 'La toma está finalizada: no admite cambios',
-        });
-      }
-      const product = await readProduct(tx, productId);
-      // Un producto desactivado no se empieza a contar, pero si ya tiene
-      // línea en esta toma se puede corregir: la consulta la sigue mostrando
-      // y no debe pasar con un error de tipeo a la toma finalizada.
-      if (!product.isActive) {
-        const existing = await tx.inventoryCountLine.findUnique({
-          where: { countId_productId: { countId, productId } },
-          select: { id: true },
-        });
-        if (existing === null) {
-          throw fieldErrors(409, 'El producto está desactivado', {
-            productId:
-              'El producto está desactivado: ya no se cuenta en las tomas',
-          });
+        if (locked.length === 0) {
+          throw new NotFoundException('Toma de inventario no encontrada');
         }
-      }
-      const result = resolveCountLine(product, {
-        boxes: dto.boxes,
-        packages: dto.packages,
-        looseQuantity: dto.looseQuantity,
+        this.assertStoreAccess(locked[0].store_id, user);
+        if (locked[0].status !== InventoryCountStatus.OPEN) {
+          throw finalizedConflict();
+        }
+        const product = await readProduct(tx, productId);
+        // Un producto desactivado no se empieza a contar, pero si ya tiene
+        // línea en esta toma se puede corregir: la consulta la sigue mostrando
+        // y no debe pasar con un error de tipeo a la toma finalizada.
+        if (!product.isActive) {
+          const existing = await tx.inventoryCountLine.findUnique({
+            where: { countId_productId: { countId, productId } },
+            select: { id: true },
+          });
+          if (existing === null) {
+            throw fieldErrors(409, 'El producto está desactivado', {
+              productId:
+                'El producto está desactivado: ya no se cuenta en las tomas',
+            });
+          }
+        }
+        const result = resolveCountLine(product, {
+          boxes: dto.boxes,
+          packages: dto.packages,
+          looseQuantity: dto.looseQuantity,
+        });
+        if (!result.ok) {
+          throw fieldErrors(
+            400,
+            'Las cantidades no son válidas para el formato del producto',
+            result.errors,
+          );
+        }
+        const data = {
+          boxes: result.line.boxes,
+          packages: result.line.packages,
+          looseQuantity: result.line.looseQuantity,
+          countedQuantity: result.line.countedQuantity,
+          productSku: product.sku,
+          productName: product.name,
+          unit: product.unit,
+          packageName: product.packageName,
+          boxContent: product.boxContent,
+          packagesPerBox: product.packagesPerBox,
+          packageContent: product.packageContent,
+          looseOnly: product.looseOnly,
+          savedById: user.id,
+        };
+        const line = await tx.inventoryCountLine.upsert({
+          where: { countId_productId: { countId, productId } },
+          create: { countId, productId, ...data },
+          update: data,
+          select: LINE_SELECT,
+        });
+        return toItem(product, line);
       });
-      if (!result.ok) {
-        throw fieldErrors(
-          400,
-          'Las cantidades no son válidas para el formato del producto',
-          result.errors,
-        );
-      }
-      const data = {
-        boxes: result.line.boxes,
-        packages: result.line.packages,
-        looseQuantity: result.line.looseQuantity,
-        countedQuantity: result.line.countedQuantity,
-        productSku: product.sku,
-        productName: product.name,
-        unit: product.unit,
-        packageName: product.packageName,
-        boxContent: product.boxContent,
-        packagesPerBox: product.packagesPerBox,
-        packageContent: product.packageContent,
-        looseOnly: product.looseOnly,
-        savedById: user.id,
-      };
-      const line = await tx.inventoryCountLine.upsert({
-        where: { countId_productId: { countId, productId } },
-        create: { countId, productId, ...data },
-        update: data,
-        select: LINE_SELECT,
-      });
-      return toItem(product, line);
-    });
+    } catch (error) {
+      throw countWriteConflict(error) ?? error;
+    }
+  }
+
+  // Finaliza la toma (SPRINT-5-T06), solo el SUPERVISOR de su local y con al
+  // menos un producto contado. En una sola transacción:
+  // 1. SELECT … FOR UPDATE sobre la toma: dos finalizaciones (o una y un
+  //    guardado) se serializan; la que llega tarde vuelve a leer la toma,
+  //    la ve CONFIRMED y responde 409 sin insertar nada.
+  // 2. Bloqueo compartido del catálogo: la plantilla y los productos activos
+  //    se copian sin que un cambio del catálogo se cruce. Los productos
+  //    activos se leen con FOR KEY SHARE.
+  // 3. Inserta una línea vacía por cada producto activo no contado (con la
+  //    copia de su nombre y formato) ANTES de pasar la toma a CONFIRMED: el
+  //    trigger solo admite líneas de una toma OPEN.
+  // 4. Pasa la toma a CONFIRMED con quién y cuándo la finalizó y la copia de
+  //    la estructura de la plantilla. Desde ahí el índice parcial de la toma
+  //    En curso deja libre el local para iniciar otra.
+  async finalize(
+    id: string,
+    user: AuthUser,
+  ): Promise<InventoryCountFinalization> {
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const locked = await tx.$queryRaw<
+            { store_id: string; status: string }[]
+          >`
+            SELECT store_id::text AS store_id, status::text AS status
+            FROM inventory_counts WHERE id = ${id}::uuid
+            FOR UPDATE`;
+          if (locked.length === 0) {
+            throw new NotFoundException('Toma de inventario no encontrada');
+          }
+          this.assertStoreAccess(locked[0].store_id, user);
+          if (locked[0].status !== InventoryCountStatus.OPEN) {
+            throw finalizedConflict();
+          }
+          const lines = await tx.inventoryCountLine.findMany({
+            where: { countId: id },
+            select: { productId: true, countedQuantity: true },
+          });
+          if (!lines.some((line) => line.countedQuantity !== null)) {
+            throw fieldErrors(400, 'La toma no tiene productos contados', {
+              countId:
+                'Guarda lo contado de al menos un producto antes de finalizar la toma',
+            });
+          }
+
+          await lockCatalogShared(tx);
+          const rows = await tx.inventoryTemplateRow.findMany({
+            select: SNAPSHOT_ROW_SELECT,
+            orderBy: { position: 'asc' },
+          });
+          // FOR KEY SHARE (el mismo bloqueo que toma la FK al insertar la
+          // línea): un producto que se borrara entre la lectura y el INSERT
+          // no termina en un error de FK, y uno ya borrado no se lee.
+          const activeIds = await tx.$queryRaw<{ id: string }[]>`
+            SELECT id::text AS id FROM products WHERE is_active
+            FOR KEY SHARE`;
+          const active = await tx.product.findMany({
+            where: {
+              id: { in: activeIds.map((product) => product.id) },
+              isActive: true,
+            },
+            select: EMPTY_LINE_PRODUCT_SELECT,
+          });
+          const emptyLines = emptyLinesFor(
+            active,
+            new Set(lines.map((line) => line.productId)),
+          );
+          if (emptyLines.length > 0) {
+            await tx.inventoryCountLine.createMany({
+              data: emptyLines.map((line) => ({
+                ...line,
+                countId: id,
+                savedById: user.id,
+              })),
+            });
+          }
+
+          const finalized = await tx.inventoryCount.update({
+            where: { id },
+            data: {
+              status: InventoryCountStatus.CONFIRMED,
+              finalizedAt: new Date(),
+              finalizedById: user.id,
+              templateSnapshot: toTemplateSnapshot(rows),
+            },
+            select: COUNT_SELECT,
+          });
+          const totals = finalizationTotals(lines, emptyLines.length);
+          return {
+            ...toSummary(finalized),
+            countedProducts: totals.countedProducts,
+            totalProducts: totals.totalProducts,
+            uncountedProducts: totals.uncountedProducts,
+          };
+        },
+        { timeout: FINALIZE_TIMEOUT_MS },
+      );
+    } catch (error) {
+      throw countWriteConflict(error) ?? error;
+    }
   }
 
   // Local de la sesión del supervisor; sin local asignado no inicia tomas.

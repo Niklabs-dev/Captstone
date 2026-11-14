@@ -22,10 +22,14 @@ import {
 } from '../src/generated/prisma/client.js';
 import type {
   InventoryCountDetail,
+  InventoryCountFinalization,
   InventoryCountItem,
   InventoryCountSummary,
+  InventoryTemplateSnapshotRow,
 } from '../src/inventory/types/inventory-counts.types.js';
+import { computeCountedQuantity } from '../src/inventory/utils/count-line.util.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
+import { sqlStateOf } from '../src/prisma/utils/database-error.util.js';
 import {
   createSwitchablePrisma,
   type SwitchablePrisma,
@@ -34,7 +38,8 @@ import {
 type App = Parameters<typeof request>[0];
 type Tx = Prisma.TransactionClient;
 
-// API de tomas de inventario (SPRINT-5-T05) por HTTP contra PostgreSQL real.
+// API de tomas de inventario (SPRINT-5-T05) y su finalización (SPRINT-5-T06)
+// por HTTP contra PostgreSQL real.
 // Cada caso arma sus locales, usuarios, productos y filas de la plantilla (en
 // posiciones altas) y corre dentro de withinRollback
 // (helpers/switchable-prisma.ts): la base se revierte, también la auditoría.
@@ -249,6 +254,8 @@ describe.skipIf(!databaseUrl)(
         .put(`/inventory-counts/${countId}/lines/${productId}`)
         .set(auth(session))
         .send(body);
+    const finalize = (session: Session, countId: string) =>
+      http().post(`/inventory-counts/${countId}/finalize`).set(auth(session));
     const detail = (session: Session, countId: string, search?: string) =>
       http()
         .get(`/inventory-counts/${countId}`)
@@ -614,8 +621,9 @@ describe.skipIf(!databaseUrl)(
           countedQuantity: '144',
         });
 
-        // Finalizada (simulada en la base: la finalización es de T06), solo
-        // muestra sus líneas y no admite cambios.
+        // Finalizada (simulada en la base, sin líneas vacías; la finalización
+        // real se prueba más abajo), solo muestra sus líneas y no admite
+        // cambios.
         await f.tx.inventoryCount.update({
           where: { id: countId },
           data: {
@@ -740,6 +748,385 @@ describe.skipIf(!databaseUrl)(
           .query({ status: 'CERRADA' })
           .set(auth(f.admin))
           .expect(400);
+      });
+    }, 60_000);
+
+    // Un rechazo de la base aborta la transacción de PostgreSQL. En uso real
+    // cada solicitud tiene la suya; aquí todas comparten la del test, así que
+    // cada intento se aísla en un SAVEPOINT y se revierte a él. Devuelve el
+    // SQLSTATE del rechazo.
+    async function rejectedByDatabase(
+      f: Fixture,
+      attempt: () => Promise<unknown>,
+    ): Promise<string | null> {
+      await f.tx.$executeRaw`SAVEPOINT intento_toma_finalizada`;
+      try {
+        await attempt();
+      } catch (error) {
+        await f.tx.$executeRaw`ROLLBACK TO SAVEPOINT intento_toma_finalizada`;
+        return sqlStateOf(error);
+      }
+      throw new Error('Se esperaba un rechazo de la base');
+    }
+
+    it('finaliza la toma: quién y cuándo, copia de la plantilla, líneas vacías con su formato y auditoría (SPRINT-5-T06)', async () => {
+      await withinRollback(async (f) => {
+        const countId = await startedCount(f);
+
+        // Sin ningún producto contado no se finaliza.
+        const empty = await finalize(f.supervisorA, countId).expect(400);
+        expect(empty.body).toEqual({
+          statusCode: 400,
+          message: 'La toma no tiene productos contados',
+          errors: {
+            countId:
+              'Guarda lo contado de al menos un producto antes de finalizar la toma',
+          },
+        });
+
+        await save(f.supervisorA, countId, f.fajita, {
+          boxes: 1,
+          packages: 2,
+          looseQuantity: '0.300',
+        }).expect(200);
+        await save(f.supervisorA, countId, f.descaler, {
+          boxes: 1,
+          looseQuantity: '6',
+        }).expect(200);
+
+        // Solo el SUPERVISOR de su local finaliza.
+        await finalize(f.admin, countId).expect(403);
+        await finalize(f.supervisorB, countId).expect(403);
+        await finalize(f.accountant, countId).expect(403);
+        await finalize(f.worker, countId).expect(403);
+        await finalize(f.supervisorA, randomUUID()).expect(404);
+        await http()
+          .post('/inventory-counts/no-es-uuid/finalize')
+          .set(auth(f.supervisorA))
+          .expect(400);
+        expect(
+          await f.tx.inventoryCount.findUniqueOrThrow({
+            where: { id: countId },
+            select: { status: true },
+          }),
+        ).toEqual({ status: 'OPEN' });
+
+        // Otro supervisor del mismo local la finaliza.
+        const before = new Date();
+        const response = await finalize(f.supervisorA2, countId).expect(200);
+        const result = response.body as InventoryCountFinalization;
+        expect(result).toMatchObject({
+          id: countId,
+          status: 'CONFIRMED',
+          storeId: f.storeA,
+          startedBy: { id: f.supervisorA.id },
+          finalizedBy: { id: f.supervisorA2.id },
+          countedProducts: 2,
+        });
+        const finalizedAt = new Date(result.finalizedAt as unknown as string);
+        expect(finalizedAt.getTime()).toBeGreaterThanOrEqual(
+          before.getTime() - 1_000,
+        );
+        expect(finalizedAt.getTime()).toBeLessThanOrEqual(Date.now() + 1_000);
+
+        const stored = await f.tx.inventoryCount.findUniqueOrThrow({
+          where: { id: countId },
+          include: { lines: true },
+        });
+        expect(stored).toMatchObject({
+          status: 'CONFIRMED',
+          finalizedById: f.supervisorA2.id,
+        });
+        // Una línea por producto: las contadas y una vacía por cada producto
+        // activo sin contar. La respuesta informa contados y no contados.
+        const uncounted = stored.lines.filter(
+          (line) => line.countedQuantity === null,
+        );
+        expect(result.totalProducts).toBe(stored.lines.length);
+        expect(result.uncountedProducts).toBe(uncounted.length);
+        expect(result.countedProducts + result.uncountedProducts).toBe(
+          result.totalProducts,
+        );
+        expect(new Set(stored.lines.map((line) => line.productId)).size).toBe(
+          stored.lines.length,
+        );
+        const lineOf = (productId: string) =>
+          stored.lines.find((line) => line.productId === productId);
+        // Productos activos no contados: línea sin cantidades con la copia de
+        // su nombre y formato, guardada por quien finalizó.
+        expect(lineOf(f.tuna)).toMatchObject({
+          boxes: null,
+          packages: null,
+          looseQuantity: null,
+          countedQuantity: null,
+          productName: `Atún Preparado ${f.suffix}`,
+          unit: 'KG',
+          looseOnly: true,
+          savedById: f.supervisorA2.id,
+        });
+        expect(lineOf(f.drink)).toMatchObject({
+          countedQuantity: null,
+          productName: `Bebida ${f.suffix}`,
+          unit: 'UNIT',
+          packageName: 'pack',
+        });
+        expect(lineOf(f.drink)?.packageContent?.toFixed(3)).toBe('6.000');
+        // Las contadas no cambian y el desactivado no recibe línea.
+        expect(lineOf(f.fajita)?.countedQuantity?.toFixed(3)).toBe('10.300');
+        expect(lineOf(f.fajita)?.savedById).toBe(f.supervisorA.id);
+        expect(lineOf(f.inactive)).toBeUndefined();
+
+        // Copia de la estructura de la plantilla, en el orden de la hoja.
+        const snapshot =
+          stored.templateSnapshot as unknown as InventoryTemplateSnapshotRow[];
+        const rows = await f.tx.inventoryTemplateRow.findMany({
+          orderBy: { position: 'asc' },
+          select: { position: true },
+        });
+        expect(snapshot.map((row) => row.position)).toEqual(
+          rows.map((row) => row.position),
+        );
+        const mine = snapshot.filter((row) => row.position > BASE);
+        expect(mine[0]).toEqual({
+          position: BASE + 1,
+          kind: 'ITEM',
+          printedText: `Carne Fajita ${f.suffix}`,
+          section: `SECCIÓN TOMA ${f.suffix}`,
+          productId: f.fajita,
+          productName: `Carne Fajita ${f.suffix}`,
+        });
+        expect(mine.at(-1)).toMatchObject({
+          position: BASE + 6,
+          kind: 'SECTION',
+          productId: null,
+          productName: null,
+        });
+
+        // Auditoría con quién, el local y lo contado y no contado.
+        const log = await f.tx.auditLog.findFirst({
+          where: {
+            action: AUDIT_ACTION.INVENTORY_COUNT_FINALIZED,
+            entityId: countId,
+          },
+        });
+        expect(log).toMatchObject({
+          entityType: 'inventory_counts',
+          userId: f.supervisorA2.id,
+          storeId: f.storeA,
+          detail: {
+            countDate: today(),
+            countedProducts: 2,
+            uncountedProducts: result.uncountedProducts,
+          },
+        });
+
+        // La consulta muestra sus líneas: contadas y pendientes.
+        const consulted = (await detail(f.admin, countId).expect(200))
+          .body as InventoryCountDetail;
+        expect(consulted).toMatchObject({
+          status: 'CONFIRMED',
+          finalizedBy: { id: f.supervisorA2.id },
+          totalProducts: result.totalProducts,
+          countedProducts: 2,
+          pendingProducts: result.uncountedProducts,
+        });
+      });
+    }, 60_000);
+
+    it('una toma finalizada no admite cambios (409) ni la base los permite; el local inicia otra (SPRINT-5-T06)', async () => {
+      await withinRollback(async (f) => {
+        const countId = await startedCount(f);
+        await save(f.supervisorA, countId, f.fajita, { boxes: 1 }).expect(200);
+        await finalize(f.supervisorA, countId).expect(200);
+        const lines = await f.tx.inventoryCountLine.findMany({
+          where: { countId },
+        });
+
+        const locked = {
+          statusCode: 409,
+          message: 'La toma de inventario está finalizada',
+          errors: { countId: 'La toma está finalizada: no admite cambios' },
+        };
+        // Finalizar de nuevo, corregir lo contado o contar un pendiente: 409.
+        expect(
+          (await finalize(f.supervisorA, countId).expect(409)).body,
+        ).toEqual(locked);
+        expect(
+          (
+            await save(f.supervisorA, countId, f.fajita, { boxes: 2 }).expect(
+              409,
+            )
+          ).body,
+        ).toEqual(locked);
+        expect(
+          (
+            await save(f.supervisorA, countId, f.tuna, {
+              looseQuantity: '1',
+            }).expect(409)
+          ).body,
+        ).toEqual(locked);
+
+        // La base tampoco lo permite (triggers, SQLSTATE 42501): ni insertar,
+        // ni modificar, ni borrar líneas, ni modificar o borrar la toma.
+        const fajitaLine = lines.find((line) => line.productId === f.fajita);
+        const tunaLine = lines.find((line) => line.productId === f.tuna);
+        expect(fajitaLine).toBeDefined();
+        expect(tunaLine).toBeDefined();
+        const extra = await f.tx.product.create({
+          data: { name: `Extra ${f.suffix}`, unit: UnitOfMeasure.KG },
+        });
+        expect(
+          await rejectedByDatabase(f, () =>
+            f.tx.inventoryCountLine.create({
+              data: {
+                countId,
+                productId: extra.id,
+                productName: extra.name,
+                unit: UnitOfMeasure.KG,
+                savedById: f.supervisorA.id,
+              },
+            }),
+          ),
+        ).toBe('42501');
+        expect(
+          await rejectedByDatabase(f, () =>
+            f.tx.inventoryCountLine.update({
+              where: { id: tunaLine?.id },
+              data: { looseQuantity: '1', countedQuantity: '1' },
+            }),
+          ),
+        ).toBe('42501');
+        expect(
+          await rejectedByDatabase(f, () =>
+            f.tx.inventoryCountLine.delete({ where: { id: fajitaLine?.id } }),
+          ),
+        ).toBe('42501');
+        expect(
+          await rejectedByDatabase(f, () =>
+            f.tx.inventoryCount.update({
+              where: { id: countId },
+              data: { notes: 'cambio tardío' },
+            }),
+          ),
+        ).toBe('42501');
+        expect(
+          await rejectedByDatabase(f, () =>
+            f.tx.inventoryCount.delete({ where: { id: countId } }),
+          ),
+        ).toBe('42501');
+        expect(
+          await f.tx.inventoryCountLine.findMany({ where: { countId } }),
+        ).toEqual(lines);
+
+        // El local queda libre para iniciar una toma nueva.
+        const next = (await start(f.supervisorA).expect(201))
+          .body as InventoryCountSummary;
+        expect(next.id).not.toBe(countId);
+        expect(next.status).toBe('OPEN');
+        expect(
+          await f.tx.auditLog.count({
+            where: {
+              action: AUDIT_ACTION.INVENTORY_COUNT_FINALIZED,
+              entityId: countId,
+            },
+          }),
+        ).toBe(1);
+      });
+    }, 60_000);
+
+    it('cambiar después el formato del producto o la plantilla no modifica la toma finalizada (SPRINT-5-T06)', async () => {
+      await withinRollback(async (f) => {
+        const countId = await startedCount(f);
+        await save(f.supervisorA, countId, f.fajita, {
+          boxes: 1,
+          packages: 2,
+          looseQuantity: '0.300',
+        }).expect(200);
+        await finalize(f.supervisorA, countId).expect(200);
+        const snapshotBefore = (
+          await f.tx.inventoryCount.findUniqueOrThrow({
+            where: { id: countId },
+            select: { templateSnapshot: true },
+          })
+        ).templateSnapshot;
+
+        // Se edita el catálogo y la plantilla después de finalizar.
+        await f.tx.product.update({
+          where: { id: f.fajita },
+          data: {
+            name: `Carne Fajita Editada ${f.suffix}`,
+            boxContent: '6',
+            packageContent: '3',
+          },
+        });
+        await f.tx.product.update({
+          where: { id: f.tuna },
+          data: { name: `Atún Editado ${f.suffix}`, looseOnly: false },
+        });
+        await f.tx.inventoryTemplateRow.update({
+          where: { position: BASE + 6 },
+          data: { printedText: `SECCIÓN EDITADA ${f.suffix}` },
+        });
+
+        const consulted = (await detail(f.supervisorA, countId).expect(200))
+          .body as InventoryCountDetail;
+        const fajita = consulted.items.find(
+          (item) => item.product.id === f.fajita,
+        );
+        // El producto muestra el formato nuevo; la línea, la copia con que se
+        // contó y el mismo total.
+        expect(fajita?.product).toMatchObject({
+          boxContent: '6.000',
+          packageContent: '3.000',
+        });
+        expect(fajita?.line).toMatchObject({
+          productName: `Carne Fajita ${f.suffix}`,
+          boxContent: '5.000',
+          packageContent: '2.500',
+          countedQuantity: '10.300',
+        });
+        const line = await f.tx.inventoryCountLine.findFirstOrThrow({
+          where: { countId, productId: f.fajita },
+        });
+        // El total se reproduce con la copia del formato de la línea, no con
+        // el formato vigente (que daría 1 × 6 + 2 × 3 + 0,300 = 12,300).
+        const quantities = {
+          boxes: line.boxes,
+          packages: line.packages,
+          looseQuantity: line.looseQuantity,
+        };
+        expect(computeCountedQuantity(line, quantities).toFixed(3)).toBe(
+          line.countedQuantity?.toFixed(3),
+        );
+        expect(
+          computeCountedQuantity(
+            {
+              boxContent: new Prisma.Decimal('6'),
+              packageContent: new Prisma.Decimal('3'),
+            },
+            quantities,
+          ).toFixed(3),
+        ).toBe('12.300');
+
+        // La línea vacía conserva el nombre y el formato al finalizar.
+        const tuna = consulted.items.find((item) => item.product.id === f.tuna);
+        expect(tuna).toMatchObject({
+          counted: false,
+          line: { productName: `Atún Preparado ${f.suffix}`, looseOnly: true },
+        });
+        // La copia de la plantilla no cambia.
+        const snapshotAfter = (
+          await f.tx.inventoryCount.findUniqueOrThrow({
+            where: { id: countId },
+            select: { templateSnapshot: true },
+          })
+        ).templateSnapshot;
+        expect(snapshotAfter).toEqual(snapshotBefore);
+        expect(
+          (snapshotAfter as unknown as InventoryTemplateSnapshotRow[]).find(
+            (row) => row.position === BASE + 6,
+          )?.printedText,
+        ).toBe(`SECCIÓN TOMA ${f.suffix}`);
       });
     }, 60_000);
   },

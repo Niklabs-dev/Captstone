@@ -5,7 +5,8 @@ import {
 } from '../../generated/prisma/client.js';
 import { ProductResponseDto } from './product-response.dto.js';
 
-// Respuestas de la API de tomas de inventario (SPRINT-5-T05).
+// Respuestas de la API de tomas de inventario (SPRINT-5-T05; finalización,
+// SPRINT-5-T06).
 
 export class InventoryCountPersonDto {
   @ApiProperty({
@@ -264,6 +265,22 @@ export class InventoryCountDetailDto extends InventoryCountSummaryDto {
     type: [InventoryCountItemDto],
   })
   items: InventoryCountItemDto[];
+}
+
+export class InventoryCountFinalizationDto extends InventoryCountSummaryDto {
+  @ApiProperty({
+    description:
+      'Productos de la toma finalizada: los contados más los activos sin contar, que quedan con una línea sin cantidades.',
+    example: 140,
+  })
+  totalProducts: number;
+
+  @ApiProperty({
+    description:
+      'Productos sin contar: quedan con una línea sin cantidades (copia de su nombre y formato).',
+    example: 18,
+  })
+  uncountedProducts: number;
 }
 
 export class InventoryCountConflictDto {
