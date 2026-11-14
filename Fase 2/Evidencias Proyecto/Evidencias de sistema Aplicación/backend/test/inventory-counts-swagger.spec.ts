@@ -132,7 +132,9 @@ describe('Swagger de la toma de inventario (SPRINT-5-T05)', () => {
     expect(op.summary).toBe(
       'Descarga en Excel una toma de inventario finalizada',
     );
-    expect(op.description).toContain('SUPERVISOR');
+    expect(op.description).toMatch(/^Rol: ADMINISTRADOR /);
+    expect(op.description).not.toContain('SUPERVISOR');
+    expect(op.description).toContain('una sola hoja');
     expect(op.description).toContain('INVENTORY_COUNT_EXPORTED');
     const ok = op.responses['200'] as {
       content: Record<string, { schema: { type: string; format: string } }>;

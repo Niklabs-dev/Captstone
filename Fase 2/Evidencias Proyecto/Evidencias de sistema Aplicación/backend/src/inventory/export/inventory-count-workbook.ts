@@ -1,8 +1,8 @@
 import type { Cell, Row } from 'write-excel-file/node';
-import { BUSINESS_TIME_ZONE } from '../../audit/utils/business-day.util.js';
 import {
   InventoryTemplateRowKind,
   type Prisma,
+  UnitOfMeasure,
 } from '../../generated/prisma/client.js';
 import {
   storeSlug,
@@ -13,28 +13,29 @@ import type { InventoryTemplateSnapshotRow } from '../types/inventory-counts.typ
 // Contenido del Excel de una toma de inventario finalizada (SPRINT-5-T08).
 // Funciones puras, sin NestJS, base de datos ni la librería de escritura.
 //
-// La hoja «Inventario» replica la plantilla impresa del 14-10-2026
-// (docs/plantilla-inventario.xlsx): la fila 1 es el encabezado y cada fila de
-// la copia de la plantilla (template_snapshot) va en su misma posición, así
-// cada artículo queda en la fila que el local conoce. Las columnas son:
-//   A ARTÍCULO: texto impreso de la fila.
+// Una sola hoja, «Inventario», que replica la plantilla impresa del
+// 14-10-2026 (docs/plantilla-inventario.xlsx): la fila 1 es el encabezado y
+// cada fila de la copia de la plantilla (template_snapshot) va en su misma
+// posición, así cada artículo queda en la fila que el local conoce y el PO
+// puede copiar y pegar el Excel en su cuadre. Las columnas son:
+//   A ARTÍCULO: nombre del producto al contarse, o el texto de la fila si no
+//     tiene producto.
 //   B BULTO (CAJA): cajas contadas.
 //   C BULTO RESTANTE: cajas × contenido por caja (kg, l o unidades).
 //   D PAQUETE: paquetes contados.
 //   E UNIDAD RESTANTES: paquetes × contenido por paquete.
 //   F LINEA Y UNIDADES: cantidad suelta.
 //   G RESTANTES: total contado (C + E + F, calculado al guardar la línea).
-// Las cantidades son celdas numéricas. Un artículo sin contar, una fila
-// <Vacío> o una fila sin texto quedan con las celdas vacías, para distinguir
-// «no se contó» de «se contó 0». Las líneas de productos sin fila en la copia
-// de la plantilla (su fila se liberó antes de finalizar) van al final, en un
-// bloque propio, para no perder lo contado.
-//
-// La hoja «Datos» trae el local, la fecha de la toma, quién la inició y quién
-// la finalizó, con la fecha-hora en hora de Chile.
+// Las cantidades son celdas numéricas. Igual que la plantilla en blanco, en
+// las filas de artículo (también las <Vacío>) C, E y G llevan 0 aunque no se
+// haya contado nada, y B, D y F quedan vacías si no se informaron. Los
+// productos «solo cantidad suelta» (los «(Preparado)») no tienen cajas ni
+// paquetes: como en la plantilla, C y E quedan vacías. Las filas
+// sin texto y las de sección no llevan números. Los productos contados sin
+// fila en la copia de la plantilla (su fila se liberó antes de finalizar) van
+// al final, en un bloque propio, para no perder lo contado.
 
 export const INVENTORY_SHEET = 'Inventario';
-export const DATA_SHEET = 'Datos';
 
 /** Encabezados de la plantilla impresa (columnas A a G). */
 export const INVENTORY_HEADERS = [
@@ -49,6 +50,17 @@ export const INVENTORY_HEADERS = [
 
 /** Cierre del bloque de productos sin fila en la plantilla. */
 export const UNPLACED_SECTION_LABEL = 'PRODUCTOS SIN FILA EN LA PLANTILLA';
+
+/**
+ * Posición máxima aceptada en la copia de la plantilla. La plantilla real
+ * ocupa las filas 2 a 183; el tope evita que una copia corrupta con una
+ * posición enorme arme un archivo gigante en memoria (la base solo exige
+ * posición >= 2).
+ */
+export const MAX_SNAPSHOT_POSITION = 1_000;
+
+/** Formato de las cantidades en kg y l (tres decimales, como la toma). */
+export const DECIMAL_QUANTITY_FORMAT = '0.000';
 
 // Anchos de las columnas A a G y alto de las filas, tomados de la plantilla.
 const COLUMN_WIDTHS = [41.63, 13.26, 16.37, 20.13, 19.25, 17.75, 12.37];
@@ -71,6 +83,8 @@ const COLOR = {
 export interface InventoryCountExportLine {
   productId: string;
   productName: string;
+  unit: UnitOfMeasure;
+  looseOnly: boolean;
   boxes: number | null;
   packages: number | null;
   looseQuantity: Prisma.Decimal | null;
@@ -80,13 +94,6 @@ export interface InventoryCountExportLine {
 }
 
 export interface InventoryCountWorkbookInput {
-  storeName: string;
-  // Fecha de la toma (YYYY-MM-DD).
-  countDate: string;
-  startedAt: Date;
-  startedBy: string;
-  finalizedAt: Date;
-  finalizedBy: string;
   snapshot: readonly InventoryTemplateSnapshotRow[];
   lines: readonly InventoryCountExportLine[];
 }
@@ -95,6 +102,14 @@ export interface InventoryCountWorkbookInput {
 export interface InventoryCountExportTotals {
   countedProducts: number;
   uncountedProducts: number;
+}
+
+/** Copia de la plantilla de una toma que no se puede leer. */
+export class InvalidTemplateSnapshotError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidTemplateSnapshotError';
+  }
 }
 
 const ROW_KINDS: readonly string[] = Object.values(InventoryTemplateRowKind);
@@ -112,6 +127,7 @@ function isSnapshotRow(value: unknown): value is InventoryTemplateSnapshotRow {
     isRecord(value) &&
     Number.isInteger(value.position) &&
     (value.position as number) >= 2 &&
+    (value.position as number) <= MAX_SNAPSHOT_POSITION &&
     typeof value.kind === 'string' &&
     ROW_KINDS.includes(value.kind) &&
     isNullableString(value.printedText) &&
@@ -128,48 +144,44 @@ function isSnapshotRow(value: unknown): value is InventoryTemplateSnapshotRow {
 export function parseTemplateSnapshot(
   value: unknown,
 ): InventoryTemplateSnapshotRow[] {
-  if (!Array.isArray(value) || !value.every(isSnapshotRow)) {
-    throw new Error('La copia de la plantilla de la toma no es válida');
+  if (!Array.isArray(value)) {
+    throw new InvalidTemplateSnapshotError(
+      'La copia de la plantilla de la toma no es una lista',
+    );
   }
-  const rows = [...value].sort((left, right) => left.position - right.position);
+  const invalid = value.findIndex((row) => !isSnapshotRow(row));
+  if (invalid !== -1) {
+    throw new InvalidTemplateSnapshotError(
+      `La copia de la plantilla de la toma tiene una fila inválida (elemento ${invalid}; posición entre 2 y ${MAX_SNAPSHOT_POSITION})`,
+    );
+  }
+  const rows = [...(value as InventoryTemplateSnapshotRow[])].sort(
+    (left, right) => left.position - right.position,
+  );
   rows.forEach((row, index) => {
     if (index > 0 && rows[index - 1].position === row.position) {
-      throw new Error(
-        `La copia de la plantilla repite la posición ${row.position}`,
+      throw new InvalidTemplateSnapshotError(
+        `La copia de la plantilla de la toma repite la posición ${row.position}`,
       );
     }
   });
   return rows;
 }
 
-// inventario_<local>_<fecha de la toma>.xlsx (fecha YYYY-MM-DD).
-export function buildInventoryFileName(
-  storeName: string,
-  countDate: string,
-): string {
-  return `inventario_${storeSlug(storeName)}_${countDate}.xlsx`;
-}
-
-// Fecha-hora en hora de Chile como DD-MM-YYYY HH:mm.
-export function formatChileDateTime(value: Date): string {
-  const parts = new Intl.DateTimeFormat('es-CL', {
-    timeZone: BUSINESS_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(value);
-  const part = (type: Intl.DateTimeFormatPartTypes): string =>
-    parts.find((item) => item.type === type)?.value ?? '';
-  return `${part('day')}-${part('month')}-${part('year')} ${part('hour')}:${part('minute')}`;
-}
-
 // YYYY-MM-DD → DD-MM-YYYY.
 function displayDate(isoDate: string): string {
   const [year, month, day] = isoDate.split('-');
   return `${day}-${month}-${year}`;
+}
+
+// inventario-<local>-<DD-MM-AAAA>.xlsx, con el local en slug (sin tildes,
+// espacios ni caracteres que rompan Content-Disposition) y la fecha de la
+// toma.
+export function buildInventoryFileName(
+  storeName: string,
+  countDate: string,
+): string {
+  return `inventario-${storeSlug(storeName)}-${displayDate(countDate)}.xlsx`;
 }
 
 export function countTotals(
@@ -217,6 +229,33 @@ export function lineQuantities(
   };
 }
 
+// Valores de las columnas B a G de una fila de artículo. C, E y G son 0 si
+// no hay nada contado, como la plantilla en blanco; B, D y F quedan vacías.
+// En un producto «solo cantidad suelta» C y E quedan vacías.
+export function articleValues(
+  quantities: LineQuantities | null,
+  looseOnly = false,
+): (number | null)[] {
+  if (looseOnly) {
+    return [
+      null,
+      null,
+      null,
+      null,
+      quantities?.looseQuantity ?? null,
+      quantities?.countedQuantity ?? 0,
+    ];
+  }
+  return [
+    quantities?.boxes ?? null,
+    quantities?.boxesQuantity ?? 0,
+    quantities?.packages ?? null,
+    quantities?.packagesQuantity ?? 0,
+    quantities?.looseQuantity ?? null,
+    quantities?.countedQuantity ?? 0,
+  ];
+}
+
 type Fill = 'white' | 'computed' | 'total';
 
 const FILL_COLOR: Record<Fill, string | undefined> = {
@@ -234,6 +273,21 @@ const COLUMN_FILLS: readonly Fill[] = [
   'white',
   'total',
 ];
+
+// En un producto «solo cantidad suelta» la plantilla pinta de gris también A,
+// B y D: solo se llenan F y G.
+const LOOSE_ONLY_FILLS: readonly Fill[] = [
+  'computed',
+  'computed',
+  'computed',
+  'computed',
+  'white',
+  'total',
+];
+
+// Columnas B a G que llevan cantidades en la unidad del producto (C, E, F y
+// G); B y D son conteos enteros de cajas y paquetes.
+const UNIT_COLUMNS: readonly boolean[] = [false, true, false, true, true, true];
 
 interface RowEdges {
   // Primera fila del bloque (después del encabezado o de una sección).
@@ -273,26 +327,23 @@ function headerCell(value: string, index: number): Cell {
   };
 }
 
+// Fila de artículo (con números) o fila sin texto (values en null). line es
+// la línea del producto de la fila, si la tiene.
 function articleRow(
   text: string | null,
-  quantities: LineQuantities | null,
+  values: readonly (number | null)[],
+  line: InventoryCountExportLine | null,
   edges: RowEdges,
 ): Row {
-  const values: (number | null)[] = quantities
-    ? [
-        quantities.boxes,
-        quantities.boxesQuantity,
-        quantities.packages,
-        quantities.packagesQuantity,
-        quantities.looseQuantity,
-        quantities.countedQuantity,
-      ]
-    : [null, null, null, null, null, null];
+  const decimal =
+    line?.unit === UnitOfMeasure.KG || line?.unit === UnitOfMeasure.L;
+  const fills = line?.looseOnly ? LOOSE_ONLY_FILLS : COLUMN_FILLS;
   const first: Cell = {
     ...(text === null ? {} : { value: text, type: String }),
     ...FONT,
     ...borders(edges),
     height: ROW_HEIGHT,
+    backgroundColor: line?.looseOnly ? COLOR.computed : undefined,
     align: 'left',
     alignVertical: 'center',
   };
@@ -300,16 +351,21 @@ function articleRow(
     first,
     ...values.map((value, index): Cell => ({
       ...(value === null ? {} : { value, type: Number }),
+      ...(value !== null && decimal && UNIT_COLUMNS[index]
+        ? { format: DECIMAL_QUANTITY_FORMAT }
+        : {}),
       ...FONT,
       ...borders(edges),
       height: ROW_HEIGHT,
-      fontWeight: COLUMN_FILLS[index] === 'total' ? 'bold' : undefined,
-      backgroundColor: FILL_COLOR[COLUMN_FILLS[index]],
+      fontWeight: fills[index] === 'total' ? 'bold' : undefined,
+      backgroundColor: FILL_COLOR[fills[index]],
       align: 'center',
       alignVertical: 'center',
     })),
   ];
 }
+
+const NO_VALUES: readonly null[] = Array<null>(6).fill(null);
 
 function sectionRow(text: string): Row {
   return INVENTORY_HEADERS.map((_header, index): Cell => ({
@@ -333,18 +389,40 @@ interface SheetRow {
 }
 
 function toSheetRow(row: SheetRow, edges: RowEdges): Row {
-  if (row.kind === InventoryTemplateRowKind.SECTION) {
-    return sectionRow(row.text ?? '');
+  switch (row.kind) {
+    case InventoryTemplateRowKind.SECTION:
+      return sectionRow(row.text ?? '');
+    case InventoryTemplateRowKind.BLANK:
+      return articleRow(row.text, NO_VALUES, null, edges);
+    case InventoryTemplateRowKind.ITEM:
+      return articleRow(
+        row.text,
+        articleValues(
+          row.line === null ? null : lineQuantities(row.line),
+          row.line?.looseOnly ?? false,
+        ),
+        row.line,
+        edges,
+      );
   }
-  return articleRow(
-    row.text,
-    row.line === null ? null : lineQuantities(row.line),
-    edges,
-  );
+}
+
+// Texto de la columna A de una fila de la copia: el nombre del producto al
+// contarse (copia de la línea, o la de la plantilla si no tiene línea) y el
+// texto impreso solo si la fila no tiene producto.
+function articleText(
+  row: InventoryTemplateSnapshotRow,
+  line: InventoryCountExportLine | null,
+): string | null {
+  if (row.kind !== InventoryTemplateRowKind.ITEM || row.productId === null) {
+    return row.printedText;
+  }
+  return line?.productName ?? row.productName ?? row.printedText;
 }
 
 // Filas 2 en adelante: cada fila de la copia en su posición (un hueco queda
-// como fila vacía) y al final las líneas sin fila en la plantilla.
+// como fila vacía) y al final los productos contados sin fila en la
+// plantilla.
 function sheetRows(
   snapshot: readonly InventoryTemplateSnapshotRow[],
   lines: readonly InventoryCountExportLine[],
@@ -359,10 +437,12 @@ function sheetRows(
         ? null
         : (lineByProduct.get(row.productId) ?? null);
     if (line !== null) placed.add(line.productId);
-    rows.push({ kind: row.kind, text: row.printedText, line });
+    rows.push({ kind: row.kind, text: articleText(row, line), line });
   }
   const unplaced = lines
-    .filter((line) => !placed.has(line.productId))
+    .filter(
+      (line) => line.countedQuantity !== null && !placed.has(line.productId),
+    )
     .sort((left, right) => left.productName.localeCompare(right.productName));
   if (unplaced.length > 0) {
     for (const line of unplaced) {
@@ -382,6 +462,7 @@ function sheetRows(
 }
 
 // Hoja «Inventario»: encabezado de la plantilla y una fila por posición.
+// Se imprime vertical y ajustada a una hoja de ancho, como la plantilla.
 export function buildInventorySheet(
   input: InventoryCountWorkbookInput,
 ): WorkbookSheet {
@@ -398,56 +479,19 @@ export function buildInventorySheet(
           last: index === rows.length - 1 || isSection(index + 1),
         };
         return row === null
-          ? articleRow(null, null, edges)
+          ? articleRow(null, NO_VALUES, null, edges)
           : toSheetRow(row, edges);
       }),
     ],
     columnWidths: COLUMN_WIDTHS,
     stickyRowsCount: 1,
     stickyColumnsCount: 1,
-  };
-}
-
-// Hoja «Datos»: los datos de la toma, uno por fila (dato y valor).
-export function buildDataSheet(
-  input: InventoryCountWorkbookInput,
-): WorkbookSheet {
-  const totals = countTotals(input.lines);
-  const label = (value: string): Cell => ({
-    value,
-    type: String,
-    ...FONT,
-    fontWeight: 'bold',
-  });
-  const text = (value: string): Cell => ({ value, type: String, ...FONT });
-  const amount = (value: number): Cell => ({
-    value,
-    type: Number,
-    ...FONT,
-    align: 'left',
-  });
-  const rows: Row[] = [
-    [label('Local'), text(input.storeName)],
-    [label('Fecha de la toma'), text(displayDate(input.countDate))],
-    [label('Estado'), text('Finalizada')],
-    [label('Iniciada por'), text(input.startedBy)],
-    [label('Iniciada el'), text(formatChileDateTime(input.startedAt))],
-    [label('Finalizada por'), text(input.finalizedBy)],
-    [label('Finalizada el'), text(formatChileDateTime(input.finalizedAt))],
-    [label('Productos contados'), amount(totals.countedProducts)],
-    [label('Productos sin contar'), amount(totals.uncountedProducts)],
-  ];
-  return {
-    name: DATA_SHEET,
-    rows,
-    columnWidths: [24, 40],
-    stickyRowsCount: 0,
-    stickyColumnsCount: 0,
+    fitToPageWidth: true,
   };
 }
 
 export function buildInventoryCountWorkbook(
   input: InventoryCountWorkbookInput,
 ): WorkbookSheet[] {
-  return [buildInventorySheet(input), buildDataSheet(input)];
+  return [buildInventorySheet(input)];
 }

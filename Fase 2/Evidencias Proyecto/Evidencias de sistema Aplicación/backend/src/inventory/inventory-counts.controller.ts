@@ -231,7 +231,7 @@ export class InventoryCountsController {
   }
 
   @Get(':id/export')
-  @Roles(ROLE.ADMINISTRADOR, ROLE.SUPERVISOR)
+  @Roles(ROLE.ADMINISTRADOR)
   @Header('Cache-Control', 'private, no-store')
   @Header('X-Content-Type-Options', 'nosniff')
   @Audited({
@@ -243,11 +243,11 @@ export class InventoryCountsController {
   @ApiOperation({
     summary: 'Descarga en Excel una toma de inventario finalizada',
     description:
-      'Roles: ADMINISTRADOR (cualquier local) y SUPERVISOR (solo su local). Planilla .xlsx con dos hojas. «Inventario» replica la plantilla impresa: encabezado en la fila 1 y cada fila de la copia de la plantilla guardada al finalizar en su misma posición, con las columnas A artículo, B cajas, C cajas × contenido por caja, D paquetes, E paquetes × contenido por paquete, F cantidad suelta y G total contado (celdas numéricas; C + E + F = G). Un artículo sin contar, una fila <Vacío> o una fila sin texto quedan con las celdas vacías; los productos contados que ya no tenían fila en la plantilla van al final, antes de la fila «PRODUCTOS SIN FILA EN LA PLANTILLA». «Datos»: local, fecha de la toma, quién la inició y la finalizó (fecha-hora de Chile) y cuántos productos se contaron y cuántos no. El archivo usa las copias de la finalización: no cambia aunque después se edite el catálogo o la plantilla. Queda en auditoría (INVENTORY_COUNT_EXPORTED) sin cantidades.',
+      'Rol: ADMINISTRADOR (cualquier local). Planilla .xlsx de una sola hoja, «Inventario», que replica la plantilla impresa: encabezado en la fila 1 y cada fila de la copia de la plantilla guardada al finalizar en su misma posición (la fila N del Excel es la posición N), con las columnas A artículo (nombre del producto al contarse, o el texto de la fila si no tiene producto), B cajas, C cajas × contenido por caja, D paquetes, E paquetes × contenido por paquete, F cantidad suelta y G total contado (celdas numéricas; C + E + F = G; kg y l con formato 0,000). Como en la plantilla en blanco, las filas de artículo y <Vacío> sin contar llevan C, E y G en 0 y B, D y F vacías; las filas sin texto y las de sección no llevan números. Los productos contados que ya no tenían fila en la plantilla van al final, antes de la fila «PRODUCTOS SIN FILA EN LA PLANTILLA». Se imprime vertical y ajustada a una hoja de ancho. El archivo usa las copias de la finalización: no cambia aunque después se edite el catálogo o la plantilla. Queda en auditoría (INVENTORY_COUNT_EXPORTED) sin cantidades.',
   })
   @ApiOkResponse({
     description:
-      'Archivo .xlsx con nombre inventario_<local>_<fecha de la toma>.xlsx en Content-Disposition (local en slug sin tildes ni espacios, fecha YYYY-MM-DD).',
+      'Archivo .xlsx con nombre inventario-<local>-<fecha de la toma>.xlsx en Content-Disposition (local en slug sin tildes ni espacios, fecha DD-MM-AAAA).',
     content: {
       [XLSX_MIME_TYPE]: { schema: { type: 'string', format: 'binary' } },
     },
@@ -257,7 +257,7 @@ export class InventoryCountsController {
         schema: {
           type: 'string',
           example:
-            'attachment; filename="inventario_subway-melipilla-centro_2026-11-11.xlsx"',
+            'attachment; filename="inventario-subway-melipilla-centro-11-11-2026.xlsx"',
         },
       },
       'Cache-Control': {
@@ -274,7 +274,7 @@ export class InventoryCountsController {
   @ApiBadRequestResponse({ description: 'El ID no es un UUID válido.' })
   @ApiForbiddenResponse({
     description:
-      'CONTADOR y TRABAJADOR no descargan tomas; un SUPERVISOR no descarga las de otro local.',
+      'Solo el ADMINISTRADOR descarga tomas en Excel (SUPERVISOR, CONTADOR y TRABAJADOR reciben 403).',
   })
   @ApiNotFoundResponse({ description: 'Toma de inventario no encontrada.' })
   @ApiConflictResponse({
@@ -284,10 +284,9 @@ export class InventoryCountsController {
   })
   async exportCount(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @CurrentUser() user: AuthUser,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
-    const file = await this.countExport.exportCount(id, user);
+    const file = await this.countExport.exportCount(id);
     // La respuesta es el archivo: a la auditoría van la fecha de la toma y
     // las cantidades de productos, nunca lo contado.
     setAuditContext(res, {
