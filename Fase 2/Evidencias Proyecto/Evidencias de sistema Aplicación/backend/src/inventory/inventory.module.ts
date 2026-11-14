@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { InventoryCountExportService } from './inventory-count-export.service.js';
 import { InventoryCountsController } from './inventory-counts.controller.js';
 import { InventoryCountsService } from './inventory-counts.service.js';
 import { InventoryTemplateController } from './inventory-template.controller.js';
@@ -8,7 +9,7 @@ import { ProductsService } from './products.service.js';
 
 // Módulo de inventario (SPRINT-5): catálogo de productos y estructura de la
 // plantilla (SPRINT-5-T03) y tomas de inventario (SPRINT-5-T05) con su
-// finalización (SPRINT-5-T06).
+// finalización (SPRINT-5-T06) y su descarga en Excel (SPRINT-5-T08).
 @Module({
   controllers: [
     InventoryTemplateController,
@@ -19,6 +20,7 @@ import { ProductsService } from './products.service.js';
     ProductsService,
     InventoryTemplateService,
     InventoryCountsService,
+    InventoryCountExportService,
   ],
   exports: [ProductsService, InventoryTemplateService, InventoryCountsService],
 })

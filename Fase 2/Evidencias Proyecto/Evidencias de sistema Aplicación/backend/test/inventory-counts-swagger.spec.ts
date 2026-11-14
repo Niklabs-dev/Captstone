@@ -14,8 +14,8 @@ interface SchemaObject {
   >;
 }
 
-// Contrato OpenAPI de la toma de inventario (SPRINT-5-T05) y su finalización
-// (SPRINT-5-T06): JWT, resumen en español con los roles, respuestas de error
+// Contrato OpenAPI de la toma de inventario (SPRINT-5-T05), su finalización
+// (SPRINT-5-T06) y su descarga en Excel (SPRINT-5-T08): JWT, resumen en español con los roles, respuestas de error
 // y DTOs tipados.
 describe('Swagger de la toma de inventario (SPRINT-5-T05)', () => {
   let app: INestApplication;
@@ -84,6 +84,12 @@ describe('Swagger de la toma de inventario (SPRINT-5-T05)', () => {
       roles: 'SUPERVISOR',
       statuses: ['200', '400', '401', '403', '404', '409'],
     },
+    {
+      method: 'get' as const,
+      path: '/inventory-counts/{id}/export',
+      roles: 'ADMINISTRADOR',
+      statuses: ['200', '400', '401', '403', '404', '409'],
+    },
   ])(
     '$method $path documenta JWT, roles y respuestas',
     ({ method, path, roles, statuses }) => {
@@ -118,6 +124,29 @@ describe('Swagger de la toma de inventario (SPRINT-5-T05)', () => {
         'uncountedProducts',
         'totalProducts',
       ]),
+    );
+  });
+
+  it('la descarga en Excel devuelve un .xlsx con su nombre y queda auditada (SPRINT-5-T08)', () => {
+    const op = operation('get', '/inventory-counts/{id}/export');
+    expect(op.summary).toBe(
+      'Descarga en Excel una toma de inventario finalizada',
+    );
+    expect(op.description).toMatch(/^Rol: ADMINISTRADOR /);
+    expect(op.description).not.toContain('SUPERVISOR');
+    expect(op.description).toContain('una sola hoja');
+    expect(op.description).toContain('INVENTORY_COUNT_EXPORTED');
+    const ok = op.responses['200'] as {
+      content: Record<string, { schema: { type: string; format: string } }>;
+      headers: Record<string, unknown>;
+    };
+    expect(
+      ok.content[
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      ].schema,
+    ).toEqual({ type: 'string', format: 'binary' });
+    expect(Object.keys(ok.headers)).toEqual(
+      expect.arrayContaining(['Content-Disposition', 'Cache-Control']),
     );
   });
 

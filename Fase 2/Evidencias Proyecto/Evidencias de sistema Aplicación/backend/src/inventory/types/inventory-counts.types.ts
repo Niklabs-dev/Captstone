@@ -88,6 +88,18 @@ export interface InventoryCountFinalization extends InventoryCountSummary {
   uncountedProducts: number;
 }
 
+/** Excel de una toma finalizada (SPRINT-5-T08), listo para descargar. */
+export interface InventoryCountExportFile {
+  countId: string;
+  store: { id: string; name: string };
+  // Fecha de la toma (YYYY-MM-DD).
+  countDate: string;
+  fileName: string;
+  content: Buffer;
+  countedProducts: number;
+  uncountedProducts: number;
+}
+
 /**
  * Fila de la plantilla copiada en template_snapshot al finalizar la toma
  * (SPRINT-5-T06): el Excel de una toma finalizada se arma con esta copia y no
