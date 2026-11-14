@@ -96,3 +96,128 @@ export function cellReference(rowIndex: number, columnIndex: number): string {
   }
   return `${column}${rowIndex + 1}`;
 }
+
+// Estilo visible de una celda para comparar el Excel de la toma de
+// inventario con la plantilla en blanco (SPRINT-5-T08).
+export interface XlsxCellStyle {
+  // Relleno sólido como RRGGBB (colores de tema resueltos), o null.
+  fill: string | null;
+  bold: boolean;
+}
+
+// Colores de tema que usa la plantilla: 0 = fondo claro (blanco) y
+// 1 = texto oscuro (negro), con la tinta aplicada como lo hace Excel.
+const THEME_COLORS: Record<string, number> = { '0': 0xffffff, '1': 0x000000 };
+
+function tinted(channel: number, tint: number): number {
+  return Math.round(
+    tint < 0 ? channel * (1 + tint) : channel + (255 - channel) * tint,
+  );
+}
+
+function colorOf(attributes: string): string | null {
+  const rgb = /\brgb="(?:FF)?([0-9A-Fa-f]{6})"/.exec(attributes)?.[1];
+  if (rgb !== undefined) return rgb.toUpperCase();
+  const theme = /\btheme="(\d+)"/.exec(attributes)?.[1];
+  if (theme === undefined || THEME_COLORS[theme] === undefined) return null;
+  const tint = Number(/\btint="(-?[\d.]+)"/.exec(attributes)?.[1] ?? '0');
+  const base = THEME_COLORS[theme];
+  return [16, 8, 0]
+    .map((shift) =>
+      tinted((base >> shift) & 0xff, tint)
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')
+    .toUpperCase();
+}
+
+function isBold(font: string): boolean {
+  const match = /<b\b([^>]*)\/?>/.exec(font);
+  return match !== null && !/val="(false|0)"/.test(match[1]);
+}
+
+// Relleno y negrita de cada celda de una hoja (por referencia, ej. 'C2').
+export function readCellStyles(
+  buffer: Buffer,
+  sheetIndex: number,
+): Map<string, XlsxCellStyle> {
+  const entries = readZipEntries(buffer);
+  const styles = entries.get('xl/styles.xml') ?? '';
+  const sheet = entries.get(`xl/worksheets/sheet${sheetIndex}.xml`);
+  if (sheet === undefined) throw new Error(`Falta la hoja ${sheetIndex}`);
+
+  const section = (tag: string): string =>
+    new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`).exec(styles)?.[1] ?? '';
+  const fills = [...section('fills').matchAll(/<fill>([\s\S]*?)<\/fill>/g)].map(
+    (match) =>
+      /patternType="solid"/.test(match[1])
+        ? colorOf(/<fgColor\b([^>]*)/.exec(match[1])?.[1] ?? '')
+        : null,
+  );
+  const fonts = [
+    ...section('fonts').matchAll(/<font\b[^>]*?(?:\/>|>([\s\S]*?)<\/font>)/g),
+  ].map((match) => isBold(match[1] ?? ''));
+  const xfs = [...section('cellXfs').matchAll(/<xf\b([^>]*)/g)].map(
+    (match) => ({
+      fill: fills[Number(/fillId="(\d+)"/.exec(match[1])?.[1] ?? '0')] ?? null,
+      bold: fonts[Number(/fontId="(\d+)"/.exec(match[1])?.[1] ?? '0')] ?? false,
+    }),
+  );
+
+  const cells = new Map<string, XlsxCellStyle>();
+  for (const match of sheet.matchAll(/<c\b([^>]*?)\/?>/g)) {
+    const reference = /\br="([A-Z]+\d+)"/.exec(match[1])?.[1];
+    if (reference === undefined) continue;
+    const style = Number(/\bs="(\d+)"/.exec(match[1])?.[1] ?? '0');
+    cells.set(reference, xfs[style] ?? { fill: null, bold: false });
+  }
+  return cells;
+}
+
+// Alto de cada fila con alto propio (número de fila → alto).
+export function readRowHeights(
+  buffer: Buffer,
+  sheetIndex: number,
+): Map<number, number> {
+  const sheet = readZipEntries(buffer).get(
+    `xl/worksheets/sheet${sheetIndex}.xml`,
+  );
+  if (sheet === undefined) throw new Error(`Falta la hoja ${sheetIndex}`);
+  const heights = new Map<number, number>();
+  for (const match of sheet.matchAll(/<row\b([^>]*)>/g)) {
+    const row = /\br="(\d+)"/.exec(match[1])?.[1];
+    const height = /\bht="([\d.]+)"/.exec(match[1])?.[1];
+    if (row !== undefined && height !== undefined) {
+      heights.set(Number(row), Number(height));
+    }
+  }
+  return heights;
+}
+
+// Ancho de las columnas en orden (A, B, …), según <cols>.
+export function readColumnWidths(buffer: Buffer, sheetIndex: number): number[] {
+  const sheet = readZipEntries(buffer).get(
+    `xl/worksheets/sheet${sheetIndex}.xml`,
+  );
+  if (sheet === undefined) throw new Error(`Falta la hoja ${sheetIndex}`);
+  const widths: number[] = [];
+  for (const match of sheet.matchAll(/<col\b([^>]*)\/?>/g)) {
+    const min = Number(/\bmin="(\d+)"/.exec(match[1])?.[1]);
+    const max = Number(/\bmax="(\d+)"/.exec(match[1])?.[1]);
+    const width = Number(/\bwidth="([\d.]+)"/.exec(match[1])?.[1]);
+    for (let column = min; column <= max; column += 1) {
+      widths[column - 1] = width;
+    }
+  }
+  return widths;
+}
+
+// XML de una hoja, para revisar la configuración de impresión.
+export function readSheetXml(buffer: Buffer, sheetIndex: number): string {
+  const sheet = readZipEntries(buffer).get(
+    `xl/worksheets/sheet${sheetIndex}.xml`,
+  );
+  if (sheet === undefined) throw new Error(`Falta la hoja ${sheetIndex}`);
+  return sheet;
+}

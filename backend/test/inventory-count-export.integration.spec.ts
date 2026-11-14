@@ -10,13 +10,16 @@ import { AUDIT_ACTION } from '../src/audit/constants/audit-actions.constants.js'
 import { ROLE, type RoleCode } from '../src/auth/constants/roles.constants.js';
 import type { JwtPayload } from '../src/auth/types/auth.types.js';
 import {
-  InventoryTemplateRowKind,
+  INVENTORY_TEMPLATE_ROWS,
+  INVENTORY_TEMPLATE_STRUCTURE,
+  seedInventoryTemplate,
+} from '../prisma/inventory-template.js';
+import {
   Prisma,
   PrismaClient,
   UnitOfMeasure,
 } from '../src/generated/prisma/client.js';
 import {
-  DATA_SHEET,
   INVENTORY_HEADERS,
   INVENTORY_SHEET,
 } from '../src/inventory/export/inventory-count-workbook.js';
@@ -38,13 +41,20 @@ type Tx = Prisma.TransactionClient;
 // corre dentro de withinRollback (helpers/switchable-prisma.ts): la base se
 // revierte, también la auditoría. Requieren TEST_DATABASE_URL.
 //
-// Las filas de la plantilla van desde la posición 1001: la finalización copia
-// todas las filas de la plantilla y la fila n del Excel es la posición n, así
-// el archivo tiene ~1000 filas (posiciones altas lo harían enorme). Ninguna
-// otra suite usa ese rango (la plantilla real ocupa 2 a 183).
+// Usa la plantilla real (filas 2 a 183; el seed de SPRINT-5-T02 la carga
+// dentro de la transacción si la base de pruebas no la tiene) y ubica los
+// productos de prueba en sus filas: la fila n del Excel es la posición n.
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const DOMAIN = '@inventory-export-test.moi-food.cl';
-const BASE = 1_000;
+
+// Filas de la plantilla real usadas por la prueba.
+const ROW = {
+  fajita: 4, // Carne Fajita (Beef Steak Saborizado)
+  empty: 15, // <Vacío>
+  tuna: 17, // Atún (Preparado)
+  drink: 95, // Lata Coca Cola
+  proteinsSection: 45,
+} as const;
 
 class Rollback extends Error {}
 
@@ -56,7 +66,6 @@ interface Session {
 interface Fixture {
   tx: Tx;
   suffix: string;
-  section: string;
   storeA: string;
   storeB: string;
   supervisorA: Session;
@@ -119,34 +128,35 @@ describe.skipIf(!databaseUrl)(
       return { id: created.id, token: await jwt.signAsync(payload) };
     }
 
+    // Crea el producto y lo ubica en su fila de la plantilla real.
     async function product(
       tx: Tx,
       position: number,
-      section: string,
       data: Prisma.ProductUncheckedCreateInput,
     ): Promise<string> {
       const created = await tx.product.create({ data, select: { id: true } });
-      await tx.inventoryTemplateRow.create({
-        data: {
-          position,
-          kind: InventoryTemplateRowKind.ITEM,
-          printedText: `Impreso ${data.name}`,
-          section,
-          productId: created.id,
-        },
+      await tx.inventoryTemplateRow.update({
+        where: { position },
+        data: { productId: created.id },
       });
       return created.id;
     }
 
-    // Plantilla (filas BASE+1 a BASE+5), en este orden:
-    //   +1 Carne Fajita: caja de 5 kg con bolsas de 2,5 kg
-    //   +2 Atún Preparado: solo cantidad suelta (kg)
-    //   +3 <Vacío> (fila de artículo sin producto)
-    //   +4 Bebida: packs de 6 unidades (queda sin contar)
-    //   +5 cierre de la sección
+    // Plantilla real con:
+    //   fila 4  Carne Fajita: caja de 5 kg con bolsas de 2,5 kg
+    //   fila 15 <Vacío> (fila de artículo sin producto)
+    //   fila 17 Atún Preparado: solo cantidad suelta (kg)
+    //   fila 95 Bebida: packs de 6 unidades (queda sin contar)
     async function fixture(tx: Tx): Promise<Fixture> {
+      await seedInventoryTemplate(tx, INVENTORY_TEMPLATE_ROWS);
+      // Los productos que ya estuvieran en esas filas salen de ellas.
+      await tx.inventoryTemplateRow.updateMany({
+        where: {
+          position: { in: [ROW.fajita, ROW.empty, ROW.tuna, ROW.drink] },
+        },
+        data: { productId: null },
+      });
       const suffix = randomUUID().slice(0, 8);
-      const section = `SECCIÓN EXCEL ${suffix}`;
       const store = (name: string) =>
         tx.store.create({
           data: {
@@ -158,7 +168,7 @@ describe.skipIf(!databaseUrl)(
         });
       const storeA = (await store('Local Excel A')).id;
       const storeB = (await store('Local Excel B')).id;
-      const fajita = await product(tx, BASE + 1, section, {
+      const fajita = await product(tx, ROW.fajita, {
         name: `Carne Fajita ${suffix}`,
         unit: UnitOfMeasure.KG,
         packageName: 'bolsa',
@@ -166,37 +176,20 @@ describe.skipIf(!databaseUrl)(
         packageContent: '2.5',
         boxContent: '5',
       });
-      const tuna = await product(tx, BASE + 2, section, {
+      const tuna = await product(tx, ROW.tuna, {
         name: `Atún Preparado ${suffix}`,
         unit: UnitOfMeasure.KG,
         looseOnly: true,
       });
-      await tx.inventoryTemplateRow.create({
-        data: {
-          position: BASE + 3,
-          kind: InventoryTemplateRowKind.ITEM,
-          printedText: '<Vacío>',
-          section,
-        },
-      });
-      const drink = await product(tx, BASE + 4, section, {
+      const drink = await product(tx, ROW.drink, {
         name: `Bebida ${suffix}`,
         unit: UnitOfMeasure.UNIT,
         packageName: 'pack',
         packageContent: '6',
       });
-      await tx.inventoryTemplateRow.create({
-        data: {
-          position: BASE + 5,
-          kind: InventoryTemplateRowKind.SECTION,
-          printedText: section,
-          section,
-        },
-      });
       return {
         tx,
         suffix,
-        section,
         storeA,
         storeB,
         supervisorA: await user(tx, ROLE.SUPERVISOR, storeA, 'Ana'),
@@ -266,13 +259,11 @@ describe.skipIf(!databaseUrl)(
       return countId;
     }
 
-    async function readSheets(
-      content: Buffer,
-    ): Promise<Map<string, SheetRow[]>> {
+    // Lee el archivo y verifica que tenga una sola hoja, «Inventario».
+    async function readInventory(content: Buffer): Promise<SheetRow[]> {
       const sheets = await readXlsxFile(content);
-      return new Map(
-        sheets.map((sheet) => [sheet.sheet, sheet.data as SheetRow[]]),
-      );
+      expect(sheets.map((sheet) => sheet.sheet)).toEqual([INVENTORY_SHEET]);
+      return sheets[0].data as SheetRow[];
     }
 
     // Fila n de la hoja (1 es el encabezado).
@@ -312,7 +303,7 @@ describe.skipIf(!databaseUrl)(
       await app.close();
     });
 
-    it('descarga la toma finalizada con la plantilla, lo contado en su fila y la hoja «Datos»', async () => {
+    it('descarga la toma finalizada en una hoja con la plantilla y lo contado en su fila', async () => {
       await withinRollback(async (f) => {
         const countId = await countedCount(f);
 
@@ -320,19 +311,20 @@ describe.skipIf(!databaseUrl)(
         expect(response.headers['content-type']).toContain(XLSX_MIME_TYPE);
         expect(response.headers['content-disposition']).toMatch(
           new RegExp(
-            `^attachment; filename="inventario_local-excel-a-${f.suffix}_\\d{4}-\\d{2}-\\d{2}\\.xlsx"$`,
+            `^attachment; filename="inventario-local-excel-a-${f.suffix}-\\d{2}-\\d{2}-\\d{4}\\.xlsx"$`,
           ),
         );
         expect(response.headers['cache-control']).toBe('private, no-store');
         expect(response.headers['x-content-type-options']).toBe('nosniff');
 
-        const sheets = await readSheets(response.body as Buffer);
-        expect([...sheets.keys()]).toEqual([INVENTORY_SHEET, DATA_SHEET]);
-        const rows = sheets.get(INVENTORY_SHEET) ?? [];
+        const rows = await readInventory(response.body as Buffer);
+        // Encabezado y las 182 filas de la plantilla real.
+        expect(rows).toHaveLength(INVENTORY_TEMPLATE_STRUCTURE.rows + 1);
         expect(rows[0]).toEqual([...INVENTORY_HEADERS]);
-        // Fajita: B cajas, C 1 × 5, D bolsas, E 2 × 2,5, F suelta, G total.
-        expect(excelRow(rows, BASE + 1)).toEqual([
-          `Impreso Carne Fajita ${f.suffix}`,
+        // Fajita: nombre del producto, B cajas, C 1 × 5, D bolsas, E 2 × 2,5,
+        // F suelta y G total.
+        expect(excelRow(rows, ROW.fajita)).toEqual([
+          `Carne Fajita ${f.suffix}`,
           1,
           5,
           2,
@@ -340,9 +332,9 @@ describe.skipIf(!databaseUrl)(
           0.3,
           10.3,
         ]);
-        // Atún contado en 0: solo cantidad suelta y total.
-        expect(excelRow(rows, BASE + 2)).toEqual([
-          `Impreso Atún Preparado ${f.suffix}`,
+        // Atún «solo cantidad suelta» contado en 0: C y E vacías.
+        expect(excelRow(rows, ROW.tuna)).toEqual([
+          `Atún Preparado ${f.suffix}`,
           null,
           null,
           null,
@@ -350,32 +342,27 @@ describe.skipIf(!databaseUrl)(
           0,
           0,
         ]);
-        // <Vacío> y la bebida sin contar: solo el texto.
-        expect(excelRow(rows, BASE + 3)).toEqual([
+        // <Vacío> y la bebida sin contar: C, E y G en 0, como la plantilla.
+        expect(excelRow(rows, ROW.empty)).toEqual([
           '<Vacío>',
-          ...Array<null>(6).fill(null),
+          null,
+          0,
+          null,
+          0,
+          null,
+          0,
         ]);
-        expect(excelRow(rows, BASE + 4)).toEqual([
-          `Impreso Bebida ${f.suffix}`,
-          ...Array<null>(6).fill(null),
+        expect(excelRow(rows, ROW.drink)).toEqual([
+          `Bebida ${f.suffix}`,
+          null,
+          0,
+          null,
+          0,
+          null,
+          0,
         ]);
-        expect(excelRow(rows, BASE + 5)[0]).toBe(f.section);
-
-        const data = new Map(
-          (sheets.get(DATA_SHEET) ?? []).map((row) => [row[0], row[1]]),
-        );
-        expect(data.get('Local')).toBe(`Local Excel A ${f.suffix}`);
-        expect(data.get('Estado')).toBe('Finalizada');
-        expect(data.get('Iniciada por')).toBe('Ana Excel');
-        expect(data.get('Finalizada por')).toBe('Ana Excel');
-        expect(data.get('Finalizada el')).toMatch(
-          /^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/,
-        );
-        expect(data.get('Productos contados')).toBe(2);
-        // La bebida y los productos activos de otras pruebas o del seed
-        // quedan sin contar: al menos uno.
-        expect(Number(data.get('Productos sin contar'))).toBeGreaterThanOrEqual(
-          1,
+        expect(excelRow(rows, ROW.proteinsSection)[0]).toBe(
+          'COSTO PROTEÍNAS, QUESO SALSAS (SUBTOTAL)',
         );
       });
     });
@@ -406,12 +393,12 @@ describe.skipIf(!databaseUrl)(
     it('el Excel no cambia si después se edita la plantilla o el producto', async () => {
       await withinRollback(async (f) => {
         const countId = await countedCount(f);
-        const before = await readSheets(
+        const before = await readInventory(
           (await download(f.admin, countId).expect(200)).body as Buffer,
         );
 
         await f.tx.inventoryTemplateRow.update({
-          where: { position: BASE + 1 },
+          where: { position: ROW.fajita },
           data: { printedText: 'Texto corregido después' },
         });
         await f.tx.product.update({
@@ -419,21 +406,22 @@ describe.skipIf(!databaseUrl)(
           data: { name: `Otro nombre ${f.suffix}`, boxContent: '10' },
         });
 
-        const after = await readSheets(
+        const after = await readInventory(
           (await download(f.admin, countId).expect(200)).body as Buffer,
         );
-        expect(excelRow(after.get(INVENTORY_SHEET) ?? [], BASE + 1)).toEqual(
-          excelRow(before.get(INVENTORY_SHEET) ?? [], BASE + 1),
+        expect(excelRow(after, ROW.fajita)).toEqual(
+          excelRow(before, ROW.fajita),
         );
+        expect(excelRow(after, ROW.fajita)[0]).toBe(`Carne Fajita ${f.suffix}`);
       });
     });
 
-    it('aplica los permisos por rol y local', async () => {
+    it('solo descarga el ADMINISTRADOR: el supervisor del local recibe 403', async () => {
       await withinRollback(async (f) => {
         const countId = await countedCount(f);
 
-        await download(f.supervisorA, countId).expect(200);
         await download(f.admin, countId).expect(200);
+        await download(f.supervisorA, countId).expect(403);
         await download(f.supervisorB, countId).expect(403);
         await download(f.accountant, countId).expect(403);
         await download(f.worker, countId).expect(403);
