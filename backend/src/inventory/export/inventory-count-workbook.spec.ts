@@ -1,24 +1,28 @@
 import type { Cell, CellObject, Row } from 'write-excel-file/node';
-import { Prisma } from '../../generated/prisma/client.js';
+import { Prisma, UnitOfMeasure } from '../../generated/prisma/client.js';
 import type { InventoryTemplateSnapshotRow } from '../types/inventory-counts.types.js';
 import {
+  articleValues,
   buildInventoryCountWorkbook,
   buildInventoryFileName,
   countTotals,
-  DATA_SHEET,
-  formatChileDateTime,
+  DECIMAL_QUANTITY_FORMAT,
   INVENTORY_HEADERS,
   INVENTORY_SHEET,
+  InvalidTemplateSnapshotError,
   lineQuantities,
+  MAX_SNAPSHOT_POSITION,
   parseTemplateSnapshot,
   UNPLACED_SECTION_LABEL,
   type InventoryCountExportLine,
   type InventoryCountWorkbookInput,
 } from './inventory-count-workbook.js';
 
-// Contenido del Excel de una toma finalizada (SPRINT-5-T08) con datos
-// ficticios: cada fila de la plantilla en su posición, columnas B a G con lo
-// contado (C + E + F = G), celdas vacías para lo no contado y hoja «Datos».
+// Contenido del Excel de una toma finalizada (SPRINT-5-T08) con una plantilla
+// ficticia corta: cada fila en su posición, columna A con el nombre del
+// producto, B a G con lo contado (C + E + F = G) y C, E y G en 0 en las filas
+// de artículo sin contar, como la plantilla en blanco. La comparación contra
+// la plantilla real está en test/inventory-count-workbook-template.spec.ts.
 
 const decimal = (value: string): Prisma.Decimal => new Prisma.Decimal(value);
 
@@ -30,6 +34,8 @@ function line(
   return {
     productId,
     productName,
+    unit: UnitOfMeasure.KG,
+    looseOnly: false,
     boxes: null,
     packages: null,
     looseQuantity: null,
@@ -45,6 +51,7 @@ function snapshotRow(
   kind: InventoryTemplateSnapshotRow['kind'],
   printedText: string | null,
   productId: string | null = null,
+  productName: string | null = null,
 ): InventoryTemplateSnapshotRow {
   return {
     position,
@@ -52,19 +59,25 @@ function snapshotRow(
     printedText,
     section: 'COSTO PROTEÍNAS',
     productId,
-    productName: printedText,
+    productName,
   };
 }
 
 // Plantilla: fajita (fila 2), atún (3), <Vacío> (4), fila sin texto (5),
 // sección (6), bebida sin contar (7) y cierre de la sección (8).
 const SNAPSHOT: InventoryTemplateSnapshotRow[] = [
-  snapshotRow(2, 'ITEM', 'Carne Fajita (Beef Steak)', 'p-fajita'),
-  snapshotRow(3, 'ITEM', 'Atún (Preparado)', 'p-tuna'),
+  snapshotRow(
+    2,
+    'ITEM',
+    'Carne Fajita (Beef Steak Saborizado)',
+    'p-fajita',
+    'Carne Fajita',
+  ),
+  snapshotRow(3, 'ITEM', 'Atún (Preparado)', 'p-tuna', 'Atún'),
   snapshotRow(4, 'ITEM', '<Vacío>'),
   snapshotRow(5, 'BLANK', null),
   snapshotRow(6, 'SECTION', 'COSTO PROTEÍNAS'),
-  snapshotRow(7, 'ITEM', 'Lata Fanta Zero', 'p-drink'),
+  snapshotRow(7, 'ITEM', 'Lata Fanta Zero', 'p-drink', 'Bebida Plantilla'),
   snapshotRow(8, 'SECTION', 'COSTO DE BEBIDAS'),
 ];
 
@@ -77,21 +90,18 @@ const FAJITA = line('p-fajita', 'Carne Fajita', {
   boxContent: decimal('5'),
   packageContent: decimal('2.5'),
 });
-// Atún: solo cantidad suelta, contado en 0.
+// Atún: contado en 0 con solo cantidad suelta.
 const TUNA = line('p-tuna', 'Atún', {
   looseQuantity: decimal('0'),
   countedQuantity: decimal('0'),
 });
-// Bebida: no se contó (línea vacía de la finalización).
-const DRINK = line('p-drink', 'Bebida', { packageContent: decimal('6') });
+// Bebida: no se contó (línea vacía de la finalización), en unidades.
+const DRINK = line('p-drink', 'Bebida', {
+  unit: UnitOfMeasure.UNIT,
+  packageContent: decimal('6'),
+});
 
 const INPUT: InventoryCountWorkbookInput = {
-  storeName: 'Subway Melipilla Centro',
-  countDate: '2026-11-11',
-  startedAt: new Date('2026-11-11T22:05:00.000Z'),
-  startedBy: 'Ana Supervisora',
-  finalizedAt: new Date('2026-11-12T01:40:00.000Z'),
-  finalizedBy: 'Beto Supervisor',
   snapshot: SNAPSHOT,
   lines: [FAJITA, TUNA, DRINK],
 };
@@ -105,41 +115,51 @@ function object(cell: Cell): CellObject {
 
 const values = (row: Row): unknown[] => row.map((cell) => object(cell).value);
 
-function sheets(input: InventoryCountWorkbookInput = INPUT) {
-  const [inventory, data] = buildInventoryCountWorkbook(input);
-  return { inventory, data };
+function inventorySheet(input: InventoryCountWorkbookInput = INPUT) {
+  const sheets = buildInventoryCountWorkbook(input);
+  expect(sheets).toHaveLength(1);
+  return sheets[0];
 }
 
 describe('Excel de la toma de inventario (SPRINT-5-T08)', () => {
-  it('arma las hojas «Inventario» y «Datos» con el encabezado de la plantilla', () => {
-    const { inventory, data } = sheets();
+  it('arma una sola hoja «Inventario» con el encabezado de la plantilla, vertical y a una hoja de ancho', () => {
+    const inventory = inventorySheet();
     expect(inventory.name).toBe(INVENTORY_SHEET);
-    expect(data.name).toBe(DATA_SHEET);
     expect(values(inventory.rows[0])).toEqual([...INVENTORY_HEADERS]);
-    expect(inventory.columnWidths).toHaveLength(7);
+    expect(inventory.columnWidths).toEqual([
+      41.63, 13.26, 16.37, 20.13, 19.25, 17.75, 12.37,
+    ]);
     expect(inventory.stickyRowsCount).toBe(1);
+    expect(inventory.fitToPageWidth).toBe(true);
   });
 
-  it('deja cada fila de la plantilla en su misma posición de la hoja', () => {
-    const { inventory } = sheets();
+  it('deja cada fila en su posición, con el nombre del producto o el texto de la fila', () => {
+    const inventory = inventorySheet();
     // La fila n de Excel es rows[n - 1].
     expect(inventory.rows).toHaveLength(8);
     expect(inventory.rows.map((row) => object(row[0]).value)).toEqual([
       'ARTÍCULO',
-      'Carne Fajita (Beef Steak)',
-      'Atún (Preparado)',
+      // Con producto: el nombre de la copia de la línea, no el impreso.
+      'Carne Fajita',
+      'Atún',
+      // Sin producto: el texto de la fila.
       '<Vacío>',
       undefined,
       'COSTO PROTEÍNAS',
-      'Lata Fanta Zero',
+      'Bebida',
       'COSTO DE BEBIDAS',
     ]);
   });
 
+  it('usa el nombre guardado en la copia de la plantilla si el producto no tiene línea', () => {
+    const inventory = inventorySheet({ ...INPUT, lines: [FAJITA, TUNA] });
+    expect(object(inventory.rows[6][0]).value).toBe('Bebida Plantilla');
+  });
+
   it('llena B a G con lo contado, como números, y C + E + F = G', () => {
-    const { inventory } = sheets();
+    const inventory = inventorySheet();
     expect(values(inventory.rows[1])).toEqual([
-      'Carne Fajita (Beef Steak)',
+      'Carne Fajita',
       2,
       10,
       1,
@@ -152,28 +172,54 @@ describe('Excel de la toma de inventario (SPRINT-5-T08)', () => {
     }
   });
 
-  it('muestra 0 en lo contado en cero y deja vacío lo no contado', () => {
-    const { inventory } = sheets();
-    // Atún contado en 0: cantidad suelta y total en 0, cajas y paquetes vacíos.
+  it('pone C, E y G en 0 en lo no contado y en las <Vacío>, y deja B, D y F vacías', () => {
+    const inventory = inventorySheet();
+    // Atún contado en 0: sin cajas ni paquetes, C y E en 0 como la plantilla.
     expect(values(inventory.rows[2])).toEqual([
-      'Atún (Preparado)',
+      'Atún',
       undefined,
+      0,
       undefined,
-      undefined,
-      undefined,
+      0,
       0,
       0,
     ]);
-    // Bebida sin contar, <Vacío> y fila sin texto: B a G vacías.
-    for (const index of [3, 4, 6]) {
+    // <Vacío> y bebida sin contar: C, E y G en 0.
+    for (const index of [3, 6]) {
+      expect(values(inventory.rows[index]).slice(1)).toEqual([
+        undefined,
+        0,
+        undefined,
+        0,
+        undefined,
+        0,
+      ]);
+    }
+  });
+
+  it('no pone números en las filas sin texto ni en las secciones', () => {
+    const inventory = inventorySheet();
+    for (const index of [4, 5, 7]) {
       expect(values(inventory.rows[index]).slice(1)).toEqual(
         Array(6).fill(undefined),
       );
     }
   });
 
-  it('pinta las secciones de negro y las columnas calculadas y el total como la plantilla', () => {
-    const { inventory } = sheets();
+  it('usa el formato 0,000 en las cantidades en kg y l, y no en cajas, paquetes ni unidades', () => {
+    const inventory = inventorySheet();
+    const formats = (index: number) =>
+      inventory.rows[index].slice(1).map((cell) => object(cell).format);
+    const kg = DECIMAL_QUANTITY_FORMAT;
+    expect(formats(1)).toEqual([undefined, kg, undefined, kg, kg, kg]);
+    // Bebida en unidades: sin formato decimal.
+    expect(formats(6)).toEqual(Array(6).fill(undefined));
+    // <Vacío> (sin producto): formato general.
+    expect(formats(3)).toEqual(Array(6).fill(undefined));
+  });
+
+  it('pinta las secciones, las columnas calculadas y el total como la plantilla', () => {
+    const inventory = inventorySheet();
     const section = inventory.rows[5].map(object);
     expect(section).toHaveLength(7);
     for (const cell of section) {
@@ -191,10 +237,13 @@ describe('Excel de la toma de inventario (SPRINT-5-T08)', () => {
       fontWeight: 'bold',
     });
     expect(article[1].backgroundColor).toBeUndefined();
+    for (const cell of article) {
+      expect(cell).toMatchObject({ fontFamily: 'Arial', height: 17.25 });
+    }
   });
 
   it('cierra cada bloque con borde continuo y separa las filas con borde punteado', () => {
-    const { inventory } = sheets();
+    const inventory = inventorySheet();
     const borders = (index: number) => {
       const cell = object(inventory.rows[index][0]);
       return [cell.topBorderStyle, cell.bottomBorderStyle];
@@ -206,8 +255,7 @@ describe('Excel de la toma de inventario (SPRINT-5-T08)', () => {
   });
 
   it('deja como fila vacía un hueco en las posiciones de la copia', () => {
-    const { inventory } = sheets({
-      ...INPUT,
+    const inventory = inventorySheet({
       snapshot: [SNAPSHOT[0], snapshotRow(4, 'SECTION', 'COSTO PROTEÍNAS')],
       lines: [FAJITA],
     });
@@ -216,41 +264,35 @@ describe('Excel de la toma de inventario (SPRINT-5-T08)', () => {
     expect(object(inventory.rows[3][0]).value).toBe('COSTO PROTEÍNAS');
   });
 
-  it('agrega al final los productos contados que ya no tenían fila en la plantilla', () => {
+  it('agrega al final solo los productos contados que ya no tenían fila en la plantilla', () => {
     const unplaced = line('p-old', 'Queso Viejo', {
       looseQuantity: decimal('1.5'),
       countedQuantity: decimal('1.5'),
     });
-    const { inventory } = sheets({
+    const uncounted = line('p-new', 'Queso Nuevo', {});
+    const inventory = inventorySheet({
       ...INPUT,
-      lines: [FAJITA, TUNA, DRINK, unplaced],
+      lines: [FAJITA, TUNA, DRINK, unplaced, uncounted],
     });
     expect(inventory.rows).toHaveLength(10);
     expect(values(inventory.rows[8])).toEqual([
       'Queso Viejo',
       undefined,
+      0,
       undefined,
-      undefined,
-      undefined,
+      0,
       1.5,
       1.5,
     ]);
     expect(object(inventory.rows[9][0]).value).toBe(UNPLACED_SECTION_LABEL);
   });
 
-  it('trae en «Datos» el local, la fecha, quién inició y finalizó y los totales', () => {
-    const { data } = sheets();
-    expect(data.rows.map(values)).toEqual([
-      ['Local', 'Subway Melipilla Centro'],
-      ['Fecha de la toma', '11-11-2026'],
-      ['Estado', 'Finalizada'],
-      ['Iniciada por', 'Ana Supervisora'],
-      ['Iniciada el', '11-11-2026 19:05'],
-      ['Finalizada por', 'Beto Supervisor'],
-      ['Finalizada el', '11-11-2026 22:40'],
-      ['Productos contados', 2],
-      ['Productos sin contar', 1],
-    ]);
+  it('no agrega el bloque si no hay productos contados sin fila', () => {
+    const inventory = inventorySheet({
+      ...INPUT,
+      lines: [FAJITA, TUNA, DRINK, line('p-new', 'Queso Nuevo', {})],
+    });
+    expect(inventory.rows).toHaveLength(8);
   });
 });
 
@@ -280,6 +322,35 @@ describe('Cantidades de una línea (SPRINT-5-T08)', () => {
     expect(lineQuantities(DRINK)).toBeNull();
   });
 
+  it('arma B a G con 0 en C, E y G cuando no hay nada contado', () => {
+    expect(articleValues(null)).toEqual([null, 0, null, 0, null, 0]);
+  });
+
+  it('deja C y E vacías en un producto «solo cantidad suelta», como la plantilla', () => {
+    expect(articleValues(null, true)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+      0,
+    ]);
+    const prepared = line('p-prep', 'Pollo Teriyaki (Preparado)', {
+      looseOnly: true,
+      looseQuantity: decimal('1.25'),
+      countedQuantity: decimal('1.25'),
+    });
+    const quantities = lineQuantities(prepared);
+    expect(articleValues(quantities, true)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      1.25,
+      1.25,
+    ]);
+  });
+
   it('cuenta los productos contados y sin contar', () => {
     expect(countTotals([FAJITA, TUNA, DRINK])).toEqual({
       countedProducts: 2,
@@ -298,29 +369,38 @@ describe('Copia de la plantilla guardada al finalizar (SPRINT-5-T08)', () => {
     ['no es una lista', { rows: [] }],
     ['sin posición', [{ ...SNAPSHOT[0], position: undefined }]],
     ['posición del encabezado', [{ ...SNAPSHOT[0], position: 1 }]],
+    [
+      'posición sobre el tope',
+      [{ ...SNAPSHOT[0], position: MAX_SNAPSHOT_POSITION + 1 }],
+    ],
     ['tipo desconocido', [{ ...SNAPSHOT[0], kind: 'OTHER' }]],
     ['texto no textual', [{ ...SNAPSHOT[0], printedText: 7 }]],
     ['posición repetida', [SNAPSHOT[0], SNAPSHOT[0]]],
   ])('rechaza una copia inválida: %s', (_case, value) => {
+    expect(() => parseTemplateSnapshot(value)).toThrow(
+      InvalidTemplateSnapshotError,
+    );
     expect(() => parseTemplateSnapshot(value)).toThrow(/copia de la plantilla/);
+  });
+
+  it('acepta la posición del tope', () => {
+    const parsed = parseTemplateSnapshot([
+      { ...SNAPSHOT[0], position: MAX_SNAPSHOT_POSITION },
+    ]);
+    expect(parsed).toHaveLength(1);
   });
 });
 
-describe('Nombre del archivo y fechas (SPRINT-5-T08)', () => {
-  it('nombra el archivo con el local en slug y la fecha de la toma', () => {
+describe('Nombre del archivo (SPRINT-5-T08)', () => {
+  it('nombra el archivo inventario-LOCAL-DD-MM-AAAA.xlsx con el local en slug', () => {
     expect(buildInventoryFileName('Subway Calera Ñuñoa', '2026-11-11')).toBe(
-      'inventario_subway-calera-nunoa_2026-11-11.xlsx',
+      'inventario-subway-calera-nunoa-11-11-2026.xlsx',
     );
   });
 
-  it('muestra la fecha-hora en hora de Chile, también en horario de verano', () => {
-    // 13-11-2026 03:30 UTC = 13-11-2026 00:30 en Chile (UTC-3).
-    expect(formatChileDateTime(new Date('2026-11-13T03:30:00.000Z'))).toBe(
-      '13-11-2026 00:30',
-    );
-    // 15-07-2026 16:00 UTC = 15-07-2026 12:00 en Chile (UTC-4).
-    expect(formatChileDateTime(new Date('2026-07-15T16:00:00.000Z'))).toBe(
-      '15-07-2026 12:00',
-    );
+  it('limpia del local los caracteres que romperían Content-Disposition', () => {
+    expect(
+      buildInventoryFileName('Local "raro"\r\n; filename=x.exe', '2026-01-05'),
+    ).toBe('inventario-local-raro-filename-x-exe-05-01-2026.xlsx');
   });
 });

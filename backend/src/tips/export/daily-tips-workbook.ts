@@ -54,6 +54,8 @@ export interface WorkbookSheet {
   columnWidths: number[];
   stickyRowsCount: number;
   stickyColumnsCount: number;
+  /// Imprimir vertical y ajustada a una hoja de ancho (SPRINT-5-T08).
+  fitToPageWidth?: boolean;
 }
 
 // Días corridos del período (YYYY-MM-DD), ambos extremos incluidos.
