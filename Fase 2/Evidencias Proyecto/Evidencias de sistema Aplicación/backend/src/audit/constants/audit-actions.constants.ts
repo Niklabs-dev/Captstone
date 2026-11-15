@@ -115,6 +115,10 @@ export const AUDIT_ACTION = {
   // y queda inmutable. El detalle registra la fecha de la toma y cuántos
   // productos se contaron y cuántos no.
   INVENTORY_COUNT_FINALIZED: 'INVENTORY_COUNT_FINALIZED',
+  // Descarga en Excel de una toma finalizada (SPRINT-5-T08): el detalle
+  // registra la fecha de la toma y cuántos productos se contaron y cuántos
+  // no; el local y quién descargó van en el evento.
+  INVENTORY_COUNT_EXPORTED: 'INVENTORY_COUNT_EXPORTED',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

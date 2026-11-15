@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   Param,
   ParseUUIDPipe,
@@ -9,6 +10,7 @@ import {
   Put,
   Query,
   Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -19,6 +21,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -44,6 +47,8 @@ import {
   InventoryCountSummaryDto,
 } from './dto/inventory-count-response.dto.js';
 import { ProductFieldErrorsDto } from './dto/product-response.dto.js';
+import { XLSX_MIME_TYPE } from '../tips/export/daily-tips-workbook.js';
+import { InventoryCountExportService } from './inventory-count-export.service.js';
 import { InventoryCountsService } from './inventory-counts.service.js';
 import type {
   InventoryCountDetail,
@@ -54,13 +59,18 @@ import type {
 
 // Tomas de inventario (SPRINT-5-T05). Iniciar, guardar líneas y finalizar
 // (SPRINT-5-T06) son del SUPERVISOR, solo en su local; el ADMINISTRADOR
-// consulta todas en solo lectura; CONTADOR y TRABAJADOR reciben 403.
+// consulta todas en solo lectura; CONTADOR y TRABAJADOR reciben 403. La
+// descarga en Excel de una toma finalizada (SPRINT-5-T08) es del
+// ADMINISTRADOR (cualquier local) y del SUPERVISOR (su local).
 @ApiTags('inventory-counts')
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Token ausente, inválido o expirado.' })
 @Controller('inventory-counts')
 export class InventoryCountsController {
-  constructor(private readonly counts: InventoryCountsService) {}
+  constructor(
+    private readonly counts: InventoryCountsService,
+    private readonly countExport: InventoryCountExportService,
+  ) {}
 
   @Post()
   @Roles(ROLE.SUPERVISOR)
@@ -218,5 +228,80 @@ export class InventoryCountsController {
       },
     });
     return count;
+  }
+
+  @Get(':id/export')
+  @Roles(ROLE.ADMINISTRADOR)
+  @Header('Cache-Control', 'private, no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  @Audited({
+    action: AUDIT_ACTION.INVENTORY_COUNT_EXPORTED,
+    entityType: 'inventory_counts',
+    entityIdFrom: 'context.entityId',
+  })
+  @ApiProduces(XLSX_MIME_TYPE)
+  @ApiOperation({
+    summary: 'Descarga en Excel una toma de inventario finalizada',
+    description:
+      'Rol: ADMINISTRADOR (cualquier local). Planilla .xlsx de una sola hoja, «Inventario», que replica la plantilla impresa: encabezado en la fila 1 y cada fila de la copia de la plantilla guardada al finalizar en su misma posición (la fila N del Excel es la posición N), con las columnas A artículo (nombre del producto al contarse, o el texto de la fila si no tiene producto), B cajas, C cajas × contenido por caja, D paquetes, E paquetes × contenido por paquete, F cantidad suelta y G total contado (celdas numéricas; C + E + F = G; kg y l con formato 0,000). Como en la plantilla en blanco, las filas de artículo y <Vacío> sin contar llevan C, E y G en 0 y B, D y F vacías; las filas sin texto y las de sección no llevan números. Los productos contados que ya no tenían fila en la plantilla van al final, antes de la fila «PRODUCTOS SIN FILA EN LA PLANTILLA». Se imprime vertical y ajustada a una hoja de ancho. El archivo usa las copias de la finalización: no cambia aunque después se edite el catálogo o la plantilla. Queda en auditoría (INVENTORY_COUNT_EXPORTED) sin cantidades.',
+  })
+  @ApiOkResponse({
+    description:
+      'Archivo .xlsx con nombre inventario-<local>-<fecha de la toma>.xlsx en Content-Disposition (local en slug sin tildes ni espacios, fecha DD-MM-AAAA).',
+    content: {
+      [XLSX_MIME_TYPE]: { schema: { type: 'string', format: 'binary' } },
+    },
+    headers: {
+      'Content-Disposition': {
+        description: 'attachment con el nombre del archivo.',
+        schema: {
+          type: 'string',
+          example:
+            'attachment; filename="inventario-subway-melipilla-centro-11-11-2026.xlsx"',
+        },
+      },
+      'Cache-Control': {
+        description:
+          'El inventario es información interna: no se guarda en caché.',
+        schema: { type: 'string', example: 'private, no-store' },
+      },
+      'X-Content-Type-Options': {
+        description: 'Siempre nosniff.',
+        schema: { type: 'string', example: 'nosniff' },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'El ID no es un UUID válido.' })
+  @ApiForbiddenResponse({
+    description:
+      'Solo el ADMINISTRADOR descarga tomas en Excel (SUPERVISOR, CONTADOR y TRABAJADOR reciben 403).',
+  })
+  @ApiNotFoundResponse({ description: 'Toma de inventario no encontrada.' })
+  @ApiConflictResponse({
+    description:
+      'La toma todavía está En curso (errors.countId): solo se descarga una toma finalizada.',
+    type: ProductFieldErrorsDto,
+  })
+  async exportCount(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const file = await this.countExport.exportCount(id);
+    // La respuesta es el archivo: a la auditoría van la fecha de la toma y
+    // las cantidades de productos, nunca lo contado.
+    setAuditContext(res, {
+      entityId: file.countId,
+      storeId: file.store.id,
+      detail: {
+        countDate: file.countDate,
+        countedProducts: file.countedProducts,
+        uncountedProducts: file.uncountedProducts,
+      },
+    });
+    return new StreamableFile(file.content, {
+      type: XLSX_MIME_TYPE,
+      disposition: `attachment; filename="${file.fileName}"`,
+      length: file.content.length,
+    });
   }
 }
