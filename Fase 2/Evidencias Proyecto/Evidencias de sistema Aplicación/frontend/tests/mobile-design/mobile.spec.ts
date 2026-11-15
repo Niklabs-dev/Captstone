@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
-import { getNavigationItems, getHomePath } from '../../src/lib/navigation';
+import {
+  getNavigationItems,
+  getNavigationView,
+  getHomePath,
+} from '../../src/lib/navigation';
 import { getMobileNavigation } from '../../src/lib/mobile-navigation';
 import type { Role } from '../../src/lib/auth';
 
@@ -160,12 +164,15 @@ for (const role of roles)
         await expect(dialog).not.toBeVisible();
         await expect(more).toBeFocused();
         await more.click();
+        // El primer módulo de «Más» de cada rol: Auditoría del administrador
+        // y, desde SPRINT-5-T07, Mis documentos del supervisor.
+        const [target] = getMobileNavigation(role).additional;
         await dialog
-          .getByRole('link', { name: 'Auditoría', exact: true })
+          .getByRole('link', { name: target.label, exact: true })
           .click();
         await expect(
           page.getByRole('heading', {
-            name: 'Auditoría del sistema',
+            name: getNavigationView(target.href).title,
             exact: true,
           }),
         ).toBeVisible();
