@@ -56,6 +56,7 @@ const actionLabels: Partial<Record<NavigationItem['href'], string>> = {
   '/admin/calendario-locales': 'Gestionar calendario de locales',
   '/liquidaciones': 'Abrir liquidaciones',
   '/propinas': 'Revisar propinas',
+  '/inventario': 'Tomar inventario',
 };
 
 export function OperationsHome({

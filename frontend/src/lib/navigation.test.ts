@@ -473,3 +473,37 @@ test('Mis documentos y Mis liquidaciones permanecen separados para trabajadores 
       );
   }
 });
+
+test('La toma de inventario es exclusiva del supervisor, junto a su operación diaria (SPRINT-5-T07)', () => {
+  assert.deepEqual(getNavigationView('/inventario'), {
+    href: '/inventario',
+    title: 'Toma de inventario',
+  });
+  for (const role of ROLES) {
+    const allowed = role === 'SUPERVISOR';
+    const items = getNavigationItems(role);
+    assert.equal(
+      items.some(
+        (item) => item.href === '/inventario' && item.label === 'Inventario',
+      ),
+      allowed,
+    );
+    assert.equal(getPageRedirect(role, '/inventario') === null, allowed);
+    assert.equal(getPageRedirect(role, '/inventario/otra') === null, allowed);
+  }
+  const supervisor = getNavigationItems('SUPERVISOR').map((item) => item.href);
+  assert.equal(
+    supervisor.indexOf('/inventario'),
+    supervisor.indexOf('/propinas/diarias') + 1,
+  );
+  assert.equal(
+    getPageRedirect('TRABAJADOR', '/inventario'),
+    '/portal?reason=forbidden',
+  );
+  assert.equal(
+    getPageRedirect('ADMINISTRADOR', '/inventario'),
+    '/dashboard?reason=forbidden',
+  );
+  // Una ruta parecida no hereda el permiso.
+  assert.equal(getPageRedirect('CONTADOR', '/inventarios'), null);
+});
