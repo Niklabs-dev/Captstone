@@ -12,6 +12,9 @@ import {
 // inventario (SPRINT-5-T02) contra PostgreSQL real. Usan una plantilla sintética en
 // posiciones altas (desde la 20000) para no chocar con las filas reales que
 // carga el seed, y cada caso corre en withinRollback (la base se revierte).
+// Los casos que comparan cuántos productos hay usan una foto fija de la base
+// (REPEATABLE READ): así no ven los productos que otras suites commitean o
+// borran en paralelo (SPRINT-5-T16).
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 const P = 20_000;
@@ -64,14 +67,17 @@ describe.skipIf(!databaseUrl)(
       await prisma.$disconnect();
     });
 
-    async function withinRollback(fn: (tx: Tx) => Promise<void>) {
+    async function withinRollback(
+      fn: (tx: Tx) => Promise<void>,
+      isolationLevel?: Prisma.TransactionIsolationLevel,
+    ) {
       try {
         await prisma.$transaction(
           async (tx) => {
             await fn(tx);
             throw new Rollback();
           },
-          { maxWait: 30_000, timeout: 60_000 },
+          { maxWait: 30_000, timeout: 60_000, isolationLevel },
         );
       } catch (error) {
         if (!(error instanceof Rollback)) throw error;
@@ -122,7 +128,7 @@ describe.skipIf(!databaseUrl)(
           [7, 'SECTION', 'COSTO DE BEBIDAS', 'COSTO DE BEBIDAS', null],
         ]);
         expect(await tx.product.count()).toBe(products);
-      });
+      }, Prisma.TransactionIsolationLevel.RepeatableRead);
     });
 
     it('una segunda carga no crea ni cambia filas', async () => {
@@ -305,7 +311,7 @@ describe.skipIf(!databaseUrl)(
           rows.filter((r) => r.kind === 'SECTION').map((r) => r.position),
         ).toEqual([45, 88, 141, 162, 183]);
         expect(await tx.product.count()).toBe(products);
-      });
+      }, Prisma.TransactionIsolationLevel.RepeatableRead);
     });
   },
 );
