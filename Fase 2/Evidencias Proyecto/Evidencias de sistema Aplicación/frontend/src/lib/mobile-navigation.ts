@@ -32,6 +32,7 @@ export function getNavigationIcon(href: NavigationItem['href']) {
     '/admin/alertas-dt': 'bell',
     '/admin/medios-pago': 'wallet',
     '/admin/productos': 'store',
+    '/admin/inventarios': 'audit',
     '/admin/importacion-ventas': 'document',
     '/admin/panel-ventas': 'chart',
     '/admin/reportes-ventas': 'audit',
