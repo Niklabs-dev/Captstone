@@ -490,3 +490,9 @@ Pruebas: `npm run test:sales-overview` y `TEST_REAL_DISPOSABLE=true npm run test
 - **Finalizar:** «Finalizar inventario» confirma con los productos contados y la lista de los sin contar; al confirmar la toma queda en solo lectura. Sin productos contados (400) o ya finalizada (409) se explica en un mensaje.
 
 Pruebas: `npm run test:inventory-count` (parseo, formato, total, secciones, avance, búsqueda, contrato del BFF y navegación) y `TEST_REAL_DISPOSABLE=true npm run test:inventory-count:real` (API y PostgreSQL reales en 1440, 360, 390 y 768 px, con `TEST_REAL_BACKEND_URL` y `TEST_REAL_FRONTEND_URL`). La prueba real crea su local, su supervisor y cuatro productos, y al terminar los desactiva; las tomas no se pueden borrar (la base las protege), por eso corre solo contra una base exclusiva de pruebas. Capturas: `output/playwright/inventory-count/<proyecto>/` (ignorado por git).
+
+### Contrato compartido de las tomas (SPRINT-5-T17)
+
+La toma del supervisor (`/inventario`) y la revisión del administrador (`/admin/inventarios`, SPRINT-5-T09) leen la API con un solo módulo, `src/lib/inventory-count-contract.ts`: tipos, parsers de las respuestas y de los cuerpos que reenvía el BFF, etiquetas de estado («En curso» / «Finalizado»), formato de cantidades (kg y L con coma y 3 decimales, unidades enteras, miles con punto) y secciones en el orden de la plantilla. Si cambia el contrato de `/inventory-counts`, se cambia solo ahí. Las reglas propias de cada vista siguen en `inventory-count.ts` (borrador, total en vivo, búsqueda, fechas y mensajes del supervisor) e `inventory-counts.ts` (filtros, celdas del detalle, nombre del Excel y mensajes del administrador).
+
+Pruebas: `inventory-count-contract.test.ts` corre dentro de `npm run test:inventory-count` y de `npm run test:inventory-counts`.
