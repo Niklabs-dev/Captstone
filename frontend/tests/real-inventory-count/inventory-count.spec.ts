@@ -505,7 +505,7 @@ test('Supervisor: inicia, cuenta con total en vivo, reintenta sin red, retoma en
       `Inventario finalizado: 3 productos contados y ${total - 3} sin contar.`,
     ),
   ).toBeVisible();
-  await expect(page.getByText('Finalizada', { exact: true })).toBeVisible();
+  await expect(page.getByText('Finalizado', { exact: true })).toBeVisible();
   await expect(
     page.getByRole('heading', { name: `Toma del ${display(today)}` }),
   ).toBeVisible();
