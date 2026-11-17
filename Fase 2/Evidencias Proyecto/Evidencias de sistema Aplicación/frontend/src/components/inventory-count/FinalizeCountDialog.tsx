@@ -10,7 +10,7 @@ import {
   primaryButtonClass,
 } from '@/components/ui/styles';
 import { formatCalendarDate } from '@/lib/display-date';
-import type { CountItem } from '@/lib/inventory-count';
+import type { CountItem } from '@/lib/inventory-count-contract';
 
 // Confirmación de «Finalizar inventario» (SPRINT-5-T07): muestra cuántos
 // productos se contaron y cuáles quedan sin contar antes de bloquear la toma.

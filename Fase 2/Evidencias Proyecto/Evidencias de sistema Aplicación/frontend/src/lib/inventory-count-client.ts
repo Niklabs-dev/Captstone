@@ -1,5 +1,8 @@
 import {
   inventoryCountErrorMessage,
+  type CountAction,
+} from './inventory-count';
+import {
   parseCountDetail,
   parseCountFieldErrors,
   parseCountFinalization,
@@ -7,7 +10,6 @@ import {
   parseCountSummaries,
   parseCountSummary,
   parseStartConflict,
-  type CountAction,
   type CountFieldErrors,
   type CountItem,
   type CountLineInput,
@@ -16,7 +18,7 @@ import {
   type InventoryCountStatus,
   type InventoryCountSummary,
   type StartConflict,
-} from './inventory-count';
+} from './inventory-count-contract';
 
 // Cliente del BFF de tomas de inventario (SPRINT-5-T07).
 export class InventoryCountRequestError extends Error {
