@@ -7,12 +7,18 @@ export function getMobileNavigation(role: Role): {
 } {
   const items = getNavigationItems(role);
   if (items.length <= 5) return { primary: items, additional: [] };
+  // Cuatro plazas más «Más»: las tareas del administrador y, para el
+  // supervisor (SPRINT-5-T07), la operación diaria, el inventario y sus
+  // propinas; documentos y liquidaciones pasan a «Más».
   const primary = items.filter((item) =>
     [
       '/dashboard',
       '/admin/usuarios',
       '/admin/locales',
       '/admin/documentos',
+      '/propinas/diarias',
+      '/inventario',
+      '/portal/propinas',
     ].includes(item.href),
   );
   return {
@@ -41,6 +47,7 @@ export function getNavigationIcon(href: NavigationItem['href']) {
     '/propinas': 'tips',
     '/propinas/diarias': 'tips',
     '/propinas/historico': 'tips',
+    '/inventario': 'inventory',
     '/portal/propinas': 'tips',
     '/portal/documentos': 'document',
     '/portal/liquidaciones': 'wallet',
@@ -52,6 +59,7 @@ export function getMobileLabel(item: NavigationItem): string {
   // Distingue las constancias propias de los módulos de gestión de propinas.
   if (item.href === '/portal/propinas') return 'Mis propinas';
   if (item.href === '/propinas/diarias') return 'Operación';
+  if (item.href === '/inventario') return 'Inventario';
   if (item.href.includes('propinas')) return 'Propinas';
   if (item.href.includes('documentos')) return 'Documentos';
   if (item.href.includes('liquidaciones')) return 'Liquidaciones';
