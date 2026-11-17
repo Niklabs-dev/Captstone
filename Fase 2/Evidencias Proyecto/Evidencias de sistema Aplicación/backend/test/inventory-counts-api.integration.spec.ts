@@ -219,8 +219,12 @@ describe.skipIf(!databaseUrl)(
       };
     }
 
+    // isolationLevel permite usar una foto fija de la base (REPEATABLE READ)
+    // en los casos que comparan contadores de toda la tabla, para que no vean
+    // lo que otras suites commitean en paralelo (SPRINT-5-T16).
     async function withinRollback(
       fn: (f: Fixture) => Promise<void>,
+      isolationLevel?: Prisma.TransactionIsolationLevel,
     ): Promise<void> {
       try {
         await prisma.$transaction(
@@ -229,7 +233,7 @@ describe.skipIf(!databaseUrl)(
             await fn(await fixture(tx));
             throw new Rollback();
           },
-          { maxWait: 30_000, timeout: 60_000 },
+          { maxWait: 30_000, timeout: 60_000, isolationLevel },
         );
       } catch (error) {
         if (!(error instanceof Rollback)) throw error;
@@ -577,6 +581,8 @@ describe.skipIf(!databaseUrl)(
           },
         });
         expect(mine[1].line?.countedQuantity).toBe('96');
+        // Con la foto fija (REPEATABLE READ) este contador coincide con el de
+        // la API aunque otras suites creen productos en paralelo.
         const activeProducts = await f.tx.product.count({
           where: { isActive: true },
         });
@@ -651,7 +657,7 @@ describe.skipIf(!databaseUrl)(
           message: 'La toma de inventario está finalizada',
           errors: { countId: 'La toma está finalizada: no admite cambios' },
         });
-      });
+      }, Prisma.TransactionIsolationLevel.RepeatableRead);
     }, 60_000);
 
     it('aplica los permisos por rol y local y filtra el listado', async () => {
