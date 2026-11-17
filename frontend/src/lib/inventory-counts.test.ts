@@ -15,6 +15,7 @@ import {
   formatChileDateTime,
   hasCountFilters,
   inventoryCountError,
+  isCalendarDate,
   parseCountFilters,
 } from './inventory-counts';
 import { getNavigationItems, getPageRedirect } from './navigation';
@@ -128,12 +129,21 @@ test('valida los filtros del listado y arma la consulta', () => {
     [{ from: '2026-13-01' }, /fechas/],
     [{ to: '11-11-2026' }, /fechas/],
     [{ from: '2026-11-30', to: '2026-11-01' }, /posterior/],
+    // Igual que la API: los años 0000 a 0099 no son fechas válidas y no se
+    // consultan (SPRINT-5-T17).
+    [{ from: '0050-01-01' }, /fechas/],
+    [{ from: '0000-01-01' }, /fechas/],
+    [{ to: '0099-12-31' }, /fechas/],
   ];
   for (const [params, message] of cases) {
     const result = parseCountFilters(params);
-    assert.equal(result.ok, false);
+    assert.equal(result.ok, false, JSON.stringify(params));
     if (!result.ok) assert.match(result.message, message);
   }
+  assert.equal(parseCountFilters({ from: '0100-01-01' }).ok, true);
+  assert.equal(isCalendarDate('2028-02-29'), true);
+  assert.equal(isCalendarDate('2026-02-29'), false);
+  assert.equal(isCalendarDate('0050-01-01'), false);
 });
 
 test('arma las celdas del detalle con la copia guardada de la línea', () => {
