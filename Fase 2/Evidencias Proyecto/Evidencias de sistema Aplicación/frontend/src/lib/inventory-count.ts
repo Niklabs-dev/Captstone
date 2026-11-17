@@ -17,7 +17,7 @@ import { isUuid } from './users';
 export type InventoryCountStatus = 'OPEN' | 'CONFIRMED';
 export const COUNT_STATUS_LABELS: Record<InventoryCountStatus, string> = {
   OPEN: 'En curso',
-  CONFIRMED: 'Finalizada',
+  CONFIRMED: 'Finalizado',
 };
 
 export interface CountPerson {
