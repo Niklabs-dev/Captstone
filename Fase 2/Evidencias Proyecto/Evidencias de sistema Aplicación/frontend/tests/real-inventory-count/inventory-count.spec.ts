@@ -672,11 +672,12 @@ test('Supervisor: estado de error con reintento y BFF acotado', async ({
   expect((await context.request.get('/api/inventory-counts')).status()).toBe(
     400,
   );
+  // La descarga del Excel es solo del administrador (SPRINT-5-T09).
   expect(
     (
       await context.request.get(`/api/inventory-counts/${open.id}/export`)
     ).status(),
-  ).toBe(404);
+  ).toBe(403);
   // Lo que no aplica al formato se rechaza con su error por campo.
   const wrong = await bff(
     context.request,

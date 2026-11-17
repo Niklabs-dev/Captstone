@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { callBackend } from '@/lib/auth-backend';
 import { isProxyUuid } from '@/lib/backend-proxy';
+import { XLSX_CONTENT_TYPE } from '@/lib/daily-tips';
+import { inventoryCountError } from '@/lib/inventory-counts';
 import {
   MAX_SEARCH_LENGTH,
   inventoryCountErrorMessage,
@@ -17,6 +19,7 @@ import {
 } from '@/lib/inventory-count';
 import { getSupervisorSession } from '@/lib/supervisor-session';
 import { hasSameOrigin } from '@/lib/users';
+import { getUsersSession } from '@/lib/users-session';
 
 // SPRINT-5-T07: BFF de la toma de inventario del supervisor. Solo expone lo
 // que usa la vista: listar las tomas de su local por estado, consultar una,
@@ -24,7 +27,57 @@ import { hasSameOrigin } from '@/lib/users';
 // servidor, el local sale siempre de la sesión y solo se reenvían campos del
 // contrato, errores por campo conocidos y, en el 409 al iniciar, el ID de la
 // toma en curso para retomarla.
+//
+// SPRINT-5-T09: además, GET :id/export descarga el Excel de una toma
+// finalizada (SPRINT-5-T08), exclusivo del administrador. Es la única ruta
+// que usa la sesión de administrador; el resto exige la del supervisor.
 type Context = { params: Promise<{ path?: string[] }> };
+
+function exportFailure(status: number): Response {
+  const safe = [400, 401, 403, 404, 409, 429, 503].includes(status)
+    ? status
+    : 502;
+  return Response.json(
+    { message: inventoryCountError(safe, 'export') },
+    {
+      status: safe,
+      headers: {
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    },
+  );
+}
+
+// El token queda en el servidor y solo se reenvía un .xlsx con su nombre.
+async function exportCount(request: Request, id: string): Promise<Response> {
+  if (new URL(request.url).search) return exportFailure(400);
+  // Verifica con el backend que la sesión sea de un administrador.
+  const session = await getUsersSession();
+  if (!session.ok) return exportFailure(session.status);
+  const upstream = await callBackend(`/inventory-counts/${id}/export`, {
+    headers: { Authorization: 'Bearer ' + session.token },
+    redirect: 'error',
+  });
+  if (!upstream) return exportFailure(503);
+  if (
+    upstream.status !== 200 ||
+    !upstream.headers.get('content-type')?.startsWith(XLSX_CONTENT_TYPE)
+  ) {
+    await upstream.body?.cancel();
+    return exportFailure(upstream.ok ? 502 : upstream.status);
+  }
+  const headers = new Headers({
+    'Content-Type': XLSX_CONTENT_TYPE,
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  for (const name of ['Content-Length', 'Content-Disposition']) {
+    const value = upstream.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  return new Response(upstream.body, { status: 200, headers });
+}
 
 function respond(data: unknown, status = 200): NextResponse {
   return NextResponse.json(data, {
@@ -92,9 +145,13 @@ export async function GET(
   request: Request,
   context: Context,
 ): Promise<Response> {
+  const path = (await context.params).path ?? [];
+  if (path.length === 2 && path[1] === 'export')
+    return isProxyUuid(path[0])
+      ? exportCount(request, path[0])
+      : exportFailure(404);
   const session = await getSupervisorSession();
   if (!session.ok) return failure(session.status, 'load');
-  const path = (await context.params).path ?? [];
   const query = new URL(request.url).searchParams;
   const { token, user } = session;
   if (path.length === 0) {
