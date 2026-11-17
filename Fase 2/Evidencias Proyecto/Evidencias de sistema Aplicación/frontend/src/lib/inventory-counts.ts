@@ -1,6 +1,5 @@
 import {
   formatCountQuantity,
-  isCountDate,
   personName,
   type CountItem,
   type InventoryCountStatus,
@@ -31,6 +30,21 @@ export const EMPTY_COUNT_FILTERS: CountFilters = {
   from: '',
   to: '',
 };
+
+// Fecha calendario real de un filtro, con la misma regla que
+// parseCalendarDate de la API (Date.UTC y comparación por partes): rechaza
+// 2026-02-30 y también los años 0000 a 0099, sin consultar la API.
+export function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value))
+    return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
 
 const single = (value: SearchValue): string =>
   (typeof value === 'string' ? value : '').trim();
@@ -68,8 +82,8 @@ export function parseCountFilters(params: {
   if (raw.status && !filters.status)
     return invalid('El estado debe ser «En curso» o «Finalizado».');
   if (
-    (filters.from && !isCountDate(filters.from)) ||
-    (filters.to && !isCountDate(filters.to))
+    (filters.from && !isCalendarDate(filters.from)) ||
+    (filters.to && !isCalendarDate(filters.to))
   )
     return invalid('Las fechas deben ser válidas (día, mes y año).');
   if (filters.from && filters.to && filters.from > filters.to)
