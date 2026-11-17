@@ -141,6 +141,12 @@ test('valida los filtros del listado y arma la consulta', () => {
     if (!result.ok) assert.match(result.message, message);
   }
   assert.equal(parseCountFilters({ from: '0100-01-01' }).ok, true);
+  // El mensaje de estado usa las etiquetas del contrato.
+  const status = parseCountFilters({ status: 'DRAFT' });
+  assert.equal(
+    status.ok ? null : status.message,
+    'El estado debe ser «En curso» o «Finalizado».',
+  );
   assert.equal(isCalendarDate('2028-02-29'), true);
   assert.equal(isCalendarDate('2026-02-29'), false);
   assert.equal(isCalendarDate('0050-01-01'), false);
