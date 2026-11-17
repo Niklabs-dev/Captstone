@@ -10,9 +10,14 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { readXlsx } from '../helpers/xlsx';
 
 // Revisión y descarga de tomas de inventario con API y PostgreSQL reales
-// (SPRINT-5-T09). Cada proyecto crea su local, su supervisor y un producto,
-// porque un local admite una sola toma En curso y la base se reutiliza entre
-// corridas.
+// (SPRINT-5-T09). Cada proyecto crea su local, su supervisor y dos productos
+// (uno que se cuenta y otro que queda «Sin contar»), porque un local admite
+// una sola toma En curso y la prueba no depende del catálogo que ya tenga la
+// base: pasa igual en la primera corrida sobre una base limpia
+// (SPRINT-5-T18). Al terminar desactiva los productos, los usuarios y el
+// local que creó, como la suite de SPRINT-5-T07. Las tomas no se pueden
+// borrar (la base las protege): quedan en el local desactivado de la base
+// exclusiva de pruebas.
 test.skip(
   process.env.TEST_REAL_DISPOSABLE !== 'true',
   'Solo contra backend y base exclusivos con datos sintéticos.',
@@ -21,6 +26,39 @@ const backend = process.env.TEST_REAL_BACKEND_URL ?? 'http://127.0.0.1:3011';
 const adminEmail = process.env.TEST_REAL_ADMIN_EMAIL ?? 'admin@moi-food.cl';
 const adminPassword =
   process.env.TEST_REAL_ADMIN_PASSWORD ?? 'admin-cambiar-en-produccion';
+
+// Lo que creó la prueba en curso, para desactivarlo al terminar.
+interface Created {
+  admin: Record<string, string> | null;
+  productIds: string[];
+  userIds: string[];
+  storeId: string | null;
+}
+const nothingCreated = (): Created => ({
+  admin: null,
+  productIds: [],
+  userIds: [],
+  storeId: null,
+});
+let created = nothingCreated();
+
+// Primero los productos y los usuarios: un local con usuarios activos no se
+// puede desactivar.
+test.afterEach(async ({ request }) => {
+  const { admin, productIds, userIds, storeId } = created;
+  created = nothingCreated();
+  if (!admin) return;
+  const deactivate = async (path: string) => {
+    const response = await request.patch(`${backend}${path}/deactivate`, {
+      headers: admin,
+    });
+    expect(response.status(), await response.text()).toBe(200);
+  };
+  for (const productId of productIds)
+    await deactivate(`/products/${productId}`);
+  for (const userId of userIds) await deactivate(`/users/${userId}`);
+  if (storeId) await deactivate(`/stores/${storeId}`);
+});
 
 async function login(
   context: BrowserContext,
@@ -76,6 +114,7 @@ async function createUser(
     },
   });
   expect(response.status(), await response.text()).toBe(201);
+  created.userIds.push(((await response.json()) as { id: string }).id);
   return { email, password };
 }
 interface Row {
@@ -84,6 +123,27 @@ interface Row {
   section: string;
   isEmptyRow: boolean;
   product: { id: string } | null;
+}
+async function createProduct(
+  request: APIRequestContext,
+  admin: Record<string, string>,
+  row: Row,
+  data: Record<string, unknown>,
+): Promise<string> {
+  const response = await request.post(backend + '/products', {
+    headers: admin,
+    data: {
+      sku: null,
+      alternativeNames: [],
+      ...data,
+      section: row.section,
+      templateRowId: row.id,
+    },
+  });
+  expect(response.status(), await response.text()).toBe(201);
+  const { id } = (await response.json()) as { id: string };
+  created.productIds.push(id);
+  return id;
 }
 
 test('Administrador: filtra, revisa una toma en curso y descarga la finalizada', async ({
@@ -94,8 +154,9 @@ test('Administrador: filtra, revisa una toma en curso y descarga la finalizada',
   const suffix = `${info.project.name}-${randomUUID().slice(0, 6)}`;
   const { request } = context;
   const admin = await token(request, adminEmail, adminPassword);
+  created.admin = admin;
 
-  // Local, supervisor y producto propios de este proyecto.
+  // Local, supervisor y productos propios de este proyecto.
   const storeName = `Local Inventario ${suffix}`;
   const storeResponse = await request.post(backend + '/stores', {
     headers: admin,
@@ -103,33 +164,40 @@ test('Administrador: filtra, revisa una toma en curso y descarga la finalizada',
   });
   expect(storeResponse.status(), await storeResponse.text()).toBe(201);
   const store = (await storeResponse.json()) as { id: string };
+  created.storeId = store.id;
   const supervisor = await createUser(request, admin, 'SUPERVISOR', store.id);
   const rows = (await (
     await request.get(backend + '/products/template', { headers: admin })
   ).json()) as Row[];
-  const free = rows.find(
+  const free = rows.filter(
     (row) => row.kind === 'ITEM' && row.isEmptyRow && !row.product,
   );
-  expect(free, 'La plantilla necesita una fila <Vacío> libre').toBeTruthy();
+  expect(
+    free.length,
+    'La plantilla necesita dos filas <Vacío> libres',
+  ).toBeGreaterThanOrEqual(2);
   const productName = `Carne E2E ${suffix}`;
-  const productResponse = await request.post(backend + '/products', {
-    headers: admin,
-    data: {
-      name: productName,
-      section: free!.section,
-      templateRowId: free!.id,
-      unit: 'KG',
-      sku: null,
-      alternativeNames: [],
-      packageName: 'bolsa',
-      packagesPerBox: 2,
-      packageContent: '2.500',
-      boxContent: '5.000',
-      looseOnly: false,
-    },
+  const productId = await createProduct(request, admin, free[0], {
+    name: productName,
+    unit: 'KG',
+    packageName: 'bolsa',
+    packagesPerBox: 2,
+    packageContent: '2.500',
+    boxContent: '5.000',
+    looseOnly: false,
   });
-  expect(productResponse.status(), await productResponse.text()).toBe(201);
-  const product = (await productResponse.json()) as { id: string };
+  // Producto propio que nadie cuenta: la prueba no depende de otros
+  // productos activos de la base para mostrar «Sin contar».
+  const pendingName = `Pendiente E2E ${suffix}`;
+  await createProduct(request, admin, free[1], {
+    name: pendingName,
+    unit: 'KG',
+    packageName: null,
+    packagesPerBox: null,
+    packageContent: null,
+    boxContent: null,
+    looseOnly: true,
+  });
 
   // El supervisor inicia la toma y cuenta 1 caja + 3 bolsas + 2,450 kg.
   const sup = await token(request, supervisor.email, supervisor.password);
@@ -142,7 +210,7 @@ test('Administrador: filtra, revisa una toma en curso y descarga la finalizada',
   expect(
     (
       await request.put(
-        `${backend}/inventory-counts/${count.id}/lines/${product.id}`,
+        `${backend}/inventory-counts/${count.id}/lines/${productId}`,
         {
           headers: sup,
           data: { boxes: 1, packages: 3, looseQuantity: '2.450' },
@@ -224,9 +292,12 @@ test('Administrador: filtra, revisa una toma en curso y descarga la finalizada',
   await expect(line).toContainText('3 bolsas');
   await expect(line).toContainText('2,450 kg');
   await expect(line).toContainText('14,950 kg');
-  await expect(
-    page.getByText('Sin contar').filter({ visible: true }).first(),
-  ).toBeVisible();
+  const pendingLine = page
+    .getByRole('article', { name: pendingName })
+    .or(page.getByRole('row').filter({ hasText: pendingName }))
+    .filter({ visible: true });
+  await expect(pendingLine).toContainText('Sin contar');
+  await expect(pendingLine).not.toContainText('kg');
   await noOverflow(page);
 
   const pending = page.waitForEvent('download');
@@ -257,8 +328,10 @@ test('Supervisor, contador y trabajador no entran a la revisión de inventarios'
 }) => {
   const { request } = context;
   const admin = await token(request, adminEmail, adminPassword);
+  created.admin = admin;
+  // Un local activo: los de corridas anteriores quedan desactivados.
   const stores = (await (
-    await request.get(backend + '/stores', { headers: admin })
+    await request.get(backend + '/stores?isActive=true', { headers: admin })
   ).json()) as { id: string }[];
   const someId = randomUUID();
   for (const role of ['SUPERVISOR', 'CONTADOR', 'TRABAJADOR']) {
