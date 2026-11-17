@@ -21,6 +21,7 @@ export interface NavigationItem {
     | '/propinas'
     | '/propinas/diarias'
     | '/propinas/historico'
+    | '/inventario'
     | '/portal/liquidaciones'
     | '/portal/documentos'
     | '/portal/propinas';
@@ -46,6 +47,7 @@ export function getNavigationView(pathname: string): {
     { href: '/liquidaciones', title: 'Gestión de liquidaciones' },
     { href: '/propinas/historico', title: 'Repartos anteriores' },
     { href: '/propinas/diarias', title: 'Operación diaria' },
+    { href: '/inventario', title: 'Toma de inventario' },
     // Después de las subrutas: /propinas solo coincide consigo misma.
     { href: '/propinas', title: 'Propinas' },
     { href: '/dashboard', title: 'Inicio' },
@@ -80,6 +82,13 @@ const SALES_REPORTS: NavigationItem = {
   label: 'Reportes de ventas',
 };
 
+// SPRINT-5-T07: la toma de inventario semanal es exclusiva del supervisor,
+// en su local.
+const INVENTORY_COUNT: NavigationItem = {
+  href: '/inventario',
+  label: 'Inventario',
+};
+
 // Una sola fuente de enlaces para todas las vistas; los permisos siguen en el servidor.
 export function getNavigationItems(
   role: Role | null,
@@ -96,6 +105,7 @@ export function getNavigationItems(
     return [
       home,
       { href: '/propinas/diarias', label: 'Operación diaria' },
+      INVENTORY_COUNT,
       MY_TIPS,
       { href: '/portal/documentos', label: 'Mis documentos' },
       { href: '/portal/liquidaciones', label: 'Mis liquidaciones' },
@@ -150,6 +160,12 @@ export function getPageRedirect(role: Role, pathname: string): string | null {
   if (
     (pathname === '/propinas/diarias' ||
       pathname.startsWith('/propinas/diarias/')) &&
+    role !== 'SUPERVISOR'
+  )
+    return '/dashboard?reason=forbidden';
+  if (
+    (pathname === INVENTORY_COUNT.href ||
+      pathname.startsWith(INVENTORY_COUNT.href + '/')) &&
     role !== 'SUPERVISOR'
   )
     return '/dashboard?reason=forbidden';

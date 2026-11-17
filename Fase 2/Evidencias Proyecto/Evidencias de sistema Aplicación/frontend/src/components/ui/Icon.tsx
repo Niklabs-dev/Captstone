@@ -18,6 +18,8 @@ const paths = {
   arrow: 'M5 12h14m-6-6 6 6-6 6',
   user: 'M20 21a8 8 0 0 0-16 0M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
   chart: 'M3 3v18h18M8 17v-5M13 17V8M18 17v-9',
+  // Caja con lista: toma de inventario.
+  inventory: 'M21 8 12 3 3 8v8l9 5 9-5V8ZM3 8l9 5 9-5M12 13v8',
   calendar: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z',
 };
 

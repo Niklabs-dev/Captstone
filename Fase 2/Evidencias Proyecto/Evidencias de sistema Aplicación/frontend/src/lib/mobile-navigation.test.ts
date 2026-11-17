@@ -65,3 +65,19 @@ test('Cada destino tiene icono compartido y etiqueta móvil legible', () => {
       assert.ok(getMobileLabel(item).length > 0);
     }
 });
+test('El supervisor tiene operación, inventario y sus propinas en la barra (SPRINT-5-T07)', () => {
+  const { primary, additional } = getMobileNavigation('SUPERVISOR');
+  assert.deepEqual(
+    primary.map((item) => item.href),
+    ['/dashboard', '/propinas/diarias', '/inventario', '/portal/propinas'],
+  );
+  assert.deepEqual(
+    additional.map((item) => item.href),
+    ['/portal/documentos', '/portal/liquidaciones'],
+  );
+  assert.equal(getNavigationIcon('/inventario'), 'inventory');
+  assert.equal(
+    getMobileLabel({ href: '/inventario', label: 'Inventario' }),
+    'Inventario',
+  );
+});
