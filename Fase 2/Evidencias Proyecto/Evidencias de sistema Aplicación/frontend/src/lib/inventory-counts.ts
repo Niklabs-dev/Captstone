@@ -1,4 +1,5 @@
 import {
+  COUNT_STATUS_LABELS,
   formatCountQuantity,
   personName,
   type CountItem,
@@ -80,7 +81,9 @@ export function parseCountFilters(params: {
   if (filters.storeId && !isUuid(filters.storeId))
     return invalid('El local seleccionado no es válido.');
   if (raw.status && !filters.status)
-    return invalid('El estado debe ser «En curso» o «Finalizado».');
+    return invalid(
+      `El estado debe ser «${COUNT_STATUS_LABELS.OPEN}» o «${COUNT_STATUS_LABELS.CONFIRMED}».`,
+    );
   if (
     (filters.from && !isCalendarDate(filters.from)) ||
     (filters.to && !isCalendarDate(filters.to))
