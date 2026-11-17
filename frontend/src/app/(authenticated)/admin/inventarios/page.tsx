@@ -14,8 +14,8 @@ import {
   primaryButtonClass,
 } from '@/components/ui/styles';
 import { fetchInventoryCounts } from '@/lib/inventory-counts-backend';
+import { COUNT_STATUS_LABELS } from '@/lib/inventory-count-contract';
 import {
-  COUNT_STATUS_LABELS,
   hasCountFilters,
   parseCountFilters,
   type SearchValue,

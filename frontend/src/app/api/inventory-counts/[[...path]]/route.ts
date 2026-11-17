@@ -2,10 +2,12 @@ import { NextResponse } from 'next/server';
 import { callBackend } from '@/lib/auth-backend';
 import { isProxyUuid } from '@/lib/backend-proxy';
 import { XLSX_CONTENT_TYPE } from '@/lib/daily-tips';
-import { inventoryCountError } from '@/lib/inventory-counts';
+import {
+  inventoryCountErrorMessage,
+  type CountAction,
+} from '@/lib/inventory-count';
 import {
   MAX_SEARCH_LENGTH,
-  inventoryCountErrorMessage,
   parseCountDetail,
   parseCountFieldErrors,
   parseCountFinalization,
@@ -15,8 +17,8 @@ import {
   parseCountSummary,
   parseStartConflict,
   parseStartInput,
-  type CountAction,
-} from '@/lib/inventory-count';
+} from '@/lib/inventory-count-contract';
+import { inventoryCountError } from '@/lib/inventory-counts';
 import { getSupervisorSession } from '@/lib/supervisor-session';
 import { hasSameOrigin } from '@/lib/users';
 import { getUsersSession } from '@/lib/users-session';

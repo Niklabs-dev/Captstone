@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  formatCountQuantity,
+  type CountItem,
+  type CountLine,
+} from './inventory-count-contract';
+import {
   computeCountTotal,
   comparableText,
   countDateError,
@@ -10,37 +15,22 @@ import {
   countProgress,
   draftFromLine,
   filterCountItems,
-  formatCountNumber,
-  formatCountQuantity,
   fromThousandths,
-  groupCountItems,
   inventoryCountErrorMessage,
-  isCountDate,
   isDraftDirty,
   lineInputFromDraft,
   lineSummary,
   liveCountTotal,
-  parseCountDetail,
-  parseCountFieldErrors,
-  parseCountFinalization,
-  parseCountItem,
-  parseCountLineInput,
-  parseCountSummaries,
   parseLooseInput,
   parsePiecesInput,
-  parseStartConflict,
-  parseStartInput,
   replaceCountItem,
   toThousandths,
-  type CountItem,
-  type CountLine,
 } from './inventory-count';
 import type { Product } from './products';
 
 const id = (n: number) =>
   `b9000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const person = { id: id(90), firstName: 'Sofía', lastName: 'Rojas' };
-const store = { id: id(80), name: 'Melipilla Centro' };
 
 // Carne Fajita: caja de 5 kg con bolsas de 2,5 kg (ejemplo de la tarjeta).
 const fajita: Product = {
@@ -150,19 +140,6 @@ const items: CountItem[] = [
   item(fanta),
   item(salsa),
 ];
-const summary = {
-  id: id(30),
-  status: 'OPEN',
-  countDate: '2026-11-10',
-  startedAt: '2026-11-11T00:15:00.000Z',
-  storeId: store.id,
-  store,
-  startedBy: person,
-  finalizedAt: null,
-  finalizedBy: null,
-  countedProducts: 1,
-};
-
 test('Cajas y paquetes: enteros desde 0 hasta 100.000', () => {
   assert.equal(parsePiecesInput(''), null);
   assert.equal(parsePiecesInput('  '), null);
@@ -186,18 +163,6 @@ test('Cantidad suelta: acepta coma o punto decimal y la envía con punto', () =>
   assert.equal(parseLooseInput('007', 'UNIT'), '7');
   for (const invalid of ['6,5', '6.000', '6,0'])
     assert.equal(parseLooseInput(invalid, 'UNIT'), undefined, invalid);
-});
-
-test('Formato de números: kg y L con coma y 3 decimales; unidades enteras', () => {
-  assert.equal(formatCountNumber('14.950', 'KG'), '14,950');
-  assert.equal(formatCountNumber('2', 'KG'), '2,000');
-  assert.equal(formatCountNumber('2.45', 'L'), '2,450');
-  assert.equal(formatCountNumber('1234.500', 'KG'), '1.234,500');
-  assert.equal(formatCountNumber('54', 'UNIT'), '54');
-  assert.equal(formatCountNumber('1200', 'UNIT'), '1.200');
-  assert.equal(formatCountQuantity('14.950', 'KG'), '14,950 kg');
-  assert.equal(formatCountQuantity('0.946', 'L'), '0,946 L');
-  assert.equal(formatCountQuantity('54', 'UNIT'), '54 u.');
 });
 
 test('Total exacto, sin punto flotante, como count-line.util.ts', () => {
@@ -398,25 +363,9 @@ test('Lo guardado vuelve como texto editable y se compara por valor', () => {
   );
 });
 
-test('Secciones en el orden de la plantilla y avance «contados X de Y»', () => {
-  const sections = groupCountItems(items);
-  assert.deepEqual(
-    sections.map((section) => [
-      section.name,
-      section.items.map((entry) => entry.product.name),
-      section.counted,
-    ]),
-    [
-      ['COSTO PROTEÍNAS', ['Carne Fajita (Beef Steak Saborizado)', 'Atún'], 1],
-      ['COSTO VERDURAS', ['Lechuga'], 0],
-      ['COSTO DE BEBIDAS', ['Lata Fanta Zero'], 0],
-      ['Sin fila en la plantilla', ['Salsa Chipotle'], 0],
-    ],
-  );
-  assert.equal(new Set(sections.map((section) => section.id)).size, 4);
+test('Avance «contados X de Y»', () => {
   assert.deepEqual(countProgress(items), { counted: 1, total: 5, percent: 20 });
   assert.deepEqual(countProgress([]), { counted: 0, total: 0, percent: 0 });
-  assert.equal(groupCountItems([]).length, 0);
 });
 
 test('Búsqueda por nombre, nombre alternativo o SKU, sin mayúsculas ni tildes', () => {
@@ -469,118 +418,6 @@ test('Fecha de la toma: hoy o hasta 7 días atrás', () => {
   assert.match(countDateError('2026-11-11', '2026-11-10') ?? '', /posterior/);
   assert.match(countDateError('2026-11-02', '2026-11-10') ?? '', /7 días/);
   assert.match(countDateError('', '2026-11-10') ?? '', /Ingresa/);
-  assert.equal(isCountDate('2026-02-30'), false);
-  assert.equal(isCountDate('2026-02-28'), true);
-});
-
-test('Contrato: listado, detalle, línea y finalización', () => {
-  assert.deepEqual(parseCountSummaries([summary]), [summary]);
-  assert.equal(parseCountSummaries([{ ...summary, status: 'DRAFT' }]), null);
-  assert.equal(
-    parseCountSummaries([{ ...summary, store: { ...store, id: id(81) } }]),
-    null,
-  );
-  const detail = parseCountDetail({
-    ...summary,
-    totalProducts: 2,
-    pendingProducts: 1,
-    items: [
-      { product: fajita, counted: true, line: fajitaLine },
-      { product: atun, counted: false, line: null },
-    ],
-  });
-  assert.equal(detail?.items.length, 2);
-  assert.equal(detail?.items[0].line?.countedQuantity, '14.950');
-  // Una línea de otro producto, o contado sin línea, no se acepta.
-  assert.equal(
-    parseCountItem({ product: atun, counted: true, line: fajitaLine }),
-    null,
-  );
-  assert.equal(
-    parseCountItem({ product: atun, counted: true, line: null }),
-    null,
-  );
-  assert.equal(
-    parseCountItem({
-      product: fajita,
-      counted: true,
-      line: { ...fajitaLine, countedQuantity: 14.95 },
-    }),
-    null,
-  );
-  // Línea vacía de una toma finalizada.
-  assert.ok(
-    parseCountItem({
-      product: atun,
-      counted: false,
-      line: {
-        ...fajitaLine,
-        productId: atun.id,
-        boxes: null,
-        packages: null,
-        looseQuantity: null,
-        countedQuantity: null,
-      },
-    }),
-  );
-  const finalized = {
-    ...summary,
-    status: 'CONFIRMED',
-    finalizedAt: '2026-11-11T01:00:00.000Z',
-    finalizedBy: person,
-    totalProducts: 140,
-    uncountedProducts: 105,
-    countedProducts: 35,
-  };
-  assert.equal(parseCountFinalization(finalized)?.uncountedProducts, 105);
-  assert.equal(parseCountFinalization({ ...finalized, status: 'OPEN' }), null);
-  assert.deepEqual(
-    parseStartConflict({
-      statusCode: 409,
-      existingCountId: id(30),
-      existingCountDate: '2026-11-10',
-    }),
-    { existingCountId: id(30), existingCountDate: '2026-11-10' },
-  );
-  assert.equal(parseStartConflict({ existingCountId: 'x' }), null);
-  assert.deepEqual(
-    parseCountFieldErrors({
-      errors: { countId: 'La toma está finalizada', other: 'x', boxes: 1 },
-    }),
-    { countId: 'La toma está finalizada' },
-  );
-  assert.equal(parseCountFieldErrors({ message: 'x' }), null);
-});
-
-test('El BFF solo reenvía los campos del contrato', () => {
-  assert.deepEqual(parseStartInput({}), {});
-  assert.deepEqual(parseStartInput({ countDate: '2026-11-10' }), {
-    countDate: '2026-11-10',
-  });
-  assert.equal(parseStartInput({ countDate: '10-11-2026' }), null);
-  assert.equal(
-    parseStartInput({ countDate: '2026-11-10', storeId: id(80) }),
-    null,
-  );
-  assert.equal(parseStartInput(undefined), null);
-  assert.deepEqual(
-    parseCountLineInput({ boxes: 1, packages: null, looseQuantity: '2.450' }),
-    { boxes: 1, packages: null, looseQuantity: '2.450' },
-  );
-  assert.deepEqual(parseCountLineInput({}), {});
-  for (const invalid of [
-    { boxes: -1 },
-    { boxes: 1.5 },
-    { boxes: 100001 },
-    { packages: '3' },
-    { looseQuantity: 2.45 },
-    { looseQuantity: '2,450' },
-    { looseQuantity: '2.4567' },
-    { countedQuantity: '14.950' },
-    null,
-    [],
-  ])
-    assert.equal(parseCountLineInput(invalid), null, JSON.stringify(invalid));
 });
 
 test('Mensajes claros para iniciar, guardar y finalizar', () => {

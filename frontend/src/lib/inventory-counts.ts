@@ -1,187 +1,20 @@
-import { isRecord } from './auth';
-import { isUuid } from './users';
 import {
-  isUnit,
-  packageLabel,
-  parseProduct,
-  type Product,
-  type ProductUnit,
-} from './products';
+  formatCountQuantity,
+  isCountDate,
+  personName,
+  type CountItem,
+  type InventoryCountStatus,
+  type InventoryCountSummary,
+} from './inventory-count-contract';
+import { packageLabel } from './products';
+import { isUuid } from './users';
 
 // Revisión y descarga de las tomas de inventario para el administrador
-// (SPRINT-5-T09): contrato de la API de SPRINT-5-T05/T06, filtros del listado,
-// formato de las cantidades y nombre del Excel de SPRINT-5-T08. Funciones
-// puras, compartidas por las páginas, el BFF y la descarga.
-
-export type InventoryCountStatus = 'OPEN' | 'CONFIRMED';
-export const COUNT_STATUS_LABELS: Record<InventoryCountStatus, string> = {
-  OPEN: 'En curso',
-  CONFIRMED: 'Finalizado',
-};
-
-export interface InventoryCountPerson {
-  id: string;
-  firstName: string;
-  lastName: string;
-}
-export interface InventoryCountSummary {
-  id: string;
-  status: InventoryCountStatus;
-  // Fecha de la toma (AAAA-MM-DD).
-  countDate: string;
-  startedAt: string;
-  store: { id: string; name: string };
-  startedBy: InventoryCountPerson;
-  finalizedAt: string | null;
-  finalizedBy: InventoryCountPerson | null;
-  countedProducts: number;
-}
-// Línea guardada, con la copia del producto con que se calculó el total.
-export interface InventoryCountLine {
-  boxes: number | null;
-  packages: number | null;
-  looseQuantity: string | null;
-  countedQuantity: string | null;
-  productSku: string | null;
-  productName: string;
-  unit: ProductUnit;
-  packageName: string | null;
-}
-export interface InventoryCountItem {
-  product: Product;
-  counted: boolean;
-  line: InventoryCountLine | null;
-}
-export interface InventoryCountDetail extends InventoryCountSummary {
-  totalProducts: number;
-  pendingProducts: number;
-  items: InventoryCountItem[];
-}
-
-// --- Contrato -----------------------------------------------------------------
-
-const API_DECIMAL = /^\d{1,12}(\.\d{1,3})?$/;
-const isText = (value: unknown, max: number): value is string =>
-  typeof value === 'string' && value.trim().length > 0 && value.length <= max;
-const isCount = (value: unknown): value is number =>
-  Number.isSafeInteger(value) && Number(value) >= 0;
-const isInstant = (value: unknown): value is string =>
-  typeof value === 'string' &&
-  value.length <= 40 &&
-  !Number.isNaN(Date.parse(value));
-
-function parsePerson(value: unknown): InventoryCountPerson | null {
-  return isRecord(value) &&
-    isUuid(value.id) &&
-    isText(value.firstName, 120) &&
-    isText(value.lastName, 120)
-    ? { id: value.id, firstName: value.firstName, lastName: value.lastName }
-    : null;
-}
-
-export function parseCountSummary(
-  value: unknown,
-): InventoryCountSummary | null {
-  if (
-    !isRecord(value) ||
-    !isUuid(value.id) ||
-    (value.status !== 'OPEN' && value.status !== 'CONFIRMED') ||
-    !isCalendarDate(value.countDate) ||
-    !isInstant(value.startedAt) ||
-    !isRecord(value.store) ||
-    !isUuid(value.store.id) ||
-    !isText(value.store.name, 160) ||
-    !isCount(value.countedProducts)
-  )
-    return null;
-  const startedBy = parsePerson(value.startedBy);
-  const finalizedBy =
-    value.finalizedBy === null ? null : parsePerson(value.finalizedBy);
-  const finalizedAt = value.finalizedAt === null ? null : value.finalizedAt;
-  if (
-    !startedBy ||
-    (value.finalizedBy !== null && !finalizedBy) ||
-    (finalizedAt !== null && !isInstant(finalizedAt))
-  )
-    return null;
-  return {
-    id: value.id,
-    status: value.status,
-    countDate: value.countDate,
-    startedAt: value.startedAt,
-    store: { id: value.store.id, name: value.store.name },
-    startedBy,
-    finalizedAt,
-    finalizedBy,
-    countedProducts: value.countedProducts,
-  };
-}
-export function parseCountSummaries(
-  value: unknown,
-): InventoryCountSummary[] | null {
-  if (!Array.isArray(value)) return null;
-  const items = value.map(parseCountSummary);
-  return items.every((item): item is InventoryCountSummary => item !== null)
-    ? items
-    : null;
-}
-
-const optionalCount = (value: unknown): value is number | null =>
-  value === null || isCount(value);
-const optionalDecimal = (value: unknown): value is string | null =>
-  value === null || (typeof value === 'string' && API_DECIMAL.test(value));
-
-function parseLine(value: unknown): InventoryCountLine | null {
-  if (
-    !isRecord(value) ||
-    !optionalCount(value.boxes) ||
-    !optionalCount(value.packages) ||
-    !optionalDecimal(value.looseQuantity) ||
-    !optionalDecimal(value.countedQuantity) ||
-    !(value.productSku === null || isText(value.productSku, 40)) ||
-    !isText(value.productName, 120) ||
-    !isUnit(value.unit) ||
-    !(value.packageName === null || isText(value.packageName, 30))
-  )
-    return null;
-  return {
-    boxes: value.boxes,
-    packages: value.packages,
-    looseQuantity: value.looseQuantity,
-    countedQuantity: value.countedQuantity,
-    productSku: value.productSku,
-    productName: value.productName,
-    unit: value.unit,
-    packageName: value.packageName,
-  };
-}
-function parseItem(value: unknown): InventoryCountItem | null {
-  if (!isRecord(value) || typeof value.counted !== 'boolean') return null;
-  const product = parseProduct(value.product);
-  const line = value.line === null ? null : parseLine(value.line);
-  if (!product || (value.line !== null && !line)) return null;
-  return { product, counted: value.counted, line };
-}
-export function parseCountDetail(value: unknown): InventoryCountDetail | null {
-  const summary = parseCountSummary(value);
-  if (
-    !summary ||
-    !isRecord(value) ||
-    !isCount(value.totalProducts) ||
-    !isCount(value.pendingProducts) ||
-    !Array.isArray(value.items)
-  )
-    return null;
-  const items = value.items.map(parseItem);
-  if (!items.every((item): item is InventoryCountItem => item !== null))
-    return null;
-  return {
-    ...summary,
-    totalProducts: value.totalProducts,
-    pendingProducts: value.pendingProducts,
-    items,
-  };
-}
+// (SPRINT-5-T09): filtros del listado, celdas del detalle, nombre del Excel
+// de SPRINT-5-T08 y mensajes. El contrato de la API, las etiquetas de estado
+// y el formato de cantidades están en inventory-count-contract.ts
+// (SPRINT-5-T17), compartido con la toma del supervisor. Funciones puras,
+// compartidas por las páginas, el BFF y la descarga.
 
 // --- Filtros del listado ------------------------------------------------------
 
@@ -198,19 +31,6 @@ export const EMPTY_COUNT_FILTERS: CountFilters = {
   from: '',
   to: '',
 };
-
-// Fecha calendario real (rechaza 2026-02-30).
-export function isCalendarDate(value: unknown): value is string {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value))
-    return false;
-  const [year, month, day] = value.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return (
-    date.getUTCFullYear() === year &&
-    date.getUTCMonth() === month - 1 &&
-    date.getUTCDate() === day
-  );
-}
 
 const single = (value: SearchValue): string =>
   (typeof value === 'string' ? value : '').trim();
@@ -248,8 +68,8 @@ export function parseCountFilters(params: {
   if (raw.status && !filters.status)
     return invalid('El estado debe ser «En curso» o «Finalizado».');
   if (
-    (filters.from && !isCalendarDate(filters.from)) ||
-    (filters.to && !isCalendarDate(filters.to))
+    (filters.from && !isCountDate(filters.from)) ||
+    (filters.to && !isCountDate(filters.to))
   )
     return invalid('Las fechas deben ser válidas (día, mes y año).');
   if (filters.from && filters.to && filters.from > filters.to)
@@ -270,9 +90,6 @@ export function hasCountFilters(filters: CountFilters): boolean {
 
 // --- Presentación -------------------------------------------------------------
 
-export function personName(person: InventoryCountPerson): string {
-  return `${person.firstName} ${person.lastName}`;
-}
 // Responsable: quien la finalizó o, mientras siga en curso, quien la inició.
 export function countResponsible(count: InventoryCountSummary): string {
   return personName(count.finalizedBy ?? count.startedBy);
@@ -294,27 +111,6 @@ export function formatChileDateTime(value: string): string {
   return `${part('day')}-${part('month')}-${part('year')} ${part('hour')}:${part('minute')}`;
 }
 
-const UNIT_SYMBOL: Record<ProductUnit, string> = {
-  KG: 'kg',
-  L: 'L',
-  UNIT: 'u.',
-};
-
-// Cantidad con su unidad. En kg y L siempre con coma y 3 decimales
-// («2,450 kg», «1.234,500 L»); en unidades, entera («6 u.»).
-export function formatCountQuantity(
-  decimal: string,
-  unit: ProductUnit,
-): string {
-  const [whole, fraction = ''] = decimal.split('.');
-  const thousands = Number(whole).toLocaleString('es-CL');
-  const number =
-    unit === 'UNIT'
-      ? thousands
-      : `${thousands},${fraction.padEnd(3, '0').slice(0, 3)}`;
-  return `${number} ${UNIT_SYMBOL[unit]}`;
-}
-
 // Celdas de una fila del detalle: «—» cuando no se informó.
 export interface CountLineCells {
   name: string;
@@ -324,7 +120,7 @@ export interface CountLineCells {
   loose: string;
   total: string;
 }
-export function countLineCells(item: InventoryCountItem): CountLineCells {
+export function countLineCells(item: CountItem): CountLineCells {
   const line = item.line;
   // Una toma finalizada muestra la copia guardada; una pendiente, el catálogo.
   const name = line?.productName ?? item.product.name;
@@ -351,31 +147,6 @@ export function countLineCells(item: InventoryCountItem): CountLineCells {
         ? '—'
         : formatCountQuantity(line.countedQuantity, line.unit),
   };
-}
-
-// Productos en el orden de la plantilla, agrupados por sección consecutiva.
-export interface CountSection {
-  id: string;
-  section: string;
-  items: InventoryCountItem[];
-}
-export const NO_SECTION = 'Sin fila en la plantilla';
-export function countSections(
-  items: readonly InventoryCountItem[],
-): CountSection[] {
-  const sections: CountSection[] = [];
-  for (const item of items) {
-    const name = item.product.section ?? NO_SECTION;
-    const last = sections.at(-1);
-    if (last && last.section === name) last.items.push(item);
-    else
-      sections.push({
-        id: `count-section-${sections.length + 1}`,
-        section: name,
-        items: [item],
-      });
-  }
-  return sections;
 }
 
 // «12 de 140 productos contados».

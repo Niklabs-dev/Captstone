@@ -15,11 +15,10 @@ import {
 import { formatCalendarDate } from '@/lib/display-date';
 import {
   COUNT_STATUS_LABELS,
-  countResponsible,
-  formatChileDateTime,
   type InventoryCountStatus,
   type InventoryCountSummary,
-} from '@/lib/inventory-counts';
+} from '@/lib/inventory-count-contract';
+import { countResponsible, formatChileDateTime } from '@/lib/inventory-counts';
 
 // SPRINT-5-T09: listado de tomas de inventario, en tabla desde lg y en
 // tarjetas en pantallas angostas.
