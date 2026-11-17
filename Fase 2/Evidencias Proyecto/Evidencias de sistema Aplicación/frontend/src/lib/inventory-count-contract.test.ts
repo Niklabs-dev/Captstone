@@ -203,8 +203,22 @@ test('Detalle: líneas contadas, vacías y pendientes con la copia del producto'
   assert.equal(detail?.items[1].line?.countedQuantity, null);
   assert.equal(detail?.items[2].line, null);
   assert.equal(detail?.totalProducts, 3);
-  // Sin totales o sin productos no es un detalle.
+  // Sin los totales o sin la lista de productos no es un detalle.
   assert.equal(parseCountDetail({ ...summary, items: [] }), null);
+  assert.equal(
+    parseCountDetail({ ...summary, totalProducts: 3, pendingProducts: 2 }),
+    null,
+  );
+  // Una búsqueda sin resultados sí es un detalle: lista vacía con totales.
+  assert.deepEqual(
+    parseCountDetail({
+      ...summary,
+      totalProducts: 3,
+      pendingProducts: 2,
+      items: [],
+    })?.items,
+    [],
+  );
   // Cualquier producto inválido invalida el detalle completo.
   assert.equal(
     parseCountDetail({
