@@ -1,13 +1,15 @@
 import { callBackend, type BackendResult } from './auth-backend';
 import {
-  countQuery,
-  inventoryCountError,
   parseCountDetail,
   parseCountSummaries,
-  type CountFilters,
-  type CountOperation,
   type InventoryCountDetail,
   type InventoryCountSummary,
+} from './inventory-count-contract';
+import {
+  countQuery,
+  inventoryCountError,
+  type CountFilters,
+  type CountOperation,
 } from './inventory-counts';
 
 // Lecturas de las tomas de inventario desde Server Components (SPRINT-5-T09).

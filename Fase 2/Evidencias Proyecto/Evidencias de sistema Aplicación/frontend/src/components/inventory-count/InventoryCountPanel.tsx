@@ -25,28 +25,30 @@ import {
 } from '@/components/ui/styles';
 import { formatCalendarDate, formatChileDate } from '@/lib/display-date';
 import {
-  COUNT_STATUS_LABELS,
-  MAX_SEARCH_LENGTH,
   countDateError,
   countDateRange,
   countProgress,
   draftFromLine,
   filterCountItems,
   formatChileTime,
-  groupCountItems,
   inventoryCountErrorMessage,
   isDraftDirty,
   lineInputFromDraft,
-  personName,
   replaceCountItem,
   type CountAction,
   type CountDraft,
-  type CountItem,
   type CountItemFilter,
+} from '@/lib/inventory-count';
+import {
+  COUNT_STATUS_LABELS,
+  MAX_SEARCH_LENGTH,
+  groupCountItems,
+  personName,
+  type CountItem,
   type InventoryCountDetail,
   type InventoryCountFinalization,
   type InventoryCountSummary,
-} from '@/lib/inventory-count';
+} from '@/lib/inventory-count-contract';
 import {
   InventoryCountRequestError,
   finalizeCount,

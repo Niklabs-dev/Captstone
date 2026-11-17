@@ -14,14 +14,16 @@ import {
   countFormatLabel,
   draftFromLine,
   formatChileTime,
-  formatCountQuantity,
   isDraftDirty,
   lineSummary,
   liveCountTotal,
   type CountDraft,
+} from '@/lib/inventory-count';
+import {
+  formatCountQuantity,
   type CountFieldErrors,
   type CountItem,
-} from '@/lib/inventory-count';
+} from '@/lib/inventory-count-contract';
 
 export type SaveState =
   | { status: 'saving' }

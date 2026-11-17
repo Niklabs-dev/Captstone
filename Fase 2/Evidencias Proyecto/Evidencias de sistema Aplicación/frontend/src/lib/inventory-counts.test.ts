@@ -1,29 +1,27 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  parseCountDetail,
+  parseCountSummary,
+} from './inventory-count-contract';
+import {
   canDownloadCount,
   countExportFileName,
   countLineCells,
   countProgress,
   countQuery,
   countResponsible,
-  countSections,
   EMPTY_COUNT_FILTERS,
   formatChileDateTime,
-  formatCountQuantity,
   hasCountFilters,
   inventoryCountError,
   isCalendarDate,
-  NO_SECTION,
-  parseCountDetail,
   parseCountFilters,
-  parseCountSummaries,
-  parseCountSummary,
-  type InventoryCountItem,
 } from './inventory-counts';
 import { getNavigationItems, getPageRedirect } from './navigation';
 
-// Revisión y descarga de tomas de inventario (SPRINT-5-T09).
+// Revisión y descarga de tomas de inventario (SPRINT-5-T09). El contrato
+// compartido se prueba en inventory-count-contract.test.ts (SPRINT-5-T17).
 const STORE = '0b6f7d1e-3c2a-4b5d-8e9f-1a2b3c4d5e6f';
 const COUNT = '1c6f7d1e-3c2a-4b5d-8e9f-1a2b3c4d5e6f';
 const PERSON = {
@@ -100,79 +98,6 @@ function detail(items: unknown[]) {
   };
 }
 
-test('interpreta el resumen de una toma y rechaza lo que no calza', () => {
-  const parsed = parseCountSummary(summary());
-  assert.equal(parsed?.status, 'CONFIRMED');
-  assert.equal(parsed?.store.name, 'Subway Melipilla Centro');
-  assert.equal(parsed?.finalizedBy?.firstName, 'Bruno');
-  assert.deepEqual(Object.keys(parsed ?? {}).includes('storeId'), false);
-  const open = parseCountSummary(
-    summary({ status: 'OPEN', finalizedAt: null, finalizedBy: null }),
-  );
-  assert.equal(open?.finalizedAt, null);
-  assert.equal(open?.finalizedBy, null);
-  for (const bad of [
-    summary({ status: 'DRAFT' }),
-    summary({ countDate: '2026-02-30' }),
-    summary({ startedAt: 'ayer' }),
-    summary({ finalizedBy: { id: 'x' } }),
-    summary({ countedProducts: -1 }),
-    summary({ store: { id: STORE } }),
-    null,
-  ])
-    assert.equal(parseCountSummary(bad), null);
-  assert.equal(parseCountSummaries([summary(), summary()])?.length, 2);
-  assert.equal(parseCountSummaries([summary(), { id: 1 }]), null);
-  assert.equal(parseCountSummaries({}), null);
-});
-
-test('interpreta el detalle con líneas contadas, vacías y pendientes', () => {
-  const parsed = parseCountDetail(
-    detail([
-      { product: product(), counted: true, line: line() },
-      {
-        product: product({ id: '6b6f7d1e-3c2a-4b5d-8e9f-1a2b3c4d5e6f' }),
-        counted: false,
-        line: line({
-          boxes: null,
-          packages: null,
-          looseQuantity: null,
-          countedQuantity: null,
-        }),
-      },
-      {
-        product: product({ id: '7c6f7d1e-3c2a-4b5d-8e9f-1a2b3c4d5e6f' }),
-        counted: false,
-        line: null,
-      },
-    ]),
-  );
-  assert.equal(parsed?.items.length, 3);
-  assert.equal(parsed?.items[0].line?.countedQuantity, '14.950');
-  assert.equal(parsed?.items[2].line, null);
-  assert.equal(
-    parseCountDetail(
-      detail([
-        { product: product(), counted: true, line: line({ boxes: 1.5 }) },
-      ]),
-    ),
-    null,
-  );
-  assert.equal(
-    parseCountDetail(
-      detail([
-        {
-          product: product(),
-          counted: true,
-          line: line({ countedQuantity: '1,5' }),
-        },
-      ]),
-    ),
-    null,
-  );
-  assert.equal(parseCountDetail({ ...summary(), items: [] }), null);
-});
-
 test('valida los filtros del listado y arma la consulta', () => {
   assert.deepEqual(parseCountFilters({}), {
     ok: true,
@@ -204,24 +129,27 @@ test('valida los filtros del listado y arma la consulta', () => {
     [{ from: '2026-13-01' }, /fechas/],
     [{ to: '11-11-2026' }, /fechas/],
     [{ from: '2026-11-30', to: '2026-11-01' }, /posterior/],
+    // Igual que la API: los años 0000 a 0099 no son fechas válidas y no se
+    // consultan (SPRINT-5-T17).
+    [{ from: '0050-01-01' }, /fechas/],
+    [{ from: '0000-01-01' }, /fechas/],
+    [{ to: '0099-12-31' }, /fechas/],
   ];
   for (const [params, message] of cases) {
     const result = parseCountFilters(params);
-    assert.equal(result.ok, false);
+    assert.equal(result.ok, false, JSON.stringify(params));
     if (!result.ok) assert.match(result.message, message);
   }
+  assert.equal(parseCountFilters({ from: '0100-01-01' }).ok, true);
+  // El mensaje de estado usa las etiquetas del contrato.
+  const status = parseCountFilters({ status: 'DRAFT' });
+  assert.equal(
+    status.ok ? null : status.message,
+    'El estado debe ser «En curso» o «Finalizado».',
+  );
   assert.equal(isCalendarDate('2028-02-29'), true);
   assert.equal(isCalendarDate('2026-02-29'), false);
-});
-
-test('muestra kg y L con coma y 3 decimales, y unidades enteras', () => {
-  assert.equal(formatCountQuantity('14.950', 'KG'), '14,950 kg');
-  assert.equal(formatCountQuantity('2.5', 'L'), '2,500 L');
-  assert.equal(formatCountQuantity('7', 'KG'), '7,000 kg');
-  assert.equal(formatCountQuantity('1234.500', 'KG'), '1.234,500 kg');
-  assert.equal(formatCountQuantity('0.930', 'KG'), '0,930 kg');
-  assert.equal(formatCountQuantity('6', 'UNIT'), '6 u.');
-  assert.equal(formatCountQuantity('1500', 'UNIT'), '1.500 u.');
+  assert.equal(isCalendarDate('0050-01-01'), false);
 });
 
 test('arma las celdas del detalle con la copia guardada de la línea', () => {
@@ -270,40 +198,6 @@ test('arma las celdas del detalle con la copia guardada de la línea', () => {
     loose: '—',
     total: '—',
   });
-});
-
-test('agrupa por sección consecutiva en el orden de la plantilla', () => {
-  const item = (section: string | null, id: string): InventoryCountItem =>
-    parseCountDetail(
-      detail([
-        {
-          product: product({
-            id,
-            section,
-            templateRowId: section ? product().templateRowId : null,
-            templatePosition: section ? 3 : null,
-          }),
-          counted: false,
-          line: null,
-        },
-      ]),
-    )!.items[0];
-  const sections = countSections([
-    item('COSTO DE ALIMENTOS', '8d6f7d1e-3c2a-4b5d-8e9f-1a2b3c4d5e61'),
-    item('COSTO DE ALIMENTOS', '8d6f7d1e-3c2a-4b5d-8e9f-1a2b3c4d5e62'),
-    item('COSTO DE BEBIDAS', '8d6f7d1e-3c2a-4b5d-8e9f-1a2b3c4d5e63'),
-    item(null, '8d6f7d1e-3c2a-4b5d-8e9f-1a2b3c4d5e64'),
-  ]);
-  assert.deepEqual(
-    sections.map((section) => [section.section, section.items.length]),
-    [
-      ['COSTO DE ALIMENTOS', 2],
-      ['COSTO DE BEBIDAS', 1],
-      [NO_SECTION, 1],
-    ],
-  );
-  assert.equal(new Set(sections.map((section) => section.id)).size, 3);
-  assert.deepEqual(countSections([]), []);
 });
 
 test('avance, responsable, fecha-hora y descarga solo de finalizadas', () => {

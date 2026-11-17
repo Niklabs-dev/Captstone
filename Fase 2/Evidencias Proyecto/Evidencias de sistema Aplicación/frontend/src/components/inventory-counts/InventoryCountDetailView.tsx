@@ -16,14 +16,16 @@ import {
 } from '@/components/ui/styles';
 import { formatCalendarDate } from '@/lib/display-date';
 import {
+  groupCountItems,
+  personName,
+  type CountItem,
+  type InventoryCountDetail,
+} from '@/lib/inventory-count-contract';
+import {
   canDownloadCount,
   countLineCells,
   countProgress,
-  countSections,
   formatChileDateTime,
-  personName,
-  type InventoryCountDetail,
-  type InventoryCountItem,
 } from '@/lib/inventory-counts';
 import { DownloadCountButton } from './DownloadCountButton';
 import { CountStatusBadge } from './InventoryCountList';
@@ -40,7 +42,7 @@ const HEADINGS = [
   'Total',
 ];
 
-function pending(item: InventoryCountItem): ReactElement | null {
+function pending(item: CountItem): ReactElement | null {
   return item.counted ? null : (
     <span className={`${badgeClass} bg-tint2 text-ink2`}>Sin contar</span>
   );
@@ -52,7 +54,7 @@ export function InventoryCountDetailView({
   count: InventoryCountDetail;
 }): ReactElement {
   const finalized = canDownloadCount(count);
-  const sections = countSections(count.items);
+  const sections = groupCountItems(count.items);
   return (
     <div className="min-w-0 space-y-5">
       <Link href="/admin/inventarios" prefetch={false} className={buttonClass}>
@@ -142,18 +144,15 @@ export function InventoryCountDetailView({
           <header className={tableHeaderClass}>
             <div className="min-w-0">
               <h2 id={section.id} className={`${panelTitleClass} break-words`}>
-                {section.section}
+                {section.name}
               </h2>
               <p className={tableDescriptionClass}>
-                {countProgress(
-                  section.items.filter((item) => item.counted).length,
-                  section.items.length,
-                )}
+                {countProgress(section.counted, section.items.length)}
               </p>
             </div>
           </header>
           <ul
-            aria-label={`Productos de ${section.section}`}
+            aria-label={`Productos de ${section.name}`}
             className="divide-y divide-line lg:hidden"
           >
             {section.items.map((item) => {
@@ -201,14 +200,14 @@ export function InventoryCountDetailView({
           </ul>
           <div
             role="region"
-            aria-label={`Tabla de ${section.section} desplazable`}
+            aria-label={`Tabla de ${section.name} desplazable`}
             tabIndex={0}
             className="hidden min-w-0 max-w-full overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-salmon-ink lg:block"
           >
             <table className={`${tableClass} min-w-[860px]`}>
               <caption className="sr-only">
                 Producto, SKU, cajas, paquetes, cantidad suelta y total de{' '}
-                {section.section}.
+                {section.name}.
               </caption>
               <thead className={tableHeadClass}>
                 <tr>
