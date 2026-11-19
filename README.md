@@ -176,6 +176,6 @@ Fase 2/
     Evidencias de documentación/   Documentos del proyecto y artefactos Scrum
     Base de datos/                 Modelo de datos (MER) y esquema
     Evidencias de sistema Aplicación/   Código fuente (frontend, backend, Docker)
-    Presentación Proyecto.pptx
+    Presentacion_Final.pptx        Presentación final (también en PDF)
 Fase 3/   Presentación final y evidencias de cierre
 ```
