@@ -1,0 +1,1506 @@
+// =============================================================
+// Moi-food — Sistema de Gestión Interna Subway (Capstone Duoc UC)
+// Modelo de datos Prisma 7 sobre PostgreSQL.
+//
+// Convenciones:
+// - Identificadores en inglés; tablas y columnas en snake_case.
+// - UUIDs generados por PostgreSQL (gen_random_uuid()); los libros
+//   mayores (audit_logs, inventory_movements) usan BigInt
+//   autoincremental para preservar el orden cronológico natural.
+// - Montos en Decimal(12, 2) (CLP); cantidades Decimal(12, 3).
+// - Fechas de negocio como date; marcas de tiempo como timestamptz.
+// - Borrado físico restringido (Restrict) por defecto para proteger
+//   la trazabilidad; los datos personales se anonimizan (no se
+//   borran) conforme a la Ley N°21.719.
+// =============================================================
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  // Explícito para que `prisma generate` produzca ESM con extensiones .js
+  // incluso sin tsconfig.json en el contexto (p. ej. etapa deps del Dockerfile).
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -------------------------------------------------------------
+// MÓDULO NÚCLEO: locales, roles, usuarios, autenticación, auditoría
+// -------------------------------------------------------------
+
+/// Local de la franquicia (dos en Melipilla y uno en Calera de Tango).
+model Store {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String   @db.VarChar(100)
+  city          String   @db.VarChar(100)
+  address       String   @db.VarChar(200)
+  /// ID del local asignado por Subway (SPRINT-4A-T15): opcional, único y solo
+  /// dígitos (1 a 10, CHECK). Identifica el local en el reporte de MrComanda;
+  /// el número interno de MrComanda («208» en «208 - 72597») no se guarda.
+  subwayStoreId String?  @unique @map("subway_store_id") @db.VarChar(10)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users              User[]
+  auditLogs          AuditLog[]
+  documents          Document[]
+  tipPools           TipPool[]
+  tipPoolReceipts    TipPoolReceipt[]
+  tipEntries         TipEntry[]
+  tipAgreements      TipAgreement[]
+  workHoursRecords   WorkHoursRecord[]
+  sales              Sale[]
+  cashClosings       CashClosing[]
+  inventoryMovements InventoryMovement[]
+  inventoryCounts    InventoryCount[]
+  dailyOperations    DailyOperation[]
+  externalCodes      StoreExternalCode[]
+  salesImports       SalesImport[]
+  operatingSchedule  StoreOperatingSchedule?
+  closures           StoreClosure[]
+  tipAllocations     DailyTipAllocation[]
+  tipPaymentBatches  TipPaymentBatch[]
+
+  @@map("stores")
+}
+
+/// Rol de acceso (ADMINISTRADOR, SUPERVISOR, TRABAJADOR, CONTADOR; seed en SPRINT-1-T05).
+model Role {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String   @unique @db.VarChar(30)
+  name        String   @db.VarChar(50)
+  description String?  @db.VarChar(255)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users User[]
+
+  @@map("roles")
+}
+
+/// Usuario del sistema. Los datos personales (nombres, RUT, correo, teléfono)
+/// son datos personales según la Ley N°21.719: se minimizan a lo estrictamente
+/// necesario y, al ejercerse el derecho de cancelación, se anonimizan en lugar
+/// de borrarse (marcando anonymized_at) para preservar la trazabilidad laboral
+/// que exige el art. 9 bis del Código del Trabajo.
+/// store_id es NULL para usuarios globales (dueño, administrador, contador).
+model User {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String    @unique @db.VarChar(160)
+  passwordHash  String    @map("password_hash") @db.VarChar(255)
+  firstName     String    @map("first_name") @db.VarChar(80)
+  lastName      String    @map("last_name") @db.VarChar(80)
+  rut           String?   @unique @db.VarChar(12)
+  phone         String?   @db.VarChar(20)
+  hiredAt       DateTime? @map("hired_at") @db.Date
+  isActive      Boolean   @default(true) @map("is_active")
+  anonymizedAt  DateTime? @map("anonymized_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  role    Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  roleId  String @map("role_id") @db.Uuid
+  store   Store? @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId String? @map("store_id") @db.Uuid
+
+  refreshTokens              RefreshToken[]
+  auditLogs                  AuditLog[]
+  subjectDocuments           Document[]           @relation("SubjectDocuments")
+  createdDocuments           Document[]           @relation("CreatedDocuments")
+  dtRegisteredDocuments      Document[]           @relation("DtRegisteredDocuments")
+  uploadedVersions           DocumentVersion[]    @relation("UploadedVersions")
+  payslips                   Payslip[]            @relation("WorkerPayslips")
+  createdPayslips            Payslip[]            @relation("CreatedPayslips")
+  publishedPayslips          Payslip[]            @relation("PublishedPayslips")
+  calculatedTipPools        TipPool[]            @relation("CalculatedTipPools")
+  confirmedTipPools          TipPool[]            @relation("ConfirmedTipPools")
+  paidTipPools               TipPool[]            @relation("PaidTipPools")
+  tipPoolReceipts            TipPoolReceipt[]     @relation("WorkerTipPoolReceipts")
+  paidTipPoolReceipts        TipPoolReceipt[]     @relation("PaidTipPoolReceipts")
+  tipPoolLines               TipPoolLine[]        @relation("TipPoolLines")
+  responsibleTipEntries      TipEntry[]           @relation("ResponsibleTipEntries")
+  createdTipAgreements       TipAgreement[]       @relation("CreatedTipAgreements")
+  workedHours                WorkHoursRecord[]    @relation("WorkerWorkHours")
+  recordedWorkHours          WorkHoursRecord[]    @relation("RecordedWorkHours")
+  registeredSales            Sale[]               @relation("RegisteredSales")
+  responsibleCashClosings    CashClosing[]        @relation("ResponsibleCashClosings")
+  closedCashClosings         CashClosing[]        @relation("ClosedCashClosings")
+  responsibleDailyOperations DailyOperation[]    @relation("ResponsibleDailyOperations")
+  dailyOperationParticipations DailyOperationParticipant[]
+  tipAllocations             DailyTipAllocation[] @relation("WorkerTipAllocations")
+  paidTipPaymentBatches      TipPaymentBatch[]    @relation("PaidTipPaymentBatches")
+  uploadedSalesImports       SalesImport[]        @relation("UploadedSalesImports")
+  confirmedSalesImports      SalesImport[]        @relation("ConfirmedSalesImports")
+  resolvedSalesImports       SalesImport[]        @relation("ResolvedSalesImports")
+  updatedOperatingSchedules  StoreOperatingSchedule[] @relation("UpdatedOperatingSchedules")
+  createdStoreClosures       StoreClosure[]       @relation("CreatedStoreClosures")
+  inventoryMovements         InventoryMovement[]  @relation("CreatedInventoryMovements")
+  inventoryCounts            InventoryCount[]     @relation("CreatedInventoryCounts")
+  finalizedInventoryCounts   InventoryCount[]     @relation("FinalizedInventoryCounts")
+  savedInventoryCountLines   InventoryCountLine[] @relation("SavedInventoryCountLines")
+  ownDataRightsRequests      DataRightsRequest[]  @relation("OwnDataRightsRequests")
+  resolvedDataRightsRequests DataRightsRequest[]  @relation("ResolvedDataRightsRequests")
+
+  @@index([storeId])
+  @@map("users")
+}
+
+/// Refresh token de sesión (SPRINT-1-T06). Nunca se guarda el token en claro,
+/// solo su hash, con expiración y revocación.
+model RefreshToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(255)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  ipAddress String?   @map("ip_address") @db.Inet
+  userAgent String?   @map("user_agent") @db.VarChar(255)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id") @db.Uuid
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+/// Registro de auditoría INMUTABLE (SPRINT-1-T12 a T15): quién, qué operación,
+/// sobre qué entidad, en qué local y cuándo. Sin updated_at: las filas no se
+/// modifican ni se borran; la aplicación solo permite INSERT y SELECT.
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  action     String   @db.VarChar(60)
+  entityType String   @map("entity_type") @db.VarChar(60)
+  entityId   String?  @map("entity_id") @db.VarChar(64)
+  detail     Json?    @db.JsonB
+  ipAddress  String?  @map("ip_address") @db.Inet
+  userAgent  String?  @map("user_agent") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Restrict: el registro es inmutable (SPRINT-1-T15, triggers en la migración
+  // auditoria_inmutable), por lo que un usuario o local con historial no se
+  // borra; la Ley N°21.719 se cumple anonimizando (anonymizedAt), que conserva la fila.
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userId     String?  @map("user_id") @db.Uuid
+  store      Store?   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId    String?  @map("store_id") @db.Uuid
+
+  @@index([storeId, createdAt])
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+// -------------------------------------------------------------
+// MÓDULO GESTOR DOCUMENTAL: documentos laborales con hash SHA-256,
+// control de versiones y conservación por 5 años (art. 9 bis CT).
+// -------------------------------------------------------------
+
+/// Tipo de documento laboral (CONTRATO, ANEXO, PACTO, FINIQUITO, LIQUIDACION, etc.).
+/// retention_years refleja la conservación exigida por la normativa (5 años).
+/// requires_dt_registration marca los tipos que deben registrarse en la
+/// Dirección del Trabajo dentro de 15 días desde su celebración (SPRINT-2-T03).
+model DocumentType {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                   String   @unique @db.VarChar(40)
+  name                   String   @db.VarChar(100)
+  description            String?  @db.VarChar(255)
+  requiresExpiration     Boolean  @default(false) @map("requires_expiration")
+  requiresDtRegistration Boolean  @default(false) @map("requires_dt_registration")
+  retentionYears         Int      @default(5) @map("retention_years")
+  isActive               Boolean  @default(true) @map("is_active")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  documents Document[]
+
+  @@map("document_types")
+}
+
+enum DocumentStatus {
+  ACTIVE
+  EXPIRED
+  ARCHIVED
+}
+
+/// Documento laboral. subject_user_id identifica al trabajador dueño del
+/// documento (NULL para documentos del local, ej. permiso sanitario).
+/// issued_at es la fecha de celebración (firma) del documento.
+/// expires_at permite alertas de vencimiento; nunca se borra físicamente
+/// durante el plazo de conservación legal.
+/// Plazos (SPRINT-2-T03):
+/// - retain_until: fecha hasta la que debe conservarse (art. 9 bis CT), fijada
+///   al crear el documento como issued_at (o la fecha de carga) + retention_years
+///   del tipo. Es una foto: no cambia si luego se modifica el tipo.
+/// - dt_registration_due_at: vencimiento del plazo de 15 días para registrar el
+///   documento en la Dirección del Trabajo; NULL si su tipo no lo exige.
+/// - dt_registered_at / dt_registered_by_id: cuándo y quién marcó el registro en
+///   la DT como realizado; mientras sea NULL la alerta sigue activa.
+/// Conservación (SPRINT-2-T07): los triggers de la migración
+/// bloqueo_eliminacion_documentos rechazan eliminar el documento mientras no
+/// venza retain_until (en hora de Chile), acortar retain_until y TRUNCATE.
+model Document {
+  id                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title               String         @db.VarChar(160)
+  description         String?
+  status              DocumentStatus @default(ACTIVE)
+  issuedAt            DateTime?      @map("issued_at") @db.Date
+  expiresAt           DateTime?      @map("expires_at") @db.Date
+  retainUntil         DateTime       @map("retain_until") @db.Date
+  dtRegistrationDueAt DateTime?      @map("dt_registration_due_at") @db.Date
+  dtRegisteredAt      DateTime?      @map("dt_registered_at") @db.Timestamptz(6)
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store            Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId          String         @map("store_id") @db.Uuid
+  subjectUser      User?          @relation("SubjectDocuments", fields: [subjectUserId], references: [id], onDelete: Restrict)
+  subjectUserId    String?        @map("subject_user_id") @db.Uuid
+  documentType     DocumentType   @relation(fields: [documentTypeId], references: [id], onDelete: Restrict)
+  documentTypeId   String         @map("document_type_id") @db.Uuid
+  createdBy        User           @relation("CreatedDocuments", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById      String         @map("created_by_id") @db.Uuid
+  dtRegisteredBy   User?          @relation("DtRegisteredDocuments", fields: [dtRegisteredById], references: [id], onDelete: Restrict)
+  dtRegisteredById String?        @map("dt_registered_by_id") @db.Uuid
+  currentVersion   DocumentVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  currentVersionId String?          @unique @map("current_version_id") @db.Uuid
+  versions         DocumentVersion[] @relation("DocumentVersions")
+  // Liquidación de sueldo asociada, si el documento es de tipo LIQUIDACION.
+  payslip          Payslip?
+
+  @@index([storeId, status])
+  @@index([subjectUserId])
+  @@index([expiresAt])
+  @@index([dtRegistrationDueAt])
+  @@index([retainUntil])
+  @@map("documents")
+}
+
+/// Versión INMUTABLE de un documento: archivo en volumen separado (file_path),
+/// hash SHA-256 único que permite verificar la integridad del archivo, y
+/// trazabilidad de quién subió cada versión y cuándo. Los triggers de la
+/// migración versiones_documento_inmutables (SPRINT-2-T05) rechazan UPDATE y
+/// TRUNCATE: una nueva carga siempre crea una versión nueva. DELETE solo se
+/// admite vencido el plazo de conservación del documento (SPRINT-2-T07).
+model DocumentVersion {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  versionNumber Int      @map("version_number")
+  fileName      String   @map("file_name") @db.VarChar(255)
+  filePath      String   @map("file_path") @db.VarChar(500)
+  mimeType      String   @map("mime_type") @db.VarChar(100)
+  sizeBytes     BigInt   @map("size_bytes")
+  sha256Hash    String   @unique @map("sha256_hash") @db.Char(64)
+  changeNote    String?  @map("change_note") @db.VarChar(255)
+  uploadedAt    DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+
+  document     Document  @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Restrict)
+  documentId   String    @map("document_id") @db.Uuid
+  uploadedBy   User      @relation("UploadedVersions", fields: [uploadedById], references: [id], onDelete: Restrict)
+  uploadedById String    @map("uploaded_by_id") @db.Uuid
+  currentOf    Document? @relation("CurrentVersion")
+
+  @@unique([documentId, versionNumber])
+  @@map("document_versions")
+}
+
+enum PayslipStatus {
+  PENDING_SIGNATURE
+  PUBLISHED
+}
+
+/// Liquidación de sueldo mensual de un trabajador (SPRINT-2-T12, E2-H1). El
+/// archivo vive en el gestor documental: document_id apunta a un documento de
+/// tipo LIQUIDACION, que aporta el versionado, el hash SHA-256 y el plazo de
+/// conservación (5 años, art. 9 bis CT).
+/// - period: mes de la remuneración, guardado como su primer día (CHECK).
+/// - status: PENDING_SIGNATURE al cargarla el contador (no visible para el
+///   trabajador) y PUBLISHED cuando confirma su publicación. signed_at (fecha
+///   de firma), published_at y published_by_id se fijan al publicar y son
+///   obligatorios en ese estado (CHECK).
+/// - Una sola liquidación por trabajador y período (restricción única).
+/// - worker_id repite el subject_user_id del documento para esa restricción;
+///   el trigger payslips_check_document exige que coincidan.
+model Payslip {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  period      DateTime      @db.Date
+  status      PayslipStatus @default(PENDING_SIGNATURE)
+  signedAt    DateTime?     @map("signed_at") @db.Date
+  publishedAt DateTime?     @map("published_at") @db.Timestamptz(6)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  documentId    String   @unique @map("document_id") @db.Uuid
+  worker        User     @relation("WorkerPayslips", fields: [workerId], references: [id], onDelete: Restrict)
+  workerId      String   @map("worker_id") @db.Uuid
+  createdBy     User     @relation("CreatedPayslips", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById   String   @map("created_by_id") @db.Uuid
+  publishedBy   User?    @relation("PublishedPayslips", fields: [publishedById], references: [id], onDelete: Restrict)
+  publishedById String?  @map("published_by_id") @db.Uuid
+
+  @@unique([workerId, period])
+  @@index([status, period])
+  @@map("payslips")
+}
+
+// -------------------------------------------------------------
+// MÓDULO PROPINAS: registro diario, pacto vigente, horas trabajadas
+// y reparto con snapshots (art. 64 del Código del Trabajo).
+// -------------------------------------------------------------
+
+enum TipPoolStatus {
+  DRAFT
+  CONFIRMED
+  PAID
+}
+
+/// Regla de reparto. PROPORTIONAL_TO_HOURS es la regla de los repartos
+/// históricos (proporcional a las horas registradas), que se conservan tal
+/// cual; EQUAL_SHARES es la regla equitativa entre los participantes de cada
+/// operación diaria (SPRINT-4R-T02 la agrega al enum y SPRINT-4R-T04 la
+/// calcula): todo cálculo nuevo la aplica y sus líneas guardan el monto final
+/// sin horas inventadas (hoursWorked NULL, validado por triggers).
+enum TipAgreementRule {
+  PROPORTIONAL_TO_HOURS
+  EQUAL_SHARES
+}
+
+/// Registro diario agregado por local y medio de pago. Es la única fuente que
+/// alimenta los repartos: sales.tip_amount se reconcilia con este registro y
+/// nunca se vuelve a sumar como una fuente independiente.
+model TipEntry {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessDate  DateTime @map("business_date") @db.Date
+  amount        Decimal  @db.Decimal(12, 2)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store            Store                 @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId          String                @map("store_id") @db.Uuid
+  paymentMethod    PaymentMethod         @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId  String                @map("payment_method_id") @db.Uuid
+  responsible      User                  @relation("ResponsibleTipEntries", fields: [responsibleId], references: [id], onDelete: Restrict)
+  responsibleId    String                @map("responsible_id") @db.Uuid
+  sales            Sale[]
+  poolSource       TipPoolSource?
+  cashClosingLinks CashClosingTipEntry[]
+
+  @@unique([storeId, businessDate, paymentMethodId])
+  @@index([storeId, businessDate])
+  @@map("tip_entries")
+}
+
+/// Pacto de reparto vigente en un local. La regla inicial es proporcional a
+/// las horas; el reparto conserva una copia para que sus cambios no lo alteren.
+model TipAgreement {
+  id        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String           @db.VarChar(160)
+  rule      TipAgreementRule
+  validFrom DateTime         @map("valid_from") @db.Date
+  validTo   DateTime?        @map("valid_to") @db.Date
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store       Store     @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId     String    @map("store_id") @db.Uuid
+  createdBy   User      @relation("CreatedTipAgreements", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById String    @map("created_by_id") @db.Uuid
+  pools       TipPool[]
+
+  @@unique([storeId, validFrom])
+  @@index([storeId, validTo])
+  @@map("tip_agreements")
+}
+
+/// Horas trabajadas por una persona en el período y local de un reparto.
+model WorkHoursRecord {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  periodStart DateTime @map("period_start") @db.Date
+  periodEnd   DateTime @map("period_end") @db.Date
+  hoursWorked Decimal  @map("hours_worked") @db.Decimal(6, 2)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store        Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId      String        @map("store_id") @db.Uuid
+  worker       User          @relation("WorkerWorkHours", fields: [workerId], references: [id], onDelete: Restrict)
+  workerId     String        @map("worker_id") @db.Uuid
+  recordedBy   User          @relation("RecordedWorkHours", fields: [recordedById], references: [id], onDelete: Restrict)
+  recordedById String        @map("recorded_by_id") @db.Uuid
+  lines        TipPoolLine[]
+
+  @@unique([storeId, workerId, periodStart, periodEnd])
+  @@index([storeId, periodStart, periodEnd])
+  @@map("work_hours_records")
+}
+
+/// Reparto de propinas de un local para un período. El total se calcula desde
+/// tip_entries y conserva el pacto aplicado como snapshot JSON. Sigue
+/// DRAFT → CONFIRMED → PAID (SPRINT-3-T13): version es el bloqueo optimista y
+/// sube en cada cambio; desde CONFIRMED los triggers impiden cambiar montos.
+model TipPool {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  periodStart       DateTime      @map("period_start") @db.Date
+  periodEnd         DateTime      @map("period_end") @db.Date
+  totalAmount       Decimal       @map("total_amount") @db.Decimal(12, 2)
+  status            TipPoolStatus @default(DRAFT)
+  notes             String?       @db.VarChar(255)
+  agreementSnapshot Json?         @map("agreement_snapshot") @db.JsonB
+  confirmedAt       DateTime?     @map("confirmed_at") @db.Timestamptz(6)
+  version           Int           @default(1)
+  paidAt            DateTime?     @map("paid_at") @db.Timestamptz(6)
+  paymentDate       DateTime?     @map("payment_date") @db.Date
+  calculatedAt      DateTime      @default(now()) @map("calculated_at") @db.Timestamptz(6)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store          Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId        String          @map("store_id") @db.Uuid
+  calculatedBy   User            @relation("CalculatedTipPools", fields: [calculatedById], references: [id], onDelete: Restrict)
+  calculatedById String          @map("calculated_by_id") @db.Uuid
+  confirmedBy    User?           @relation("ConfirmedTipPools", fields: [confirmedById], references: [id], onDelete: Restrict)
+  confirmedById  String?         @map("confirmed_by_id") @db.Uuid
+  paidBy         User?           @relation("PaidTipPools", fields: [paidById], references: [id], onDelete: Restrict)
+  paidById       String?         @map("paid_by_id") @db.Uuid
+  agreement      TipAgreement?   @relation(fields: [agreementId], references: [id], onDelete: Restrict)
+  agreementId    String?         @map("agreement_id") @db.Uuid
+  lines          TipPoolLine[]
+  sources        TipPoolSource[]
+  dailyOperationSources TipPoolDailyOperationSource[]
+  receipts       TipPoolReceipt[]
+  // Lote histórico que conserva el pago de este reparto en el modelo de
+  // propinas diarias (SPRINT-4A-T02); solo existe para repartos PAID.
+  legacyPaymentBatch TipPaymentBatch?
+
+  @@unique([storeId, periodStart, periodEnd])
+  @@index([agreementId])
+  @@map("tip_pools")
+}
+
+/// Detalle del reparto por trabajador. hoursWorked es el snapshot usado en el
+/// cálculo proporcional histórico y workHoursRecord mantiene la referencia a
+/// su registro fuente. En los repartos equitativos (EQUAL_SHARES,
+/// SPRINT-4R-T04) hoursWorked es null: la regla no usa horas y no se inventan
+/// (la base lo exige con triggers desde SPRINT-4R-T02).
+model TipPoolLine {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  hoursWorked Decimal? @map("hours_worked") @db.Decimal(6, 2)
+  amount      Decimal  @db.Decimal(12, 2)
+
+  pool              TipPool          @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  poolId            String           @map("pool_id") @db.Uuid
+  user              User             @relation("TipPoolLines", fields: [userId], references: [id], onDelete: Restrict)
+  userId            String           @map("user_id") @db.Uuid
+  workHoursRecord   WorkHoursRecord? @relation(fields: [workHoursRecordId], references: [id], onDelete: Restrict)
+  workHoursRecordId String?          @map("work_hours_record_id") @db.Uuid
+
+  @@unique([poolId, userId])
+  @@index([workHoursRecordId])
+  @@map("tip_pool_lines")
+}
+
+/// Fuente de un reparto: el registro solo puede usarse una vez y amount
+/// conserva el monto aplicado aunque después se corrija el registro diario.
+model TipPoolSource {
+  id     String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  amount Decimal @db.Decimal(12, 2)
+
+  pool       TipPool  @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  poolId     String   @map("pool_id") @db.Uuid
+  tipEntry   TipEntry @relation(fields: [tipEntryId], references: [id], onDelete: Restrict)
+  tipEntryId String   @unique @map("tip_entry_id") @db.Uuid
+
+  @@index([poolId])
+  @@map("tip_pool_sources")
+}
+
+/// Constancia de pago del reparto para un trabajador (SPRINT-3-T13). Es una
+/// foto: copia nombres, local, período, montos y el detalle del reparto para
+/// explicarse sola sin joins futuros. Se inserta al pasar el reparto a PAID y
+/// después es inmutable (triggers). hoursWorked es null solo en los repartos
+/// equitativos (misma regla que tip_pool_lines).
+model TipPoolReceipt {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workerName  String   @map("worker_name") @db.VarChar(161)
+  storeName   String   @map("store_name") @db.VarChar(100)
+  periodStart DateTime @map("period_start") @db.Date
+  periodEnd   DateTime @map("period_end") @db.Date
+  hoursWorked Decimal? @map("hours_worked") @db.Decimal(6, 2)
+  amount      Decimal  @db.Decimal(12, 2)
+  paymentDate DateTime @map("payment_date") @db.Date
+  paidByName  String   @map("paid_by_name") @db.VarChar(161)
+  detail      Json     @db.JsonB
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  pool     TipPool @relation(fields: [poolId], references: [id], onDelete: Restrict)
+  poolId   String  @map("pool_id") @db.Uuid
+  user     User    @relation("WorkerTipPoolReceipts", fields: [userId], references: [id], onDelete: Restrict)
+  userId   String  @map("user_id") @db.Uuid
+  store    Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId  String  @map("store_id") @db.Uuid
+  paidBy   User    @relation("PaidTipPoolReceipts", fields: [paidById], references: [id], onDelete: Restrict)
+  paidById String  @map("paid_by_id") @db.Uuid
+
+  @@unique([poolId, userId])
+  @@index([userId])
+  @@index([storeId])
+  @@index([paidById])
+  @@map("tip_pool_receipts")
+}
+
+// -------------------------------------------------------------
+// MÓDULO VENTAS Y CAJA: catálogo administrable de medios de pago,
+// ventas por local y cierre de caja diario con responsable
+// asociado y diferencia calculada.
+// -------------------------------------------------------------
+
+/// Comportamiento del medio de pago ante el cierre y la conciliación
+/// (SPRINT-4-T32): CASH recibe el fondo de caja y no se concilia contra
+/// vouchers; RECONCILABLE_CARD alimenta mrcomanda_net_sales con los vouchers
+/// MrComanda clasificados; EXTERNAL_OTHER (transferencias, Junaeb, etc.)
+/// queda fuera de esa conciliación para no sumarse dos veces.
+enum PaymentMethodBehavior {
+  CASH
+  RECONCILABLE_CARD
+  EXTERNAL_OTHER
+}
+
+/// Origen de la venta (SPRINT-4-T32): MANUAL (registro del supervisor) o
+/// MRCOMANDA (total neto agregado del punto de venta por local, medio y
+/// período; tip_amount siempre 0 porque PROPINAS conserva su fuente propia).
+enum SaleSource {
+  MANUAL
+  MRCOMANDA
+}
+
+/// Medio de pago del catálogo administrable (SPRINT-4-T32), única fuente para
+/// ventas, propinas, líneas de cierre y clasificación de vouchers. Reemplaza
+/// al enum PaymentMethod: el código es estable e inmutable (es el contrato
+/// operativo con el frontend y los DTO) y el resto de los atributos se
+/// administran por API sin borrar historial (desactivar no elimina ni oculta
+/// movimientos pasados). Los cuatro medios iniciales conservan su código
+/// (backfill desde el enum en la migración y seed idempotente por código).
+model PaymentMethod {
+  id               String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code             String                @unique @db.VarChar(40)
+  name             String                @db.VarChar(100)
+  sortOrder        Int                   @map("sort_order")
+  isActive         Boolean               @default(true) @map("is_active")
+  behavior         PaymentMethodBehavior
+  availableForTips Boolean               @default(false) @map("available_for_tips")
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sales               Sale[]
+  tipEntries          TipEntry[]
+  cashClosingLines    CashClosingLine[]
+  cashClosingVouchers CashClosingVoucher[]
+  externalAliases     PaymentMethodAlias[]
+  salesImportLines    SalesImportLine[]
+
+  @@map("payment_methods")
+}
+
+enum SaleChannel {
+  IN_STORE
+  DELIVERY
+}
+
+/// Venta registrada en un local. tip_amount detalla la propina de la venta y
+/// se reconcilia con una sola tip_entry; no es una segunda fuente del reparto.
+/// Las ventas MRCOMANDA agregan el total neto (gross - tip, con tip 0) por
+/// local, medio y período: una sola venta por combinación (restricción única;
+/// los períodos NULL de las ventas manuales no colisionan). sold_at sigue
+/// marcando el día de negocio en hora de Chile para la reconciliación.
+model Sale {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  soldAt      DateTime   @map("sold_at") @db.Timestamptz(6)
+  channel     SaleChannel @default(IN_STORE)
+  grossAmount Decimal    @map("gross_amount") @db.Decimal(12, 2)
+  tipAmount   Decimal    @default(0) @map("tip_amount") @db.Decimal(12, 2)
+  source      SaleSource @default(MANUAL)
+  periodStart DateTime?  @map("period_start") @db.Timestamptz(6)
+  periodEnd   DateTime?  @map("period_end") @db.Timestamptz(6)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  store          Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId        String        @map("store_id") @db.Uuid
+  paymentMethod  PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId String       @map("payment_method_id") @db.Uuid
+  cashClosing    CashClosing?  @relation(fields: [cashClosingId], references: [id], onDelete: Restrict)
+  cashClosingId  String?       @map("cash_closing_id") @db.Uuid
+  registeredBy   User          @relation("RegisteredSales", fields: [registeredById], references: [id], onDelete: Restrict)
+  registeredById String        @map("registered_by_id") @db.Uuid
+  tipEntry       TipEntry?     @relation(fields: [tipEntryId], references: [id], onDelete: Restrict)
+  tipEntryId     String?       @map("tip_entry_id") @db.Uuid
+
+  @@unique([storeId, paymentMethodId, periodStart, periodEnd])
+  @@index([storeId, soldAt])
+  @@index([cashClosingId])
+  @@index([tipEntryId])
+  @@map("sales")
+}
+
+enum CashClosingStatus {
+  OPEN
+  CLOSED
+}
+
+/// Origen de un voucher de cierre (SPRINT-4-T08): el reporte de MrComanda
+/// (venta neta del punto de venta) o la liquidación de Mercado Pago (cobro
+/// bruto, que incluye la propina pagada con tarjeta).
+enum CashClosingVoucherSource {
+  MRCOMANDA
+  MERCADO_PAGO
+}
+
+/// Cierre de caja por local, día de negocio y turno (SPRINT-4-T08). Un solo
+/// cierre por local, día y turno (restricción única compuesta); shift es el
+/// número de turno (>= 1) y cada local define cuántos tiene.
+///
+/// El supervisor declara lo contado por cada medio de pago activo del
+/// catálogo (payment_methods, ordenado por sort_order) en cash_closing_lines y
+/// el sistema lo compara contra lo esperado según las ventas, calculando la
+/// diferencia por línea; la diferencia total del cierre es la suma de las
+/// líneas. opening_cash (fondo de caja) es un monto único: se suma una sola
+/// vez a lo esperado, en la primera línea cuyo medio tiene comportamiento
+/// CASH (por sort_order/código), aunque el catálogo tenga más de un medio
+/// CASH. Un fondo positivo sin una línea CASH hace que la API rechace el cierre.
+///
+/// Conciliación con los proveedores externos (CHECK en la base):
+///   reconciliation_difference = mercado_pago_gross_amount
+///                               - mercado_pago_tip_amount
+///                               - mrcomanda_net_sales
+/// Positiva: Mercado Pago cobró más de lo vendido. Al cerrar, los tres totales
+/// deben coincidir con la suma de los vouchers del cierre: mrcomanda_net_sales
+/// solo recibe vouchers MrComanda clasificados con un medio RECONCILABLE_CARD
+/// (o sin clasificar, que conservan el comportamiento heredado); los vouchers
+/// MrComanda de medios CASH u EXTERNAL_OTHER quedan fuera y no se suman dos
+/// veces. SUPUESTO pendiente de confirmar con el PO: (a) mrcomanda_net_sales
+/// es solo la porción de la venta cobrada por Mercado Pago y (b) todos los
+/// montos incluyen IVA.
+///
+/// La propina NO es venta: no se suma a lo esperado de ninguna línea ni a la
+/// venta neta, y no se copia al cierre. Su única fuente sigue siendo
+/// tip_entries, que se vincula solo como referencia en cash_closing_tip_entries.
+///
+/// Ciclo OPEN → CLOSED (triggers): se crea en OPEN; closed_at y closed_by se
+/// llenan solo al cerrar, y si alguna línea o la conciliación tienen
+/// diferencia distinta de 0 el motivo (difference_reason) es obligatorio. Un
+/// cierre CLOSED es inmutable junto con sus líneas, vouchers, vínculos a
+/// propinas y ventas asociadas.
+model CashClosing {
+  id                       String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessDate             DateTime          @map("business_date") @db.Date
+  shift                    Int               @db.SmallInt
+  openingCash              Decimal           @map("opening_cash") @db.Decimal(12, 2)
+  status                   CashClosingStatus @default(OPEN)
+  notes                    String?           @db.VarChar(255)
+  differenceReason         String?           @map("difference_reason") @db.VarChar(500)
+  mrcomandaNetSales        Decimal           @default(0) @map("mrcomanda_net_sales") @db.Decimal(12, 2)
+  mercadoPagoGrossAmount   Decimal           @default(0) @map("mercado_pago_gross_amount") @db.Decimal(12, 2)
+  mercadoPagoTipAmount     Decimal           @default(0) @map("mercado_pago_tip_amount") @db.Decimal(12, 2)
+  reconciliationDifference Decimal           @default(0) @map("reconciliation_difference") @db.Decimal(12, 2)
+  closedAt                 DateTime?         @map("closed_at") @db.Timestamptz(6)
+  createdAt                DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store         Store                 @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId       String                @map("store_id") @db.Uuid
+  responsible   User                  @relation("ResponsibleCashClosings", fields: [responsibleId], references: [id], onDelete: Restrict)
+  responsibleId String                @map("responsible_id") @db.Uuid
+  closedBy      User?                 @relation("ClosedCashClosings", fields: [closedById], references: [id], onDelete: Restrict)
+  closedById    String?               @map("closed_by_id") @db.Uuid
+  sales         Sale[]
+  lines         CashClosingLine[]
+  vouchers      CashClosingVoucher[]
+  tipEntries    CashClosingTipEntry[]
+
+  @@unique([storeId, businessDate, shift])
+  @@index([closedById])
+  @@map("cash_closings")
+}
+
+/// Desglose del cierre de caja por medio de pago del catálogo: lo esperado
+/// según el sistema (suma de las ventas del medio, más el fondo de caja único
+/// si es la primera línea CASH del cierre) contra lo declarado/contado por el
+/// supervisor, con su diferencia. Un medio de pago por línea (restricción
+/// única compuesta). CHECK: montos >= 0 y difference = counted - expected.
+model CashClosingLine {
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  expectedAmount Decimal @map("expected_amount") @db.Decimal(12, 2)
+  countedAmount  Decimal @map("counted_amount") @db.Decimal(12, 2)
+  difference     Decimal @db.Decimal(12, 2)
+
+  closing         CashClosing   @relation(fields: [closingId], references: [id], onDelete: Cascade)
+  closingId       String        @map("closing_id") @db.Uuid
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId String        @map("payment_method_id") @db.Uuid
+
+  @@unique([closingId, paymentMethodId])
+  @@map("cash_closing_lines")
+}
+
+/// Voucher de respaldo de la conciliación (SPRINT-4-T08): fuente, período de
+/// corte que cubre (timestamptz, fin > inicio) y monto. Solo Mercado Pago
+/// informa propina incluida en el bruto; en MrComanda es siempre 0 (CHECK).
+/// Puede haber varios por fuente y turno (terminales o cortes parciales).
+/// payment_method clasifica los vouchers MrComanda nuevos (obligatorio vía
+/// API): solo los de comportamiento RECONCILABLE_CARD alimentan
+/// mrcomanda_net_sales; los vouchers históricos sin clasificación conservan
+/// el comportamiento heredado y siguen sumando (NULL).
+model CashClosingVoucher {
+  id                String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source            CashClosingVoucherSource
+  periodStart       DateTime                 @map("period_start") @db.Timestamptz(6)
+  periodEnd         DateTime                 @map("period_end") @db.Timestamptz(6)
+  amount            Decimal                  @db.Decimal(12, 2)
+  tipIncludedAmount Decimal                  @default(0) @map("tip_included_amount") @db.Decimal(12, 2)
+  reference         String?                  @db.VarChar(100)
+  createdAt         DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  closing         CashClosing   @relation(fields: [closingId], references: [id], onDelete: Cascade)
+  closingId       String        @map("closing_id") @db.Uuid
+  paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId String?       @map("payment_method_id") @db.Uuid
+
+  @@index([closingId, source])
+  @@map("cash_closing_vouchers")
+}
+
+/// Vínculo de SOLO REFERENCIA entre un cierre y el registro diario de propinas
+/// del mismo local y día (SPRINT-4-T08). No copia montos: la propina no se
+/// suma a lo esperado de ventas ni se duplica el fondo; tip_entries sigue
+/// siendo la única fuente de los repartos. Como el registro es diario y el
+/// cierre es por turno, un mismo registro puede vincularse a varios turnos.
+model CashClosingTipEntry {
+  closing    CashClosing @relation(fields: [closingId], references: [id], onDelete: Cascade)
+  closingId  String      @map("closing_id") @db.Uuid
+  tipEntry   TipEntry    @relation(fields: [tipEntryId], references: [id], onDelete: Restrict)
+  tipEntryId String      @map("tip_entry_id") @db.Uuid
+
+  @@id([closingId, tipEntryId])
+  @@index([tipEntryId])
+  @@map("cash_closing_tip_entries")
+}
+
+// -------------------------------------------------------------
+// MÓDULO OPERACIÓN DIARIA: un único registro por local y día de
+// negocio con ambos montos de propina y la diferencia de efectivo
+// declarada (SPRINT-4R-T01). Reemplaza al flujo previo de cierres
+// por turno con conciliación y a la captura separada de propinas;
+// los históricos de cash_closings, cash_closing_vouchers y
+// tip_entries se conservan solo de lectura.
+// -------------------------------------------------------------
+
+/// Operación diaria de un local: la propina de tarjeta (con su voucher
+/// fotográfico privado), la propina en efectivo y la diferencia de efectivo
+/// declarada por el supervisor con su motivo cuando no es cero. Un solo
+/// registro por local y día de negocio (restricción única compuesta).
+///
+/// Es la fuente de ambos montos de propina (card_tip_amount y
+/// cash_tip_amount); tip_fund_amount es su suma (CHECK) y alimenta el fondo
+/// del reparto. Los montos son CLP enteros en BIGINT (el tope de validación
+/// de la API supera el entero de 32 bits). La diferencia de efectivo lleva
+/// signo: positiva sobrante, negativa faltante, y exige motivo si no es cero
+/// (CHECK). El voucher es obligatorio siempre que card_tip_amount > 0 (CHECK
+/// sobre la misma fila, porque la FK al voucher vive aquí).
+model DailyOperation {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessDate     DateTime @map("business_date") @db.Date
+  cardTipAmount    BigInt   @map("card_tip_amount")
+  cashTipAmount    BigInt   @map("cash_tip_amount")
+  tipFundAmount    BigInt   @map("tip_fund_amount")
+  cashDifference   BigInt   @map("cash_difference")
+  differenceReason String?  @map("difference_reason") @db.VarChar(500)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store         Store                 @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId       String                @map("store_id") @db.Uuid
+  responsible   User                  @relation("ResponsibleDailyOperations", fields: [responsibleId], references: [id], onDelete: Restrict)
+  responsibleId String                @map("responsible_id") @db.Uuid
+  voucher       DailyOperationVoucher? @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  voucherId     String?               @unique @map("voucher_id") @db.Uuid
+
+  participants   DailyOperationParticipant[]
+  poolSource     TipPoolDailyOperationSource?
+  tipAllocations DailyTipAllocation[]
+
+  @@unique([storeId, businessDate])
+  @@map("daily_operations")
+}
+
+/// Foto del voucher de propinas de tarjeta de una operación diaria. Guarda
+/// solo metadatos: el archivo vive en el volumen privado de almacenamiento
+/// (mismo volumen que el gestor documental, subcarpeta vouchers/) con un
+/// nombre físico aleatorio, y se descarga únicamente por la API autorizada
+/// (GET /daily-operations/:id/voucher); nunca se sirve de forma pública. Su
+/// integridad se verifica con sha256_hash. Relación 1:1 con la operación: la
+/// FK con valor único vive en daily_operations, lo que además permite el
+/// CHECK que exige voucher cuando hay propina de tarjeta.
+model DailyOperationVoucher {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fileName   String   @map("file_name") @db.VarChar(255)
+  filePath   String   @map("file_path") @db.VarChar(500)
+  mimeType   String   @map("mime_type") @db.VarChar(100)
+  sizeBytes  BigInt   @map("size_bytes")
+  sha256Hash String   @map("sha256_hash") @db.Char(64)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  operation DailyOperation?
+
+  @@map("daily_operation_vouchers")
+}
+
+/// Trabajadores que participan del reparto de una operación diaria
+/// (SPRINT-4R-T02). La operación ya es única por local y fecha y acumula la
+/// propina de tarjeta y la de efectivo en un solo fondo, así que UNA selección
+/// de participantes cubre ambos medios: no hay selecciones paralelas que
+/// diverjan. La base valida al insertar o cambiar la fila (trigger) que el
+/// trabajador sea del mismo local de la operación, con rol TRABAJADOR o
+/// SUPERVISOR (SPRINT-4A-T01: el supervisor también recibe su parte) y
+/// activo; una baja lógica o un cambio de rol/local posteriores NO tocan la
+/// selección: la FK al trabajador es Restrict (no hay borrado) y la validación
+/// solo corre al escribir la participación, de modo que el historial se
+/// conserva. Tampoco se puede cambiar la selección ni los montos de la
+/// operación cuando ya alimentó un reparto CONFIRMED o PAID (trigger): eso no
+/// reinterpreta repartos cerrados.
+model DailyOperationParticipant {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  operation   DailyOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operationId String         @map("operation_id") @db.Uuid
+  worker      User           @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  workerId    String         @map("worker_id") @db.Uuid
+
+  @@unique([operationId, workerId])
+  @@index([workerId])
+  @@map("daily_operation_participants")
+}
+
+/// Fuente de un reparto alimentada por la operación diaria (SPRINT-4R-T02):
+/// separada de tip_pool_sources, que sigue ligada a los tip_entries
+/// históricos. Cada operación solo puede alimentar UN reparto (operation_id
+/// único), lo que evita el doble reparto del mismo fondo y, con amount BIGINT
+/// en CLP entero igual al tip_fund_amount de la operación (trigger), da la
+/// conciliación exacta del reparto contra el fondo que lo originó. amount
+/// conserva el monto aplicado aunque después se corrija la operación (la foto
+/// no se reinterpreta), y la base bloquea corregir los montos de una operación
+/// ya usada por un reparto CONFIRMED o PAID. Solo cambia en DRAFT (trigger),
+/// como las líneas y fuentes históricas.
+model TipPoolDailyOperationSource {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  amount BigInt
+
+  pool        TipPool        @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  poolId      String         @map("pool_id") @db.Uuid
+  operation   DailyOperation @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  operationId String         @unique @map("operation_id") @db.Uuid
+
+  @@index([poolId])
+  @@map("tip_pool_daily_operation_sources")
+}
+
+// -------------------------------------------------------------
+// PROPINA DIARIA POR TRABAJADOR Y LOTES DE PAGO (SPRINT-4A-T02)
+// Decisión del Product Owner (10/11/2026): la unidad de propina es la
+// asignación diaria por trabajador, creada en la misma transacción que la
+// operación diaria (SPRINT-4A-T03), y el pago se registra como lote por local
+// y período. Los repartos por período (tip_pools) quedan como históricos de
+// solo lectura. Las reglas de integridad viven en la migración
+// 20261110040000_propinas_diarias_lotes_pago (CHECK y triggers).
+// -------------------------------------------------------------
+
+/// Estado de pago de la propina diaria de un trabajador: nace UNPAID (No
+/// pagada) y pasa a PAID (Pagada) una sola vez, al quedar en un lote de pago.
+enum TipAllocationStatus {
+  UNPAID
+  PAID
+}
+
+/// Propina de un trabajador en una operación diaria (SPRINT-4A-T02). Una fila
+/// por (operación, trabajador), en CLP entero (BIGINT, >= 0). local y fecha de
+/// negocio copian los de la operación (trigger) para consultar por local/día y
+/// por trabajador/día sin joins. La base garantiza: el trabajador es
+/// participante de la operación; las asignaciones de una operación suman
+/// exactamente su fondo (tarjeta + efectivo) y cubren a todos sus
+/// participantes (constraint trigger diferido, al commit; desde SPRINT-4A-T03
+/// el reparto es obligatorio si la operación tiene fondo y participantes, y
+/// la API lo guarda en la misma transacción); PAID exige lote y
+/// UNPAID no lo admite (CHECK); una asignación PAID es inmutable y no se
+/// borra; y mientras una operación tenga asignaciones PAID no cambian sus
+/// montos, fecha, local ni participantes.
+model DailyTipAllocation {
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessDate DateTime            @map("business_date") @db.Date
+  amount       BigInt
+  status       TipAllocationStatus @default(UNPAID)
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  operation      DailyOperation   @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operationId    String           @map("operation_id") @db.Uuid
+  store          Store            @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId        String           @map("store_id") @db.Uuid
+  worker         User             @relation("WorkerTipAllocations", fields: [workerId], references: [id], onDelete: Restrict)
+  workerId       String           @map("worker_id") @db.Uuid
+  paymentBatch   TipPaymentBatch? @relation(fields: [paymentBatchId], references: [id], onDelete: Restrict)
+  paymentBatchId String?          @map("payment_batch_id") @db.Uuid
+
+  @@unique([operationId, workerId])
+  @@index([storeId, businessDate])
+  @@index([workerId, businessDate])
+  @@index([paymentBatchId])
+  @@map("daily_tip_allocations")
+}
+
+/// Lote de pago de propinas (SPRINT-4A-T02): un local, un período (desde y
+/// hasta, inclusive), quién pagó y cuándo. Marca como PAID las asignaciones
+/// No pagadas del período (el endpoint de pago es SPRINT-4A-T06). Es
+/// inmutable (trigger) y sus totales cuadran con sus asignaciones (constraint
+/// trigger diferido): total_amount es su suma y allocation_count su cantidad.
+/// legacy_pool_id solo lo usan los lotes históricos que la migración crea
+/// para los repartos tip_pools ya pagados.
+model TipPaymentBatch {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  periodStart     DateTime @map("period_start") @db.Date
+  periodEnd       DateTime @map("period_end") @db.Date
+  totalAmount     BigInt   @map("total_amount")
+  allocationCount Int      @map("allocation_count")
+  paidAt          DateTime @map("paid_at") @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  store        Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId      String               @map("store_id") @db.Uuid
+  paidBy       User                 @relation("PaidTipPaymentBatches", fields: [paidById], references: [id], onDelete: Restrict)
+  paidById     String               @map("paid_by_id") @db.Uuid
+  legacyPool   TipPool?             @relation(fields: [legacyPoolId], references: [id], onDelete: Restrict)
+  legacyPoolId String?              @unique @map("legacy_pool_id") @db.Uuid
+  allocations  DailyTipAllocation[]
+
+  @@index([storeId, periodStart, periodEnd])
+  @@index([paidById])
+  @@map("tip_payment_batches")
+}
+
+// -------------------------------------------------------------
+// IMPORTACIÓN DIARIA DE VENTAS MRCOMANDA (SPRINT-4R-T08)
+// Las ventas del día salen del reporte Excel de MrComanda: cabecera por
+// archivo importado y líneas por medio de pago. No escribe en sales (las
+// ventas anteriores quedan como historial) ni guarda propinas o diferencias
+// de efectivo (vienen solo de daily_operations). Las reglas de integridad
+// viven en la migración 20261108010000_importaciones_ventas_mrcomanda
+// (CHECK y triggers); la normalización de etiquetas usa la función SQL
+// normalize_external_label (mayúsculas, sin tildes y espacios colapsados).
+// -------------------------------------------------------------
+
+/// Sistema externo que origina datos importados. Hoy solo MrComanda.
+enum ExternalSystem {
+  MRCOMANDA
+}
+
+/// Ciclo de vida de una importación: PENDING (previsualizada, se puede
+/// descartar), ACTIVE (confirmada y vigente; una sola por local y fecha) y
+/// SUPERSEDED (reemplazada por una versión posterior; terminal).
+enum SalesImportStatus {
+  PENDING
+  ACTIVE
+  SUPERSEDED
+}
+
+/// Origen de un dato resuelto al importar (SPRINT-4A-T18): AUTOMATIC si salió
+/// de una equivalencia configurada (ID Subway del local o alias del medio) y
+/// MANUAL si lo eligió el administrador en la vista previa.
+enum SalesImportResolution {
+  AUTOMATIC
+  MANUAL
+}
+
+/// Identificador explícito de un local en un sistema externo. Un local tiene
+/// a lo más un identificador por sistema y un identificador nunca apunta a dos
+/// locales. external_code se guarda normalizado (CHECK).
+/// Sin uso desde SPRINT-4A-T17: las importaciones identifican el local por
+/// stores.subway_store_id (ni la API ni los triggers leen esta tabla). Se
+/// conserva por compatibilidad; su retiro irá en una migración nueva.
+model StoreExternalCode {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  system       ExternalSystem
+  externalCode String         @map("external_code") @db.VarChar(100)
+  externalName String?        @map("external_name") @db.VarChar(150)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId String @map("store_id") @db.Uuid
+
+  @@unique([system, externalCode])
+  @@unique([system, storeId])
+  @@index([storeId])
+  @@map("store_external_codes")
+}
+
+/// Alias externo de un medio de pago del catálogo («T. DEBITO», «EFECTIVO»,
+/// etc.). El código del medio no cambia; cada sistema puede tener varios
+/// alias por medio, pero una etiqueta normalizada resuelve un único medio.
+/// normalized_label = normalize_external_label(label) (CHECK).
+model PaymentMethodAlias {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  system          ExternalSystem
+  label           String         @db.VarChar(100)
+  normalizedLabel String         @map("normalized_label") @db.VarChar(100)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId String        @map("payment_method_id") @db.Uuid
+
+  @@unique([system, normalizedLabel])
+  @@index([paymentMethodId])
+  @@map("payment_method_aliases")
+}
+
+/// Archivo de ventas importado para un local y una fecha de negocio. Guarda
+/// el período y horario del reporte, el identificador y nombre externos del
+/// local, el nombre original, la ruta privada, el SHA-256, quién lo subió y
+/// cuándo. El mismo archivo (hash) no se importa dos veces para el mismo local
+/// y fecha; un archivo distinto crea una nueva versión. is_current es TRUE
+/// solo en ACTIVE (NULL en los demás estados), lo que deja una sola versión
+/// vigente por local y fecha con la restricción única. Los datos del archivo
+/// son inmutables y PENDING → ACTIVE exige que las líneas sumen total_amount
+/// (trigger).
+model SalesImport {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  system            ExternalSystem    @default(MRCOMANDA)
+  businessDate      DateTime          @map("business_date") @db.Date
+  periodStart       DateTime          @map("period_start") @db.Timestamptz(6)
+  periodEnd         DateTime          @map("period_end") @db.Timestamptz(6)
+  /// Fecha de emisión del reporte (SPRINT-4R-T10); solo informativa e
+  /// inmutable. NULL si el reporte no la trae.
+  issuedAt          DateTime?         @map("issued_at") @db.Timestamptz(6)
+  externalStoreCode String            @map("external_store_code") @db.VarChar(100)
+  externalStoreName String?           @map("external_store_name") @db.VarChar(150)
+  /// ID Subway con que se identificó el local (SPRINT-4A-T17): solo dígitos
+  /// (CHECK) e inmutable. El trigger exige al insertar que sea el ID Subway
+  /// del local; NULL solo en importaciones anteriores a la migración.
+  subwayStoreId     String?           @map("subway_store_id") @db.VarChar(10)
+  version           Int
+  status            SalesImportStatus @default(PENDING)
+  isCurrent         Boolean?          @map("is_current")
+  totalAmount       BigInt            @map("total_amount")
+  fileName          String            @map("file_name") @db.VarChar(255)
+  filePath          String            @map("file_path") @db.VarChar(500)
+  mimeType          String            @map("mime_type") @db.VarChar(100)
+  sizeBytes         BigInt            @map("size_bytes")
+  sha256Hash        String            @map("sha256_hash") @db.Char(64)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  confirmedAt       DateTime?         @map("confirmed_at") @db.Timestamptz(6)
+  supersededAt      DateTime?         @map("superseded_at") @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store         Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId       String  @map("store_id") @db.Uuid
+  uploadedBy    User    @relation("UploadedSalesImports", fields: [uploadedById], references: [id], onDelete: Restrict)
+  uploadedById  String  @map("uploaded_by_id") @db.Uuid
+  confirmedBy   User?   @relation("ConfirmedSalesImports", fields: [confirmedById], references: [id], onDelete: Restrict)
+  confirmedById String? @map("confirmed_by_id") @db.Uuid
+
+  /// Cómo se identificó el local (SPRINT-4A-T18): por su ID Subway
+  /// (AUTOMATIC) o elegido a mano por el administrador (MANUAL; el trigger
+  /// exige un local activo y que el ID Subway del archivo no identifique a
+  /// otro local activo). Inmutable desde el INSERT.
+  storeResolution SalesImportResolution @default(AUTOMATIC) @map("store_resolution")
+  /// Quién resolvió a mano algún dato (local o medios) y cuándo; NULL si todo
+  /// se identificó por equivalencias. Van juntos (CHECK) e inmutables.
+  resolvedAt      DateTime?             @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy      User?                 @relation("ResolvedSalesImports", fields: [resolvedById], references: [id], onDelete: Restrict)
+  resolvedById    String?               @map("resolved_by_id") @db.Uuid
+
+  lines        SalesImportLine[]
+  skippedLines SalesImportSkippedLine[]
+
+  @@unique([storeId, businessDate, version])
+  @@unique([storeId, businessDate, sha256Hash])
+  @@unique([storeId, businessDate, isCurrent])
+  @@index([businessDate])
+  @@map("sales_imports")
+}
+
+/// Total de un medio de pago dentro de una importación. Conserva la etiqueta
+/// original del reporte y el medio resuelto por alias (trigger), de modo que
+/// cambiar un alias después no reinterpreta importaciones pasadas. Monto CLP
+/// entero con signo (una nota de crédito puede restar) y porcentaje opcional.
+/// Solo cambia mientras la importación está PENDING (trigger).
+model SalesImportLine {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lineNumber      Int      @map("line_number")
+  originalLabel   String   @map("original_label") @db.VarChar(100)
+  normalizedLabel String   @map("normalized_label") @db.VarChar(100)
+  amount          BigInt
+  percentage      Decimal? @db.Decimal(5, 2)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  import          SalesImport   @relation(fields: [importId], references: [id], onDelete: Cascade)
+  importId        String        @map("import_id") @db.Uuid
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId String        @map("payment_method_id") @db.Uuid
+  /// AUTOMATIC si el medio salió de un alias; MANUAL si lo eligió el
+  /// administrador (SPRINT-4A-T18: medio activo y sin alias hacia otro medio).
+  resolution      SalesImportResolution @default(AUTOMATIC)
+
+  @@unique([importId, lineNumber])
+  @@unique([importId, normalizedLabel])
+  @@index([paymentMethodId])
+  @@map("sales_import_lines")
+}
+
+/// Línea del reporte omitida al importar (SPRINT-4A-T18; desde SPRINT-4A-T21
+/// se omite sola): solo con monto 0 (CHECK) y sin alias configurado para su
+/// etiqueta (trigger). Se conserva para la trazabilidad, pero no es una
+/// venta: reportes y panel no la leen. Inmutable; se elimina solo con su importación PENDING.
+model SalesImportSkippedLine {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lineNumber      Int                   @map("line_number")
+  originalLabel   String                @map("original_label") @db.VarChar(100)
+  normalizedLabel String                @map("normalized_label") @db.VarChar(100)
+  amount          BigInt
+  percentage      Decimal?              @db.Decimal(5, 2)
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// SPRINT-4A-T21: AUTOMATIC si se omitió sola (monto 0 sin alias); MANUAL
+  /// si la omitió el administrador (solo importaciones de SPRINT-4A-T18).
+  resolution      SalesImportResolution @default(AUTOMATIC)
+
+  import   SalesImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  importId String      @map("import_id") @db.Uuid
+
+  @@unique([importId, lineNumber])
+  @@unique([importId, normalizedLabel])
+  @@map("sales_import_skipped_lines")
+}
+
+// -------------------------------------------------------------
+// CALENDARIO DE OPERACIÓN DE LOCALES (SPRINT-4R-T12)
+// Días semanales en que abre cada local y excepciones de cierre, para
+// calcular (al consultar, sin guardar alertas) si cada día está IMPORTADO,
+// PENDIENTE, ATRASADO o CERRADO. Independiente de los horarios de los
+// trabajadores. Reglas en la migración
+// 20261108030000_calendario_operacion_locales.
+// -------------------------------------------------------------
+
+/// Días de la semana en que abre un local y desde cuándo se le exigen
+/// ventas importadas. Uno por local; al menos un día abierto (CHECK). Un local
+/// sin calendario no genera alertas de ventas faltantes.
+model StoreOperatingSchedule {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  opensMonday       Boolean  @map("opens_monday")
+  opensTuesday      Boolean  @map("opens_tuesday")
+  opensWednesday    Boolean  @map("opens_wednesday")
+  opensThursday     Boolean  @map("opens_thursday")
+  opensFriday       Boolean  @map("opens_friday")
+  opensSaturday     Boolean  @map("opens_saturday")
+  opensSunday       Boolean  @map("opens_sunday")
+  /// Primer día de negocio en que se exigen ventas; los anteriores no se
+  /// informan.
+  trackingStartDate DateTime @map("tracking_start_date") @db.Date
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store       Store  @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId     String @unique @map("store_id") @db.Uuid
+  updatedBy   User   @relation("UpdatedOperatingSchedules", fields: [updatedById], references: [id], onDelete: Restrict)
+  updatedById String @map("updated_by_id") @db.Uuid
+
+  @@map("store_operating_schedules")
+}
+
+/// Cierre excepcional de un local en una fecha (feriado, mantención, etc.),
+/// con motivo obligatorio. Uno por local y fecha; ese día nunca genera alerta.
+model StoreClosure {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  closureDate DateTime @map("closure_date") @db.Date
+  reason      String   @db.VarChar(300)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  store       Store  @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId     String @map("store_id") @db.Uuid
+  createdBy   User   @relation("CreatedStoreClosures", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById String @map("created_by_id") @db.Uuid
+
+  @@unique([storeId, closureDate])
+  @@map("store_closures")
+}
+
+// -------------------------------------------------------------
+// MÓDULO INVENTARIO: productos con su formato de caja y paquete,
+// filas fijas de la plantilla impresa, libro mayor de movimientos y
+// tomas de inventario físico (SPRINT-5-T01, migración
+// 20261111120000_inventario_catalogo_toma).
+// -------------------------------------------------------------
+
+/// Unidad de un producto (SPRINT-5-T01): kilos, litros o unidades. Los kilos y
+/// litros admiten 3 decimales; en UNIT los contenidos y la cantidad suelta son
+/// enteros (CHECK). Se retiraron G, ML y PACK: un pack de 6 bebidas son 6 UNIT.
+enum UnitOfMeasure {
+  UNIT
+  KG
+  L
+}
+
+/// Insumo o producto controlado en inventario (SPRINT-5-T01). El administrador
+/// lo crea a mano con el SKU del proveedor y su formato:
+///   total = cajas × box_content + paquetes × package_content + suelta
+/// box_content y package_content son independientes: no se exige
+/// box_content = packages_per_box × package_content (Pepperoni: caja de 7,3 kg
+/// con paquetes de 0,93 kg). packages_per_box es solo informativo. CHECK:
+/// contenidos > 0 y packages_per_box >= 1 cuando existen; enteros en UNIT.
+/// Un producto con líneas de toma o movimientos no se borra (FK Restrict).
+model Product {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// SKU que entrega el proveedor: opcional mientras se recopila y único
+  /// cuando existe (PostgreSQL admite varios NULL); nunca vacío (CHECK).
+  sku              String?       @unique @db.VarChar(40)
+  name             String        @db.VarChar(120)
+  /// Otros nombres del mismo producto (un solo SKU), para buscarlo por
+  /// cualquiera de ellos: Carne Fajita, Beef Steak y Carne Queso. Sin
+  /// elementos NULL ni vacíos (CHECK).
+  alternativeNames String[]      @default([]) @map("alternative_names") @db.VarChar(120)
+  category         String?       @db.VarChar(60)
+  unit             UnitOfMeasure
+  /// Nombre del paquete (bolsa, paquete, botella o pack); nunca vacío.
+  packageName      String?       @map("package_name") @db.VarChar(30)
+  /// Contenido de una caja en la unidad del producto (5,000 kg).
+  boxContent       Decimal?      @map("box_content") @db.Decimal(12, 3)
+  /// Paquetes que trae una caja: solo informativo, no entra en el total.
+  packagesPerBox   Int?          @map("packages_per_box")
+  /// Contenido de un paquete en la unidad del producto (2,500 kg).
+  packageContent   Decimal?      @map("package_content") @db.Decimal(12, 3)
+  /// Se cuenta solo como cantidad suelta: sus líneas no admiten cajas ni
+  /// paquetes (CHECK en la línea, sobre la copia del formato).
+  looseOnly        Boolean       @default(false) @map("loose_only")
+  minStock         Decimal       @default(0) @map("min_stock") @db.Decimal(12, 3)
+  isActive         Boolean       @default(true) @map("is_active")
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  movements   InventoryMovement[]
+  countLines  InventoryCountLine[]
+  templateRow InventoryTemplateRow?
+
+  @@map("products")
+}
+
+/// Tipo de fila de la plantilla de inventario (SPRINT-5-T01): artículo (con
+/// nombre o «<Vacío>»), fila sin texto o fila de sección que cierra su grupo.
+enum InventoryTemplateRowKind {
+  ITEM
+  BLANK
+  SECTION
+}
+
+/// Fila de la plantilla impresa de inventario (SPRINT-5-T01). position es el
+/// número de fila de la hoja Excel (la 1 es el encabezado; la 4 es Carne
+/// Fajita y la 45 la primera sección) y es FIJA: el Product Owner copia el
+/// Excel descargado y lo pega en otro cuadre, así que la aplicación nunca
+/// inserta, borra ni reordena filas; solo cambian el texto impreso, la sección
+/// y el producto asignado. Triggers: position, kind e id no se actualizan y
+/// las filas no se borran (DELETE/TRUNCATE). La carga de las filas es el seed
+/// (SPRINT-5-T02).
+/// CHECK: BLANK sin texto, ITEM y SECTION con texto; solo un ITEM lleva
+/// producto, y cada producto ocupa como máximo una fila (FK única).
+model InventoryTemplateRow {
+  id          String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  position    Int                      @unique
+  kind        InventoryTemplateRowKind
+  /// Texto de la columna ARTÍCULO: el nombre del artículo, «<Vacío>» o el
+  /// rótulo de la sección. NULL solo en las filas BLANK.
+  printedText String?                  @map("printed_text") @db.VarChar(120)
+  /// Rótulo de la sección que cierra el grupo de la fila (en una fila
+  /// SECTION, su propio texto).
+  section     String                   @db.VarChar(120)
+  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product   Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productId String?  @unique @map("product_id") @db.Uuid
+
+  @@map("inventory_template_rows")
+}
+
+enum InventoryMovementType {
+  PURCHASE
+  CONSUMPTION
+  WASTE
+  ADJUSTMENT
+}
+
+/// Libro mayor de movimientos de inventario: quantity siempre es positiva y el
+/// tipo define el signo (PURCHASE suma; CONSUMPTION y WASTE restan; ADJUSTMENT
+/// corrige). El stock de un producto es la suma firmada de sus movimientos.
+model InventoryMovement {
+  id          BigInt                @id @default(autoincrement())
+  type        InventoryMovementType
+  quantity    Decimal               @db.Decimal(12, 3)
+  reason      String?               @db.VarChar(255)
+  reference   String?               @db.VarChar(60)
+  occurredAt  DateTime              @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  store       Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId     String  @map("store_id") @db.Uuid
+  product     Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productId   String  @map("product_id") @db.Uuid
+  createdBy   User    @relation("CreatedInventoryMovements", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById String  @map("created_by_id") @db.Uuid
+
+  @@index([storeId, productId, occurredAt])
+  @@map("inventory_movements")
+}
+
+/// Estado de una toma de inventario: OPEN es «En curso» y CONFIRMED es
+/// «Finalizado» (SPRINT-5-T01).
+enum InventoryCountStatus {
+  OPEN
+  CONFIRMED
+}
+
+/// Toma de inventario físico de un local (SPRINT-5-T01). Nace OPEN («En
+/// curso») y pasa una sola vez a CONFIRMED («Finalizado») con el usuario, la
+/// fecha-hora de finalización y la copia de la estructura de la plantilla
+/// (template_snapshot), que se llenan solo al finalizar (CHECK). Una toma
+/// CONFIRMED es inmutable y no se borra (trigger), igual que sus líneas.
+/// Como máximo una toma OPEN por local: índice único parcial
+/// inventory_counts_store_id_open_key (SQL crudo en la migración; Prisma no
+/// expresa índices parciales).
+model InventoryCount {
+  id               String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status           InventoryCountStatus @default(OPEN)
+  /// Fecha de negocio de la toma (la semanal se hace el martes en la noche o
+  /// el miércoles en la mañana).
+  countDate        DateTime             @map("count_date") @db.Date
+  /// Fecha-hora en que se inició la toma (columna de la migración inicial).
+  countedAt        DateTime             @default(now()) @map("counted_at") @db.Timestamptz(6)
+  notes            String?              @db.VarChar(255)
+  finalizedAt      DateTime?            @map("finalized_at") @db.Timestamptz(6)
+  /// Copia de las filas de la plantilla al finalizar (posición, tipo, texto
+  /// impreso, sección y producto): la descarga en Excel de una toma
+  /// finalizada no cambia aunque después se corrija la plantilla.
+  templateSnapshot Json?                @map("template_snapshot")
+  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store         Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  storeId       String               @map("store_id") @db.Uuid
+  createdBy     User                 @relation("CreatedInventoryCounts", fields: [createdById], references: [id], onDelete: Restrict)
+  createdById   String               @map("created_by_id") @db.Uuid
+  finalizedBy   User?                @relation("FinalizedInventoryCounts", fields: [finalizedById], references: [id], onDelete: Restrict)
+  finalizedById String?              @map("finalized_by_id") @db.Uuid
+  lines         InventoryCountLine[]
+
+  @@index([storeId, countDate])
+  @@index([finalizedById])
+  @@map("inventory_counts")
+}
+
+/// Línea de una toma: lo contado de un producto en cajas, paquetes y cantidad
+/// suelta (SPRINT-5-T01). Una por toma y producto. Copia el SKU, el nombre, la
+/// unidad y el formato que tenía el producto al guardarla, de modo que una
+/// toma finalizada no cambia si después se edita el producto. counted_quantity
+/// guarda el total y la base lo verifica sobre esa copia (CHECK):
+///   counted_quantity = boxes × box_content + packages × package_content
+///                      + loose_quantity
+/// Una línea vacía (producto no contado: la finalización, SPRINT-5-T06, las
+/// inserta ANTES de pasar la toma a CONFIRMED) tiene boxes, packages,
+/// loose_quantity y counted_quantity en NULL. Las líneas de una toma CONFIRMED
+/// no se insertan, modifican ni borran (trigger, SQLSTATE 42501). El trigger
+/// toma la toma con FOR NO KEY UPDATE: las escrituras de líneas de una toma se
+/// serializan entre sí y con su finalización, sin deadlock entre dos
+/// finalizaciones simultáneas. system_quantity y difference quedan reservadas
+/// para la comparación contra el stock esperado.
+model InventoryCountLine {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Cajas contadas (entero >= 0).
+  boxes           Int?
+  /// Paquetes contados (entero >= 0); pueden ser más que los de una caja.
+  packages        Int?
+  /// Cantidad suelta en la unidad del producto (>= 0; entera en UNIT).
+  looseQuantity   Decimal?       @map("loose_quantity") @db.Decimal(12, 3)
+  /// Total calculado en el backend con aritmética decimal exacta.
+  countedQuantity Decimal?       @map("counted_quantity") @db.Decimal(12, 3)
+  systemQuantity  Decimal?       @map("system_quantity") @db.Decimal(12, 3)
+  difference      Decimal?       @db.Decimal(12, 3)
+  // Copia del producto y su formato al guardar la línea.
+  productSku      String?        @map("product_sku") @db.VarChar(40)
+  productName     String         @map("product_name") @db.VarChar(120)
+  unit            UnitOfMeasure
+  packageName     String?        @map("package_name") @db.VarChar(30)
+  boxContent      Decimal?       @map("box_content") @db.Decimal(12, 3)
+  packagesPerBox  Int?           @map("packages_per_box")
+  packageContent  Decimal?       @map("package_content") @db.Decimal(12, 3)
+  looseOnly       Boolean        @default(false) @map("loose_only")
+  /// Fecha-hora del último guardado de la línea: la asigna el trigger
+  /// (now()) en cada INSERT y UPDATE; el valor que envíe la aplicación se
+  /// ignora (20261111130000_inventario_bloqueo_finalizacion).
+  savedAt         DateTime       @default(now()) @map("saved_at") @db.Timestamptz(6)
+
+  count     InventoryCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  countId   String         @map("count_id") @db.Uuid
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productId String         @map("product_id") @db.Uuid
+  /// Usuario del último guardado de la línea.
+  savedBy   User           @relation("SavedInventoryCountLines", fields: [savedById], references: [id], onDelete: Restrict)
+  savedById String         @map("saved_by_id") @db.Uuid
+
+  @@unique([countId, productId])
+  @@index([productId])
+  @@index([savedById])
+  @@map("inventory_count_lines")
+}
+
+// -------------------------------------------------------------
+// LEY N°21.719: gestión de solicitudes de derechos de los titulares
+// (acceso, rectificación, cancelación, oposición y portabilidad),
+// con plazo legal de respuesta (due_at) y trazabilidad de resolución.
+// -------------------------------------------------------------
+
+enum DataRightType {
+  ACCESS
+  RECTIFICATION
+  CANCELLATION
+  OBJECTION
+  PORTABILITY
+}
+
+enum DataRightStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+}
+
+/// Solicitud de ejercicio de derechos del titular de datos personales.
+/// Una cancelación RESOLVED gatilla la anonimización del usuario
+/// (users.anonymized_at), no su borrado físico.
+model DataRightsRequest {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type        DataRightType
+  status      DataRightStatus @default(PENDING)
+  description String?
+  response    String?
+  requestedAt DateTime        @default(now()) @map("requested_at") @db.Timestamptz(6)
+  dueAt       DateTime        @map("due_at") @db.Date
+  resolvedAt  DateTime?       @map("resolved_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  subject      User    @relation("OwnDataRightsRequests", fields: [subjectId], references: [id], onDelete: Restrict)
+  subjectId    String  @map("subject_id") @db.Uuid
+  resolvedBy   User?   @relation("ResolvedDataRightsRequests", fields: [resolvedById], references: [id], onDelete: Restrict)
+  resolvedById String? @map("resolved_by_id") @db.Uuid
+
+  @@index([status, dueAt])
+  @@map("data_rights_requests")
+}

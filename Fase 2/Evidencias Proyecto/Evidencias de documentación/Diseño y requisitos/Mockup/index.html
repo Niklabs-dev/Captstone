@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MoiFood · Gestión Interna — Mockup Administrador</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#FFFFFF;
+  --tint:#FEF4EF;
+  --tint2:#FCE9DF;
+  --tint3:#F9DCCB;
+  --line:#F3E4DB;
+  --line2:#EAD5C9;
+  --salmon:#FF8B52;
+  --salmon-deep:#E96F33;
+  --salmon-ink:#B44E1B;
+  --ink:#2E2320;
+  --ink2:#5C4A41;
+  --muted:#97807a;
+  --ok:#2F9E6E;
+  --ok-bg:#E9F6F0;
+  --warn:#D98A1F;
+  --warn-bg:#FCF2E2;
+  --crit:#D9503C;
+  --crit-bg:#FBEBE8;
+  --info:#4E7FBF;
+  --info-bg:#ECF2FA;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --sans:'Inter',-apple-system,'Segoe UI',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  font-family:var(--sans);
+  background:var(--tint);
+  color:var(--ink);
+  font-size:14px;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:var(--tint3)}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:var(--tint3);border-radius:3px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ============ ESTRUCTURA GENERAL ============ */
+.app{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+
+/* ============ SIDEBAR ============ */
+.sidebar{
+  background:var(--bg);
+  border-right:1px solid var(--line);
+  display:flex;flex-direction:column;
+  position:sticky;top:0;height:100vh;
+}
+.brand{
+  display:flex;align-items:center;gap:12px;
+  padding:20px 20px 18px;
+  border-bottom:1px solid var(--line);
+}
+.brand img{width:46px;height:46px;border-radius:12px;border:1px solid var(--line)}
+.brand-name{font-weight:800;font-size:16px;letter-spacing:-.02em}
+.brand-name span{color:var(--salmon-deep)}
+.brand-sub{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:2px}
+.nav-label{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);padding:18px 20px 8px}
+.nav{flex:1;padding:0 10px}
+.nav button{
+  display:flex;align-items:center;gap:11px;width:100%;
+  padding:10px 12px;margin-bottom:2px;
+  background:none;border:none;border-radius:9px;
+  font-family:var(--sans);font-size:13.5px;font-weight:500;color:var(--ink2);
+  cursor:pointer;text-align:left;transition:background .15s ease,color .15s ease;
+}
+.nav button svg{flex:none;opacity:.75}
+.nav button:hover{background:var(--tint)}
+.nav button.active{background:var(--tint2);color:var(--salmon-ink);font-weight:600}
+.nav button.active svg{opacity:1}
+.nav .badge-n{
+  margin-left:auto;font-family:var(--mono);font-size:10px;font-weight:600;
+  background:var(--crit-bg);color:var(--crit);padding:2px 7px;border-radius:20px;
+}
+.sidebar-foot{border-top:1px solid var(--line);padding:14px 16px}
+.user-chip{display:flex;align-items:center;gap:10px}
+.avatar{
+  width:36px;height:36px;border-radius:10px;flex:none;
+  background:var(--salmon);color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:13px;
+}
+.user-chip .n{font-size:13px;font-weight:600}
+.user-chip .r{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--salmon-deep);margin-top:1px}
+.mockup-tag{
+  margin-top:12px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);
+  border:1px dashed var(--line2);border-radius:8px;padding:7px 10px;text-align:center;
+}
+
+/* ============ MAIN ============ */
+.main{display:flex;flex-direction:column;min-width:0}
+.topbar{
+  background:var(--bg);border-bottom:1px solid var(--line);
+  padding:0 28px;height:64px;
+  display:flex;align-items:center;gap:16px;
+  position:sticky;top:0;z-index:20;
+}
+.topbar h1{font-size:17px;font-weight:700;letter-spacing:-.01em}
+.topbar .crumb{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:1px}
+.local-select{
+  margin-left:auto;display:flex;align-items:center;gap:8px;
+  border:1px solid var(--line2);border-radius:9px;padding:8px 12px;
+  font-size:13px;font-weight:500;background:var(--bg);color:var(--ink);cursor:pointer;
+}
+.local-select .dot{width:8px;height:8px;border-radius:50%;background:var(--salmon)}
+.date-chip{font-family:var(--mono);font-size:11.5px;color:var(--ink2);background:var(--tint);padding:8px 12px;border-radius:9px}
+.bell{
+  position:relative;width:38px;height:38px;border-radius:9px;border:1px solid var(--line2);
+  background:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center;
+}
+.bell .n{
+  position:absolute;top:-5px;right:-5px;min-width:17px;height:17px;border-radius:9px;
+  background:var(--crit);color:#fff;font-family:var(--mono);font-size:9.5px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;padding:0 4px;
+}
+.content{padding:26px 28px 60px;flex:1}
+.view{display:none;animation:fadein .25s ease}
+.view.active{display:block}
+@keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* ============ COMPONENTES ============ */
+.grid{display:grid;gap:14px}
+.g4{grid-template-columns:repeat(4,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g23{grid-template-columns:1.6fr 1fr}
+.g32{grid-template-columns:1fr 1.6fr}
+
+.card{
+  background:var(--bg);border:1px solid var(--line);border-radius:14px;
+  padding:18px 20px;
+}
+.card-h{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px}
+.card-t{font-size:14px;font-weight:700;letter-spacing:-.01em}
+.card-s{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.link{font-size:12px;font-weight:600;color:var(--salmon-deep);text-decoration:none;cursor:pointer}
+.link:hover{text-decoration:underline}
+
+/* KPI */
+.kpi{position:relative;overflow:hidden}
+.kpi .lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.kpi .val{font-family:var(--mono);font-size:26px;font-weight:700;margin:8px 0 4px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.kpi .sub{font-size:12px;color:var(--ink2)}
+.kpi .sub b{font-weight:600}
+.kpi .trend-up{color:var(--ok);font-weight:600}
+.kpi .trend-down{color:var(--crit);font-weight:600}
+.kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--salmon)}
+.kpi.k-ok::after{background:var(--ok)}
+.kpi.k-warn::after{background:var(--warn)}
+.kpi.k-crit::after{background:var(--crit)}
+
+/* Alertas (borde izquierdo por severidad) */
+.alert{
+  display:flex;gap:12px;align-items:flex-start;
+  background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--salmon);
+  border-radius:10px;padding:12px 14px;margin-bottom:10px;
+}
+.alert.sev-crit{border-left-color:var(--crit)}
+.alert.sev-warn{border-left-color:var(--warn)}
+.alert.sev-info{border-left-color:var(--info)}
+.alert .ttl{font-size:13px;font-weight:600}
+.alert .meta{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:3px}
+.alert .tag{
+  margin-left:auto;flex:none;font-family:var(--mono);font-size:9px;font-weight:700;
+  letter-spacing:.1em;text-transform:uppercase;padding:3px 8px;border-radius:6px;
+}
+.tag.crit{background:var(--crit-bg);color:var(--crit)}
+.tag.warn{background:var(--warn-bg);color:var(--warn)}
+.tag.info{background:var(--info-bg);color:var(--info)}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}
+.tag.salmon{background:var(--tint2);color:var(--salmon-ink)}
+.tag.gray{background:var(--tint);color:var(--ink2)}
+
+/* Tablas */
+.grid > *{min-width:0}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th{
+  font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--muted);text-align:left;
+  padding:9px 12px;border-bottom:1px solid var(--line2);white-space:nowrap;
+}
+td{padding:11px 12px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr{transition:background .12s ease}
+tbody tr:hover{background:var(--tint)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px}
+td .who{font-weight:600}
+td .sub2{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:2px}
+.hash{font-family:var(--mono);font-size:10.5px;color:var(--ink2);background:var(--tint);padding:3px 7px;border-radius:6px}
+
+/* Pills de estado */
+.pill{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  padding:4px 9px;border-radius:20px;white-space:nowrap;
+}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.crit{background:var(--crit-bg);color:var(--crit)}
+.pill.info{background:var(--info-bg);color:var(--info)}
+.pill.salmon{background:var(--tint2);color:var(--salmon-ink)}
+.pill.gray{background:var(--tint);color:var(--ink2)}
+.pulse::before{animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* Barra de progreso */
+.bar{height:6px;border-radius:3px;background:var(--tint2);overflow:hidden;min-width:80px}
+.bar i{display:block;height:100%;border-radius:3px;background:var(--salmon)}
+.bar i.ok{background:var(--ok)}
+.bar i.warn{background:var(--warn)}
+.bar i.crit{background:var(--crit)}
+
+/* Botones */
+.btn{
+  display:inline-flex;align-items:center;gap:7px;
+  font-family:var(--sans);font-size:12.5px;font-weight:600;
+  padding:9px 15px;border-radius:9px;border:1px solid var(--line2);
+  background:var(--bg);color:var(--ink);cursor:pointer;transition:all .15s ease;
+}
+.btn:hover{background:var(--tint)}
+.btn.primary{background:var(--salmon);border-color:var(--salmon);color:#fff}
+.btn.primary:hover{background:var(--salmon-deep);border-color:var(--salmon-deep)}
+.btn.sm{padding:6px 11px;font-size:11.5px}
+.toolbar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.search{
+  display:flex;align-items:center;gap:8px;flex:1;max-width:340px;
+  border:1px solid var(--line2);border-radius:9px;padding:9px 12px;background:var(--bg);
+}
+.search input{border:none;outline:none;font-family:var(--sans);font-size:13px;width:100%;background:transparent;color:var(--ink)}
+.search input::placeholder{color:var(--muted)}
+
+/* Gráfico de barras CSS */
+.chart{display:flex;align-items:flex-end;gap:10px;height:150px;padding-top:6px}
+.chart .col{flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;height:100%;justify-content:flex-end}
+.chart .b{
+  width:100%;max-width:38px;border-radius:6px 6px 3px 3px;
+  background:linear-gradient(180deg,var(--salmon) 0%,var(--salmon-deep) 100%);
+  position:relative;transition:filter .15s ease;
+}
+.chart .b:hover{filter:brightness(1.08)}
+.chart .b.dim{background:var(--tint3)}
+.chart .v{font-family:var(--mono);font-size:9.5px;color:var(--ink2)}
+.chart .d{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+
+/* Reloj legal propinas */
+.clock-ring{display:flex;align-items:center;gap:16px}
+.ring{width:86px;height:86px;flex:none}
+.ring .bg{stroke:var(--tint2)}
+.ring .fg{stroke:var(--salmon-deep);stroke-linecap:round;transform:rotate(-90deg);transform-origin:center}
+.ring text{font-family:var(--mono);font-weight:700;fill:var(--ink)}
+.mono{font-family:var(--mono)}
+.divider{height:1px;background:var(--line);margin:14px 0}
+.row-between{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.small-note{font-size:11.5px;color:var(--muted);line-height:1.5}
+
+/* Log de auditoría */
+.log-item{
+  display:grid;grid-template-columns:78px 1fr auto;gap:12px;align-items:baseline;
+  padding:9px 0;border-bottom:1px solid var(--line);
+}
+.log-item:last-child{border-bottom:none}
+.log-item .t{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.log-item .m{font-size:12.5px}
+.log-item .m b{font-weight:600}
+.log-item .h{font-family:var(--mono);font-size:10px;color:var(--muted)}
+
+@media (max-width:1180px){.g4{grid-template-columns:repeat(2,1fr)}.g23,.g32,.g2{grid-template-columns:1fr}.g3{grid-template-columns:1fr}}
+@media (max-width:820px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto}.g4{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ============ SIDEBAR ============ -->
+<aside class="sidebar">
+  <div class="brand">
+    <img src="assets/logo.png" alt="MoiFood Inversiones">
+    <div>
+      <div class="brand-name">Moi<span>Food</span></div>
+      <div class="brand-sub">Gestión Interna</div>
+    </div>
+  </div>
+  <div class="nav-label">Módulos</div>
+  <nav class="nav">
+    <button class="active" data-view="dashboard">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+      Dashboard
+    </button>
+    <button data-view="documental">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>
+      Gestor Documental
+      <span class="badge-n">4</span>
+    </button>
+    <button data-view="propinas">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="5"/><path d="M18.09 10.37A5 5 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></svg>
+      Propinas
+      <span class="badge-n">1</span>
+    </button>
+    <button data-view="ventas">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/></svg>
+      Ventas y Caja
+    </button>
+    <button data-view="inventario">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+      Inventario
+      <span class="badge-n">2</span>
+    </button>
+    <button data-view="usuarios">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Usuarios y Auditoría
+    </button>
+  </nav>
+  <div class="sidebar-foot">
+    <div class="user-chip">
+      <div class="avatar">MJ</div>
+      <div>
+        <div class="n">Moisés Jiménez</div>
+        <div class="r">Administrador</div>
+      </div>
+    </div>
+    <div class="mockup-tag">Mockup · Datos de ejemplo</div>
+  </div>
+</aside>
+
+<!-- ============ MAIN ============ -->
+<div class="main">
+  <header class="topbar">
+    <div>
+      <div class="crumb" id="crumb">Panel general</div>
+      <h1 id="view-title">Dashboard consolidado</h1>
+    </div>
+    <div class="local-select">
+      <span class="dot"></span>
+      Todos los locales (3)
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+    </div>
+    <div class="date-chip">JUE 03 · SEP · 2026</div>
+    <div class="bell">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5C4A41" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      <span class="n">7</span>
+    </div>
+  </header>
+
+  <div class="content">
+
+  <!-- ==================== VISTA 1: DASHBOARD ==================== -->
+  <section class="view active" id="view-dashboard">
+    <div class="grid g4" style="margin-bottom:14px">
+      <div class="card kpi">
+        <div class="lbl">Ventas hoy · consolidado</div>
+        <div class="val">$1.284.500</div>
+        <div class="sub"><span class="trend-up">▲ 8,2%</span> vs. jueves anterior</div>
+      </div>
+      <div class="card kpi k-warn">
+        <div class="lbl">Propinas por enterar</div>
+        <div class="val">$186.400</div>
+        <div class="sub">Plazo art. 64: <b>quedan 3 días hábiles</b></div>
+      </div>
+      <div class="card kpi k-crit">
+        <div class="lbl">Alertas documentales</div>
+        <div class="val">4</div>
+        <div class="sub"><b>1 contrato</b> sin registrar en Mi DT</div>
+      </div>
+      <div class="card kpi k-ok">
+        <div class="lbl">Cierres de caja ayer</div>
+        <div class="val">3 / 3</div>
+        <div class="sub">Diferencia total: <b class="trend-down">−$4.250</b></div>
+      </div>
+    </div>
+
+    <div class="grid g23">
+      <div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-h">
+            <div><div class="card-t">Ventas por local — hoy</div><div class="card-s">Comparativo contra meta diaria</div></div>
+            <a class="link">Ver reportes →</a>
+          </div>
+          <table>
+            <thead><tr><th>Local</th><th class="num">Venta neta</th><th class="num">Meta</th><th style="width:180px">Cumplimiento</th><th>Cierre caja</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><div class="who">Melipilla Centro</div><div class="sub2">LOC-01 · Supervisor: R. Soto</div></td>
+                <td class="num">$512.300</td><td class="num">$480.000</td>
+                <td><div class="row-between"><div class="bar" style="flex:1"><i class="ok" style="width:100%"></i></div><span class="mono" style="font-size:11px">107%</span></div></td>
+                <td><span class="pill ok">Cuadrada</span></td>
+              </tr>
+              <tr>
+                <td><div class="who">Melipilla Poniente</div><div class="sub2">LOC-02 · Supervisor: C. Bravo</div></td>
+                <td class="num">$438.700</td><td class="num">$450.000</td>
+                <td><div class="row-between"><div class="bar" style="flex:1"><i class="warn" style="width:97%"></i></div><span class="mono" style="font-size:11px">97%</span></div></td>
+                <td><span class="pill warn">−$4.250</span></td>
+              </tr>
+              <tr>
+                <td><div class="who">Calera de Tango</div><div class="sub2">LOC-03 · Supervisor: P. Núñez</div></td>
+                <td class="num">$333.500</td><td class="num">$320.000</td>
+                <td><div class="row-between"><div class="bar" style="flex:1"><i class="ok" style="width:100%"></i></div><span class="mono" style="font-size:11px">104%</span></div></td>
+                <td><span class="pill ok">Cuadrada</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-h">
+            <div><div class="card-t">Ventas consolidadas — últimos 7 días</div><div class="card-s">CLP · los 3 locales</div></div>
+            <a class="link">Exportar →</a>
+          </div>
+          <div class="chart">
+            <div class="col"><span class="v">1,09M</span><div class="b dim" style="height:62%"></div><span class="d">Vie</span></div>
+            <div class="col"><span class="v">1,42M</span><div class="b dim" style="height:84%"></div><span class="d">Sáb</span></div>
+            <div class="col"><span class="v">1,51M</span><div class="b dim" style="height:90%"></div><span class="d">Dom</span></div>
+            <div class="col"><span class="v">0,98M</span><div class="b dim" style="height:55%"></div><span class="d">Lun</span></div>
+            <div class="col"><span class="v">1,12M</span><div class="b dim" style="height:65%"></div><span class="d">Mar</span></div>
+            <div class="col"><span class="v">1,18M</span><div class="b dim" style="height:70%"></div><span class="d">Mié</span></div>
+            <div class="col"><span class="v">1,28M</span><div class="b" style="height:76%"></div><span class="d">Jue</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="align-self:start">
+        <div class="card-h">
+          <div><div class="card-t">Panel de alertas</div><div class="card-s">Vencimientos legales y operación</div></div>
+          <span class="pill crit pulse">7 activas</span>
+        </div>
+        <div class="alert sev-crit">
+          <div><div class="ttl">Contrato sin registrar en Mi DT</div><div class="meta">J. PAREDES · LOC-02 · FIRMADO 28-AGO · PLAZO 15 DÍAS → VENCE 11-SEP</div></div>
+          <span class="tag crit">Art. 9 bis</span>
+        </div>
+        <div class="alert sev-crit">
+          <div><div class="ttl">Diferencia de caja sobre umbral</div><div class="meta">LOC-02 · TURNO TARDE · −$4.250 · RESP: C. BRAVO</div></div>
+          <span class="tag crit">Caja</span>
+        </div>
+        <div class="alert sev-warn">
+          <div><div class="ttl">Propinas tarjeta por enterar</div><div class="meta">$186.400 · SEMANA 36 · QUEDAN 3 DÍAS HÁBILES</div></div>
+          <span class="tag warn">Art. 64</span>
+        </div>
+        <div class="alert sev-warn">
+          <div><div class="ttl">Stock bajo: Pan Italiano</div><div class="meta">LOC-01 · 42 UN · MÍNIMO 60 UN</div></div>
+          <span class="tag warn">Inventario</span>
+        </div>
+        <div class="alert sev-info">
+          <div><div class="ttl">Liquidaciones agosto pendientes de firma</div><div class="meta">5 DE 18 PUBLICADAS · PLAZO LRE: 15 DÍAS HÁBILES</div></div>
+          <span class="tag info">Documental</span>
+        </div>
+        <div class="alert sev-info">
+          <div><div class="ttl">Pacto de horas extras por vencer</div><div class="meta">M. CONTRERAS · VENCE 08-SEP (MÁX. 3 MESES · ART. 32)</div></div>
+          <span class="tag info">Documental</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== VISTA 2: GESTOR DOCUMENTAL ==================== -->
+  <section class="view" id="view-documental">
+    <div class="toolbar">
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#97807a" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input placeholder="Buscar por trabajador, RUT, tipo de documento…">
+      </div>
+      <button class="btn sm">Todos los tipos ▾</button>
+      <button class="btn sm">Período ▾</button>
+      <button class="btn primary sm" style="margin-left:auto">＋ Subir documento</button>
+      <button class="btn sm">Carga masiva liquidaciones</button>
+      <button class="btn sm">Exportar ZIP</button>
+    </div>
+
+    <div class="grid g32">
+      <div class="card" style="align-self:start">
+        <div class="card-h"><div><div class="card-t">Trabajadores</div><div class="card-s">18 activos · 3 locales</div></div></div>
+        <table>
+          <thead><tr><th>Trabajador</th><th>Estado docs</th></tr></thead>
+          <tbody>
+            <tr><td><div class="who">Camila Rojas</div><div class="sub2">12.345.678-5 · CAJERA · LOC-01</div></td><td><span class="pill ok">Al día</span></td></tr>
+            <tr><td><div class="who">José Paredes</div><div class="sub2">18.765.432-1 · SANDWICHERO · LOC-02</div></td><td><span class="pill crit pulse">Contrato s/ registro</span></td></tr>
+            <tr><td><div class="who">María Contreras</div><div class="sub2">15.987.654-3 · SUPERVISORA · LOC-01</div></td><td><span class="pill warn">Pacto vence 08-sep</span></td></tr>
+            <tr><td><div class="who">Diego Fuentes</div><div class="sub2">17.456.789-2 · SANDWICHERO · LOC-03</div></td><td><span class="pill ok">Al día</span></td></tr>
+            <tr><td><div class="who">Valentina Soto</div><div class="sub2">19.234.567-8 · CAJERA · LOC-02</div></td><td><span class="pill warn">Liq. ago. s/ firma</span></td></tr>
+            <tr><td><div class="who">Andrés Molina</div><div class="sub2">16.543.210-9 · EX TRABAJADOR</div></td><td><span class="pill gray">Conservación</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-h">
+          <div><div class="card-t">Documentos recientes</div><div class="card-s">Integridad verificable SHA-256 · conservación 5 años</div></div>
+          <span class="pill salmon">Hash verificado</span>
+        </div>
+        <table>
+          <thead><tr><th>Documento</th><th>Trabajador</th><th>Hash SHA-256</th><th>Estado</th><th>Conservación</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><div class="who">Contrato de trabajo.pdf</div><div class="sub2">v2 · SUBIDO 28-AGO POR M. JIMÉNEZ</div></td>
+              <td>José Paredes</td>
+              <td><span class="hash">a3f2…9c41</span></td>
+              <td><span class="pill warn">Falta registro DT</span></td>
+              <td class="mono" style="font-size:11px">Hasta 08-2031 🔒</td>
+            </tr>
+            <tr>
+              <td><div class="who">Liquidación 2026-08.pdf</div><div class="sub2">v1 · CARGA MASIVA 02-SEP</div></td>
+              <td>Camila Rojas</td>
+              <td><span class="hash">77be…02dd</span></td>
+              <td><span class="pill info">Pendiente de firma</span></td>
+              <td class="mono" style="font-size:11px">Hasta 08-2031 🔒</td>
+            </tr>
+            <tr>
+              <td><div class="who">Pacto horas extraordinarias.pdf</div><div class="sub2">v1 · SUBIDO 08-JUN POR R. SOTO</div></td>
+              <td>María Contreras</td>
+              <td><span class="hash">c04d…b1e8</span></td>
+              <td><span class="pill warn">Vence en 5 días</span></td>
+              <td class="mono" style="font-size:11px">Hasta 08-2031 🔒</td>
+            </tr>
+            <tr>
+              <td><div class="who">Pacto reparto de propinas.pdf</div><div class="sub2">v3 · REEMPLAZA v2 (ARCHIVADA)</div></td>
+              <td>Local LOC-03</td>
+              <td><span class="hash">e91a…4f07</span></td>
+              <td><span class="pill ok">Vigente</span></td>
+              <td class="mono" style="font-size:11px">Hasta 01-2032 🔒</td>
+            </tr>
+            <tr>
+              <td><div class="who">Finiquito + carta de aviso.pdf</div><div class="sub2">v1 · SUBIDO 15-JUL POR M. JIMÉNEZ</div></td>
+              <td>Andrés Molina</td>
+              <td><span class="hash">5d8c…73aa</span></td>
+              <td><span class="pill gray">Ex trabajador</span></td>
+              <td class="mono" style="font-size:11px">Hasta 07-2031 🔒</td>
+            </tr>
+            <tr>
+              <td><div class="who">Comprobante LRE agosto.pdf</div><div class="sub2">v1 · DECLARACIÓN MENSUAL</div></td>
+              <td>Empresa</td>
+              <td><span class="hash">b220…6e9f</span></td>
+              <td><span class="pill ok">Declarado</span></td>
+              <td class="mono" style="font-size:11px">Hasta 09-2031 🔒</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="divider"></div>
+        <div class="small-note">🔒 <b>Bloqueo de eliminación activo:</b> ningún documento puede eliminarse antes de cumplir los 5 años de conservación desde el término de la relación laboral (art. 9 bis CT). Los reemplazos archivan la versión anterior, nunca la sobrescriben. Todo acceso y descarga queda en el log de auditoría.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== VISTA 3: PROPINAS ==================== -->
+  <section class="view" id="view-propinas">
+    <div class="toolbar">
+      <button class="btn sm">Semana 36 (31-ago → 06-sep) ▾</button>
+      <button class="btn sm">Todos los locales ▾</button>
+      <button class="btn primary sm" style="margin-left:auto">＋ Registrar propinas del día</button>
+      <button class="btn sm">Enterar y generar constancias</button>
+    </div>
+
+    <div class="grid g3" style="margin-bottom:14px">
+      <div class="card">
+        <div class="card-h"><div><div class="card-t">Reloj legal — art. 64 CT</div><div class="card-s">Propinas tarjeta · semana 35</div></div></div>
+        <div class="clock-ring">
+          <svg class="ring" viewBox="0 0 100 100">
+            <circle class="bg" cx="50" cy="50" r="42" fill="none" stroke-width="9"/>
+            <circle class="fg" cx="50" cy="50" r="42" fill="none" stroke-width="9" stroke-dasharray="263.9" stroke-dashoffset="150.8"/>
+            <text x="50" y="46" text-anchor="middle" font-size="19">3</text>
+            <text x="50" y="62" text-anchor="middle" font-size="8.5" style="letter-spacing:.08em">DÍAS HÁB.</text>
+          </svg>
+          <div>
+            <div style="font-weight:700;font-size:14px">Quedan 3 de 7 días hábiles</div>
+            <div class="small-note" style="margin-top:4px">Vencimiento: <b>09-sep</b><br>Monto por enterar: <span class="mono" style="font-weight:600">$186.400</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="card kpi">
+        <div class="lbl">Propinas hoy · consolidado</div>
+        <div class="val">$94.850</div>
+        <div class="sub">Efectivo <b>$31.200</b> · Tarjeta <b>$48.150</b> · Apps <b>$15.500</b></div>
+      </div>
+      <div class="card kpi k-ok">
+        <div class="lbl">Enteradas semana 35</div>
+        <div class="val">$412.700</div>
+        <div class="sub"><b>18 constancias</b> generadas y archivadas</div>
+      </div>
+    </div>
+
+    <div class="grid g23">
+      <div class="card">
+        <div class="card-h">
+          <div><div class="card-t">Reparto calculado — semana 35</div><div class="card-s">Criterio: horas trabajadas · según pacto firmado (v3, archivado en Gestor Documental)</div></div>
+          <span class="pill ok">Validado por contador</span>
+        </div>
+        <table>
+          <thead><tr><th>Trabajador</th><th>Local</th><th class="num">Horas</th><th class="num">Efectivo</th><th class="num">Tarjeta + apps</th><th class="num">Total a recibir</th><th>Constancia</th></tr></thead>
+          <tbody>
+            <tr><td class="who">Camila Rojas</td><td>LOC-01</td><td class="num">38</td><td class="num">$28.400</td><td class="num">$46.900</td><td class="num" style="font-weight:700">$75.300</td><td><span class="pill ok">Entregada</span></td></tr>
+            <tr><td class="who">María Contreras</td><td>LOC-01</td><td class="num">45</td><td class="num">$33.600</td><td class="num">$55.500</td><td class="num" style="font-weight:700">$89.100</td><td><span class="pill ok">Entregada</span></td></tr>
+            <tr><td class="who">José Paredes</td><td>LOC-02</td><td class="num">30</td><td class="num">$22.400</td><td class="num">$37.000</td><td class="num" style="font-weight:700">$59.400</td><td><span class="pill warn pulse">Pendiente</span></td></tr>
+            <tr><td class="who">Valentina Soto</td><td>LOC-02</td><td class="num">36</td><td class="num">$26.900</td><td class="num">$44.400</td><td class="num" style="font-weight:700">$71.300</td><td><span class="pill ok">Entregada</span></td></tr>
+            <tr><td class="who">Diego Fuentes</td><td>LOC-03</td><td class="num">42</td><td class="num">$31.400</td><td class="num">$51.800</td><td class="num" style="font-weight:700">$83.200</td><td><span class="pill ok">Entregada</span></td></tr>
+            <tr style="background:var(--tint)"><td class="who">Total semana</td><td>—</td><td class="num">191</td><td class="num">$142.700</td><td class="num">$235.600</td><td class="num" style="font-weight:700">$378.300</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" style="align-self:start">
+        <div class="card-h"><div><div class="card-t">Registro diario por medio de pago</div><div class="card-s">Separación contable estricta — nunca se mezcla con la venta</div></div></div>
+        <table>
+          <thead><tr><th>Fecha</th><th>Local</th><th class="num">Efectivo</th><th class="num">Tarjeta</th><th class="num">Apps</th></tr></thead>
+          <tbody>
+            <tr><td class="mono" style="font-size:12px">03-sep</td><td>LOC-01</td><td class="num">$14.800</td><td class="num">$21.300</td><td class="num">$6.900</td></tr>
+            <tr><td class="mono" style="font-size:12px">03-sep</td><td>LOC-02</td><td class="num">$9.600</td><td class="num">$15.450</td><td class="num">$5.200</td></tr>
+            <tr><td class="mono" style="font-size:12px">03-sep</td><td>LOC-03</td><td class="num">$6.800</td><td class="num">$11.400</td><td class="num">$3.400</td></tr>
+            <tr><td class="mono" style="font-size:12px">02-sep</td><td>LOC-01</td><td class="num">$13.100</td><td class="num">$19.800</td><td class="num">$7.100</td></tr>
+            <tr><td class="mono" style="font-size:12px">02-sep</td><td>LOC-02</td><td class="num">$10.400</td><td class="num">$14.900</td><td class="num">$4.600</td></tr>
+          </tbody>
+        </table>
+        <div class="divider"></div>
+        <div class="small-note">Las propinas son <b>propiedad de los trabajadores</b>: no son remuneración, no pagan cotizaciones ni impuestos, y nunca se integran a la liquidación de sueldo. El criterio de reparto lo define el pacto firmado; el sistema solo calcula. Cada entrega genera constancia visible en el Portal del Trabajador.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== VISTA 4: VENTAS Y CAJA ==================== -->
+  <section class="view" id="view-ventas">
+    <div class="toolbar">
+      <button class="btn sm">03-sep-2026 ▾</button>
+      <button class="btn sm">Todos los locales ▾</button>
+      <button class="btn primary sm" style="margin-left:auto">＋ Nuevo cierre de caja</button>
+      <button class="btn sm">Importar desde POS</button>
+      <button class="btn sm">Exportar Excel / PDF</button>
+    </div>
+
+    <div class="grid g23">
+      <div class="card">
+        <div class="card-h">
+          <div><div class="card-t">Cierres de caja — miércoles 02-sep</div><div class="card-s">Con responsable, fecha y diferencia calculada</div></div>
+          <span class="pill salmon">3 de 3 cerrados</span>
+        </div>
+        <table>
+          <thead><tr><th>Local / Turno</th><th class="num">Efectivo</th><th class="num">Débito/Crédito</th><th class="num">Apps delivery</th><th class="num">Diferencia</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><div class="who">LOC-01 · Turno completo</div><div class="sub2">RESP: R. SOTO · 22:41</div></td>
+              <td class="num">$198.400</td><td class="num">$246.900</td><td class="num">$67.000</td>
+              <td class="num">$0</td><td><span class="pill ok">Cuadrada</span></td>
+            </tr>
+            <tr>
+              <td><div class="who">LOC-02 · Turno completo</div><div class="sub2">RESP: C. BRAVO · 22:37</div></td>
+              <td class="num">$171.550</td><td class="num">$201.300</td><td class="num">$70.100</td>
+              <td class="num" style="color:var(--crit);font-weight:700">−$4.250</td><td><span class="pill crit pulse">Faltante</span></td>
+            </tr>
+            <tr>
+              <td><div class="who">LOC-03 · Turno completo</div><div class="sub2">RESP: P. NÚÑEZ · 22:29</div></td>
+              <td class="num">$124.700</td><td class="num">$158.600</td><td class="num">$50.200</td>
+              <td class="num">$0</td><td><span class="pill ok">Cuadrada</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="divider"></div>
+        <div class="alert sev-crit" style="margin-bottom:0">
+          <div><div class="ttl">Diferencia con observación obligatoria — LOC-02</div><div class="meta">“FALTANTE EN EFECTIVO, POSIBLE ERROR EN VUELTO TURNO TARDE” · REGISTRADO POR C. BRAVO · REVISIÓN PENDIENTE DEL ADMINISTRADOR</div></div>
+          <button class="btn sm">Revisar</button>
+        </div>
+      </div>
+
+      <div class="card" style="align-self:start">
+        <div class="card-h"><div><div class="card-t">Detalle del cierre — LOC-02</div><div class="card-s">02-sep · turno completo</div></div></div>
+        <table>
+          <tbody>
+            <tr><td>Venta bruta POS</td><td class="num" style="font-weight:600">$447.200</td></tr>
+            <tr><td>Descuentos</td><td class="num">−$3.500</td></tr>
+            <tr><td>Anulaciones (2)</td><td class="num">−$5.000</td></tr>
+            <tr><td style="font-weight:600">Venta neta</td><td class="num" style="font-weight:700">$438.700</td></tr>
+            <tr><td>Efectivo esperado en caja</td><td class="num">$175.800</td></tr>
+            <tr><td>Efectivo contado</td><td class="num">$171.550</td></tr>
+            <tr style="background:var(--crit-bg)"><td style="font-weight:600;color:var(--crit)">Diferencia (faltante)</td><td class="num" style="font-weight:700;color:var(--crit)">−$4.250</td></tr>
+          </tbody>
+        </table>
+        <div class="divider"></div>
+        <div class="small-note">El módulo <b>no reemplaza el POS</b>: importa las ventas para evitar digitación. Los reportes por período, producto y franja horaria alimentan el consumo teórico del módulo Inventario y los reportes al franquiciador.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== VISTA 5: INVENTARIO ==================== -->
+  <section class="view" id="view-inventario">
+    <div class="toolbar">
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#97807a" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input placeholder="Buscar insumo…">
+      </div>
+      <button class="btn sm">Categoría ▾</button>
+      <button class="btn sm">Local: LOC-01 ▾</button>
+      <button class="btn primary sm" style="margin-left:auto">＋ Ingresar compra</button>
+      <button class="btn sm">Registrar conteo</button>
+      <button class="btn sm">Registrar merma</button>
+    </div>
+
+    <div class="grid g4" style="margin-bottom:14px">
+      <div class="card kpi"><div class="lbl">Valorización inventario</div><div class="val">$2.846.300</div><div class="sub">Consolidado 3 locales</div></div>
+      <div class="card kpi k-warn"><div class="lbl">Bajo stock mínimo</div><div class="val">2</div><div class="sub">Pan Italiano · Palta</div></div>
+      <div class="card kpi k-crit"><div class="lbl">Mermas del mes</div><div class="val">$96.400</div><div class="sub"><span class="trend-up">▲ 12%</span> vs. agosto</div></div>
+      <div class="card kpi k-ok"><div class="lbl">Desviación teórico vs real</div><div class="val">2,1%</div><div class="sub">Dentro del rango aceptable (&lt;4%)</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">
+        <div><div class="card-t">Consumo teórico vs. real — semana 35</div><div class="card-s">Teórico por recetas del franquiciador × ventas del módulo Ventas</div></div>
+        <a class="link">Ver desviaciones por insumo →</a>
+      </div>
+      <table>
+        <thead><tr><th>Insumo</th><th>Categoría</th><th class="num">Stock actual</th><th class="num">Stock mín.</th><th class="num">Consumo teórico</th><th class="num">Consumo real</th><th style="width:170px">Desviación</th><th>Estado</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="who">Pan Italiano 15 cm</td><td>Panes</td>
+            <td class="num">42 un</td><td class="num">60 un</td>
+            <td class="num">380 un</td><td class="num">389 un</td>
+            <td><div class="row-between"><div class="bar" style="flex:1"><i class="ok" style="width:24%"></i></div><span class="mono" style="font-size:11px">+2,4%</span></div></td>
+            <td><span class="pill warn pulse">Reponer</span></td>
+          </tr>
+          <tr>
+            <td class="who">Pollo rotisserie</td><td>Proteínas</td>
+            <td class="num">18 kg</td><td class="num">10 kg</td>
+            <td class="num">24,5 kg</td><td class="num">25,1 kg</td>
+            <td><div class="row-between"><div class="bar" style="flex:1"><i class="ok" style="width:25%"></i></div><span class="mono" style="font-size:11px">+2,4%</span></div></td>
+            <td><span class="pill ok">Normal</span></td>
+          </tr>
+          <tr>
+            <td class="who">Palta</td><td>Vegetales</td>
+            <td class="num">4 kg</td><td class="num">6 kg</td>
+            <td class="num">11,2 kg</td><td class="num">11,0 kg</td>
+            <td><div class="row-between"><div class="bar" style="flex:1"><i class="ok" style="width:18%"></i></div><span class="mono" style="font-size:11px">−1,8%</span></div></td>
+            <td><span class="pill warn pulse">Reponer</span></td>
+          </tr>
+          <tr>
+            <td class="who">Queso americano</td><td>Lácteos</td>
+            <td class="num">210 lámina</td><td class="num">150</td>
+            <td class="num">740 lámina</td><td class="num">782 lámina</td>
+            <td><div class="row-between"><div class="bar" style="flex:1"><i class="crit" style="width:57%"></i></div><span class="mono" style="font-size:11px;color:var(--crit)">+5,7%</span></div></td>
+            <td><span class="pill crit">Revisar</span></td>
+          </tr>
+          <tr>
+            <td class="who">Vasos 22 oz</td><td>Empaques</td>
+            <td class="num">480 un</td><td class="num">300 un</td>
+            <td class="num">612 un</td><td class="num">620 un</td>
+            <td><div class="row-between"><div class="bar" style="flex:1"><i class="ok" style="width:13%"></i></div><span class="mono" style="font-size:11px">+1,3%</span></div></td>
+            <td><span class="pill ok">Normal</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="divider"></div>
+      <div class="small-note">Última merma registrada: <b>Pan Italiano vencido — 26 un · $18.200</b> (LOC-02, 02-sep, causa “vencimiento”, registrado por C. Bravo). Los ajustes de conteo físico requieren justificación obligatoria y quedan en auditoría.</div>
+    </div>
+  </section>
+
+  <!-- ==================== VISTA 6: USUARIOS Y AUDITORÍA ==================== -->
+  <section class="view" id="view-usuarios">
+    <div class="toolbar">
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#97807a" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input placeholder="Buscar usuario o acción…">
+      </div>
+      <button class="btn sm">Rol ▾</button>
+      <button class="btn primary sm" style="margin-left:auto">＋ Crear usuario</button>
+    </div>
+
+    <div class="grid g23">
+      <div class="card">
+        <div class="card-h"><div><div class="card-t">Usuarios del sistema</div><div class="card-s">Control de acceso por rol · mínimo privilegio (Ley N°21.719)</div></div></div>
+        <table>
+          <thead><tr><th>Usuario</th><th>Rol</th><th>Alcance</th><th>2FA</th><th>Estado</th></tr></thead>
+          <tbody>
+            <tr><td><div class="who">Moisés Jiménez</div><div class="sub2"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="5c1d181115121c1113151a131318721f10">[email&#160;protected]</a></div></td><td><span class="pill salmon">Administrador</span></td><td>Consolidado 3 locales</td><td class="mono" style="font-size:11px">✓</td><td><span class="pill ok">Activo</span></td></tr>
+            <tr><td><div class="who">Contadora externa</div><div class="sub2"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="92d1dddcc6d3d6ddc0d2d7c1c6c7d6dbddbcd1de">[email&#160;protected]</a></div></td><td><span class="pill info">Contador</span></td><td>3 locales · reportes</td><td class="mono" style="font-size:11px">✓</td><td><span class="pill ok">Activo</span></td></tr>
+            <tr><td><div class="who">Rodrigo Soto</div><div class="sub2">R.SOTO · LOC-01</div></td><td><span class="pill gray">Supervisor</span></td><td>Solo LOC-01</td><td class="mono" style="font-size:11px">—</td><td><span class="pill ok">Activo</span></td></tr>
+            <tr><td><div class="who">Carolina Bravo</div><div class="sub2">C.BRAVO · LOC-02</div></td><td><span class="pill gray">Supervisor</span></td><td>Solo LOC-02</td><td class="mono" style="font-size:11px">—</td><td><span class="pill ok">Activo</span></td></tr>
+            <tr><td><div class="who">Camila Rojas</div><div class="sub2">PORTAL TRABAJADOR</div></td><td><span class="pill gray">Trabajador</span></td><td>Solo su información</td><td class="mono" style="font-size:11px">—</td><td><span class="pill ok">Activo</span></td></tr>
+            <tr><td><div class="who">Andrés Molina</div><div class="sub2">EX TRABAJADOR · 15-JUL</div></td><td><span class="pill gray">Trabajador</span></td><td>—</td><td class="mono" style="font-size:11px">—</td><td><span class="pill crit">Desactivado</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" style="align-self:start">
+        <div class="card-h">
+          <div><div class="card-t">Log de auditoría</div><div class="card-s">Inmutable · quién hizo qué, cuándo y en qué módulo</div></div>
+          <span class="pill salmon">Transversal</span>
+        </div>
+        <div class="log-item"><span class="t">09:42</span><div class="m"><b>M. Jiménez</b> aprobó el reparto de propinas semana 35 <span class="tag salmon">Propinas</span></div><span class="h">#a91f</span></div>
+        <div class="log-item"><span class="t">09:15</span><div class="m"><b>Contadora</b> publicó 13 liquidaciones de agosto <span class="tag salmon">Documental</span></div><span class="h">#a91e</span></div>
+        <div class="log-item"><span class="t">08:57</span><div class="m"><b>C. Bravo</b> registró merma: pan italiano 26 un <span class="tag salmon">Inventario</span></div><span class="h">#a91d</span></div>
+        <div class="log-item"><span class="t">22:37</span><div class="m"><b>C. Bravo</b> cerró caja LOC-02 con diferencia −$4.250 <span class="tag salmon">Ventas</span></div><span class="h">#a91c</span></div>
+        <div class="log-item"><span class="t">21:04</span><div class="m"><b>V. Soto</b> descargó su liquidación de agosto <span class="tag salmon">Portal</span></div><span class="h">#a91b</span></div>
+        <div class="log-item"><span class="t">18:33</span><div class="m"><b>Sistema</b> bloqueó eliminación de documento (conservación 5 años) <span class="tag salmon">Núcleo</span></div><span class="h">#a91a</span></div>
+        <div class="log-item"><span class="t">17:12</span><div class="m"><b>R. Soto</b> subió turnos de septiembre LOC-01 <span class="tag salmon">Documental</span></div><span class="h">#a919</span></div>
+        <div class="divider"></div>
+        <div class="small-note">El log es <b>de solo lectura e inmutable</b>: ni el administrador puede editarlo. Cada entrada encadena con la anterior (hash incremental) para detectar alteraciones — constancia ante fiscalización de la Dirección del Trabajo.</div>
+      </div>
+    </div>
+  </section>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+</div><!-- /app -->
+
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+const titles = {
+  dashboard:  ['Panel general', 'Dashboard consolidado'],
+  documental: ['Módulo · Riesgo legal alto', 'Gestor Documental'],
+  propinas:   ['Módulo · Art. 64 Código del Trabajo', 'Reparto de Propinas'],
+  ventas:     ['Módulo · Cierre diario por local', 'Ventas y Caja'],
+  inventario: ['Módulo · Consumo teórico vs. real', 'Inventario'],
+  usuarios:   ['Núcleo transversal', 'Usuarios, Roles y Auditoría']
+};
+function activate(name){
+  if(!titles[name]) return;
+  document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  const [crumb, title] = titles[name];
+  document.getElementById('crumb').textContent = crumb;
+  document.getElementById('view-title').textContent = title;
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+document.querySelectorAll('.nav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    history.replaceState(null, '', '#' + btn.dataset.view);
+    activate(btn.dataset.view);
+  });
+});
+activate(location.hash.replace('#', '') || 'dashboard');
+
+/* Envolver tablas para scroll horizontal en columnas angostas */
+document.querySelectorAll('.card table, .view table').forEach(t => {
+  if (t.parentElement.classList.contains('table-wrap')) return;
+  const w = document.createElement('div');
+  w.className = 'table-wrap';
+  t.parentNode.insertBefore(w, t);
+  w.appendChild(t);
+});
+</script>
+</body>
+</html>
